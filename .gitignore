@@ -1,0 +1,213 @@
+# ============================================
+# 云集智能视频创意站 - Git忽略配置
+# ============================================
+# Git管理：
+# - .gitignore (本文件)
+# - LICENSE
+# - README.md
+# - dev/app/ (源代码 - 不含运行时/模型/缓存)
+#
+# Git不管理：
+# - build/ (构建产物)
+# - dev/ver/*.exe (EXE文件，通过Release分发)
+# - dev/data/ (用户数据)
+# - dev/temp/ (临时文件)
+# - LTX Desktop/ (参考文件)
+# ============================================
+
+# ── 构建产物 ──
+build/
+
+# ── EXE文件（通过GitHub/Gitee Release分发）──
+*.exe
+
+# ── 参考文件 ──
+LTX Desktop/
+
+# ── dev/ 根目录临时文件 ──
+dev/*.txt
+dev/*.bat
+dev/icon.ico
+dev/icon.png
+
+# ── dev/ver/ 版本目录 ──
+dev/ver/
+
+# ── 三目录纯净整合包结构 ──
+
+# 用户数据目录（可写）
+dev/data/
+
+# 临时文件目录（可删除）
+dev/temp/
+temp/
+
+# ── app 目录排除 ──
+
+# 嵌入式Python运行时
+dev/app/resources/python/
+
+# AI模型文件
+dev/app/resources/models/
+
+# 运行时数据
+dev/app/resources/data/
+
+# UV包管理器
+dev/app/resources/uv/
+
+# Python缓存
+dev/app/__pycache__/
+
+# 运行时配置
+dev/app/config/
+
+# 输出目录
+dev/app/resources/outputs/
+
+# ── 通用排除 ──
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py.cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Environments
+.env
+.envrc
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# Ruff stuff
+.ruff_cache/
+
+# Large dependency files
+*.whl
+*.tar.gz
+*.zip
+
+# Backup directories
+BAK/
+BAK_*/
+build-release/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+Thumbs.db
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# Windows special device files
+nul
+
+# Video/Audio files
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.mp4
+*.avi
+*.mov
+*.wmv
+
+# Model files
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.onnx
+
+# Lock files
+*.lock
+
+# Runtime/debug logs
+*.log
+logs/
+.debug/
+_runtime/
+crash*.log
+_instance_debug.log
+
+# Temporary reference files
+stable_*.py
+
+# ── .trae/ 规则 ──
+.trae/
+
+# ── 根目录临时文件 ──
+/*.txt
+/*.py
+/*.ico
+/*.png
+/*.bat

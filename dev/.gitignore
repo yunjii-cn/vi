@@ -1,0 +1,199 @@
+# ============================================
+# Git管理范围说明
+# ============================================
+# Git只管理：
+# - .gitignore (本文件)
+# - app/ (纯净整合包文件夹 - 不含运行时/模型/缓存)
+# - ver/ (稳定版本EXE列表)
+#
+# Git不管理：
+# - app/resources/python/ (嵌入式Python运行时)
+# - app/resources/models/ (AI模型文件)
+# - app/resources/data/ (运行时数据-旧结构兼容)
+# - app/resources/uv/ (UV包管理器)
+# - app/__pycache__/ (Python缓存)
+# - app/config/ (运行时配置)
+# - data/ (用户数据+环境-三目录纯净整合包结构)
+# - temp/ (临时文件-三目录纯净整合包结构)
+# - *.exe (开发测试用的临时EXE，但 ver/*.exe 保留)
+# ============================================
+
+# ── dev/ 根目录规则 ──
+
+# 忽略根目录下的临时EXE，但保留 ver/ 下的稳定版本EXE
+*.exe
+!ver/*.exe
+
+# ── 三目录纯净整合包结构 ──
+
+# 用户数据目录（可写，需要备份）
+data/venv/
+data/outputs/
+data/uploads/
+data/models/
+data/settings.json
+data/custom_dir.txt
+data/low_vram_mode.pref
+data/ffmpeg_path.txt
+
+# 临时文件目录（可删除，无需备份）
+temp/
+
+# ── app 目录排除 ──
+
+# 嵌入式Python运行时（约200MB，用户部署时自动下载）
+app/resources/python/
+
+# AI模型文件（数GB，部署时自动下载）
+app/resources/models/
+
+# 运行时数据（用户配置、缓存等）
+app/resources/data/
+
+# UV包管理器（部署时自动下载）
+app/resources/uv/
+
+# Python缓存
+app/__pycache__/
+
+# 运行时配置（用户修改后的配置）
+app/config/
+
+# ── 通用排除 ──
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[codz]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py.cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Environments
+.env
+.envrc
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# Ruff stuff
+.ruff_cache/
+
+# Large dependency files
+*.whl
+*.tar.gz
+*.zip
+
+# Backup directories
+BAK/
+BAK_*/
+build-release/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+Thumbs.db
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# Windows special device files
+nul
+
+# Video/Audio files
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.mp4
+*.avi
+*.mov
+*.wmv
+
+# Model files
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.onnx
+
+# Lock files
+*.lock
+
+# Runtime/debug logs
+*.log
+!app/resources/patches/*.log
+logs/
+.debug/
+_runtime/
+crash*.log
+_instance_debug.log
+
+# Temporary reference files
+stable_*.py
+app/resources/outputs/
