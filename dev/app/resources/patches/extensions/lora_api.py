@@ -1,7 +1,8 @@
 """LoRA scanning and management API endpoints (YunJi custom).
 
 Endpoints:
-  GET  /api/loras       - List available LoRA models
+  GET  /api/loras       - List available LoRA models (with metadata)
+  GET  /api/lora-info   - Get detailed metadata for a single LoRA file
   POST /api/lora-dir    - Save LoRA directory preference
   GET  /api/lora-dir    - Get LoRA directory preference
 
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import struct
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -19,6 +21,109 @@ from fastapi.responses import JSONResponse
 
 from extensions._context import ExtensionContext
 from extensions._utils import default_lora_dir, resolve_models_root
+
+
+def _read_safetensors_metadata(file_path: str | Path) -> dict:
+    p = Path(file_path)
+    if not p.is_file() or p.suffix.lower() != ".safetensors":
+        return {}
+    try:
+        with open(p, "rb") as f:
+            header_size_bytes = f.read(8)
+            if len(header_size_bytes) < 8:
+                return {}
+            header_size = struct.unpack("<Q", header_size_bytes)[0]
+            if header_size <= 0 or header_size > 100 * 1024 * 1024:
+                return {}
+            header_json_bytes = f.read(header_size)
+            if len(header_json_bytes) < header_size:
+                return {}
+            header = json.loads(header_json_bytes)
+        metadata = header.get("__metadata__", {})
+        if not isinstance(metadata, dict):
+            return {}
+        result: dict = {}
+        desc = (
+            metadata.get("description")
+            or metadata.get("ss_training_comment")
+            or metadata.get("modelspec.description")
+            or ""
+        )
+        if isinstance(desc, str) and desc.strip():
+            result["description"] = desc.strip()
+        triggers = metadata.get("trigger_words") or metadata.get("tags") or ""
+        if isinstance(triggers, str) and triggers.strip():
+            result["trigger_words"] = [t.strip() for t in triggers.split(",") if t.strip()]
+        elif isinstance(triggers, list) and triggers:
+            result["trigger_words"] = [str(t).strip() for t in triggers if str(t).strip()]
+        base = (
+            metadata.get("base_model")
+            or metadata.get("ss_base_model_version")
+            or metadata.get("modelspec.architecture")
+            or ""
+        )
+        if isinstance(base, str) and base.strip():
+            result["base_model"] = base.strip()
+        return result
+    except Exception:
+        return {}
+
+
+def _load_custom_models_dirs(ctx: ExtensionContext) -> list[Path]:
+    dirs: list[Path] = []
+    try:
+        for candidate in [ctx.config_dir, ctx.config_dir / "config"]:
+            launcher_config = candidate / "launcher_config.json"
+            if launcher_config.is_file():
+                with open(launcher_config, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                for d in cfg.get("model_dirs", []):
+                    p = d.get("path", "").strip().strip('"').strip("'")
+                    if p:
+                        pp = Path(p).expanduser()
+                        if pp.is_dir() and pp not in dirs:
+                            dirs.append(pp)
+                break
+    except Exception:
+        pass
+    try:
+        f = ctx.config_dir / "custom_models_dirs.txt"
+        if f.is_file():
+            for line in f.read_text(encoding="utf-8").splitlines():
+                line = line.strip().strip('"').strip("'")
+                if not line:
+                    continue
+                p = Path(line).expanduser()
+                if p.is_dir() and p not in dirs:
+                    dirs.append(p)
+    except Exception:
+        pass
+    return dirs
+
+
+def _scan_loras_in_dir(root: Path, suffixes: set[str], read_meta: bool = False) -> list[dict]:
+    found: list[dict] = []
+    try:
+        for dirpath, _dirnames, filenames in os.walk(root):
+            for fn in filenames:
+                suf = Path(fn).suffix.lower()
+                if suf in suffixes:
+                    full = Path(dirpath) / fn
+                    if full.is_file():
+                        try:
+                            resolved = str(full.resolve())
+                        except OSError:
+                            resolved = str(full)
+                        entry: dict = {"name": fn, "path": resolved}
+                        if read_meta and suf == ".safetensors":
+                            meta = _read_safetensors_metadata(full)
+                            if meta:
+                                entry.update(meta)
+                        found.append(entry)
+    except OSError:
+        pass
+    found.sort(key=lambda x: x["name"].lower())
+    return found
 
 
 def install(app: FastAPI, ctx: ExtensionContext) -> None:
@@ -64,11 +169,13 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
 
     @app.get("/api/loras")
     async def route_list_loras(request: Request):
-        from pathlib import Path as _Path
         raw = (request.query_params.get("dir") or "").strip()
+        with_meta = request.query_params.get("meta", "").lower() in ("1", "true", "yes")
         if raw.startswith("True"):
             raw = raw[4:].lstrip()
         raw = raw.strip().strip('"').strip("'")
+
+        custom_lora_dir = ""
         if not raw:
             try:
                 settings_file = ctx.config_dir / "settings.json"
@@ -80,40 +187,76 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
                         raw = str(custom_lora_dir).strip()
             except Exception as e:
                 print(f"[PATCH] Failed to read lora_dir from settings: {e}")
-            if not raw:
+
+        if raw:
+            root = Path(raw).expanduser()
+            try:
+                root = root.resolve()
+            except OSError:
+                pass
+            if not root.is_dir():
+                pass
+            else:
+                found = _scan_loras_in_dir(root, _LORA_SCAN_SUFFIXES, read_meta=with_meta)
                 _default_lora_dir = default_lora_dir(ctx)
-                raw = str(_default_lora_dir) if _default_lora_dir else ""
-        if not raw:
-            return {"loras": [], "loras_dir": "", "models_dir": ""}
-        root = _Path(raw).expanduser()
-        try:
-            root = root.resolve()
-        except OSError:
-            pass
-        if not root.is_dir():
-            return {
-                "loras": [], "error": "not_a_directory",
-                "message": "路径不是文件夹或不存在，请检查拼写、盘符与权限",
-                "path": str(root), "loras_dir": str(root), "models_dir": str(root.parent),
-            }
-        found: list[dict[str, str]] = []
-        try:
-            for dirpath, _dirnames, filenames in os.walk(root):
-                for fn in filenames:
-                    suf = _Path(fn).suffix.lower()
-                    if suf in _LORA_SCAN_SUFFIXES:
-                        full = _Path(dirpath) / fn
-                        if full.is_file():
-                            try:
-                                resolved = str(full.resolve())
-                            except OSError:
-                                resolved = str(full)
-                            found.append({"name": fn, "path": resolved})
-        except OSError as e:
-            return JSONResponse(status_code=400, content={"loras": [], "error": "scan_failed", "message": str(e), "path": str(root)})
-        found.sort(key=lambda x: x["name"].lower())
+                return {
+                    "loras": found, "loras_dir": str(root),
+                    "models_dir": str(root.parent),
+                    "default_loras_dir": str(_default_lora_dir or ""),
+                }
+
+        seen_paths: set[str] = set()
+        all_loras: list[dict] = []
+
+        scan_dirs: list[Path] = []
+
         _default_lora_dir = default_lora_dir(ctx)
+        if _default_lora_dir and _default_lora_dir.is_dir():
+            scan_dirs.append(_default_lora_dir)
+
+        models_root = resolve_models_root(ctx)
+        if models_root and models_root.is_dir() and models_root not in scan_dirs:
+            loras_sub = models_root / "loras"
+            if loras_sub.is_dir() and loras_sub not in scan_dirs:
+                scan_dirs.append(loras_sub)
+
+        for cd in _load_custom_models_dirs(ctx):
+            if cd.is_dir() and cd not in scan_dirs:
+                scan_dirs.append(cd)
+                loras_sub = cd / "loras"
+                if loras_sub.is_dir() and loras_sub not in scan_dirs:
+                    scan_dirs.append(loras_sub)
+
+        for d in scan_dirs:
+            for m in _scan_loras_in_dir(d, _LORA_SCAN_SUFFIXES, read_meta=with_meta):
+                if m["path"] not in seen_paths:
+                    seen_paths.add(m["path"])
+                    all_loras.append(m)
+
+        all_loras.sort(key=lambda x: x["name"].lower())
+        primary_dir = str(scan_dirs[0]) if scan_dirs else ""
         return {
-            "loras": found, "loras_dir": str(root), "models_dir": str(root.parent),
+            "loras": all_loras,
+            "loras_dir": primary_dir,
+            "models_dir": str(models_root.parent) if models_root else "",
             "default_loras_dir": str(_default_lora_dir or ""),
         }
+
+    @app.get("/api/lora-info")
+    async def route_lora_info(request: Request):
+        lora_path = (request.query_params.get("path") or "").strip()
+        if not lora_path:
+            return JSONResponse({"error": "path parameter required"}, status_code=400)
+        p = Path(lora_path).expanduser()
+        try:
+            p = p.resolve()
+        except OSError:
+            pass
+        if not p.is_file():
+            return JSONResponse({"error": "file not found"}, status_code=404)
+        entry: dict = {"name": p.name, "path": str(p)}
+        if p.suffix.lower() == ".safetensors":
+            meta = _read_safetensors_metadata(p)
+            if meta:
+                entry.update(meta)
+        return entry

@@ -38,8 +38,115 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
             "version": data.get("version", 1), "mode": data.get("mode"),
             "endpoint": data.get("endpoint"), "label": data.get("label"),
             "payload": payload, "task_id": data.get("task_id"),
+            "created_at": data.get("created_at"),
             "finished_at": data.get("finished_at"),
         }
+
+    def _extract_gen_info(replay: dict | None, item_type: str) -> dict:
+        info: dict = {}
+        if not replay:
+            return info
+        payload = replay.get("payload") or {}
+        mode = replay.get("mode") or replay.get("label", "")
+        endpoint = replay.get("endpoint") or ""
+
+        if payload.get("prompt"):
+            info["prompt"] = payload["prompt"]
+        if payload.get("seed"):
+            info["seed"] = payload["seed"]
+
+        w = payload.get("customWidth") or payload.get("width") or payload.get("image_width")
+        h = payload.get("customHeight") or payload.get("height") or payload.get("image_height")
+        if w and h:
+            info["width"] = w
+            info["height"] = h
+        if payload.get("fps"):
+            info["fps"] = payload["fps"]
+        dur = payload.get("duration")
+        if dur:
+            info["duration"] = str(dur)
+        if payload.get("aspectRatio"):
+            info["aspect_ratio"] = payload["aspectRatio"]
+        if payload.get("cameraMotion") and payload["cameraMotion"] != "none":
+            info["camera_motion"] = payload["cameraMotion"]
+        if payload.get("num_inference_steps") or payload.get("numSteps"):
+            info["steps"] = payload.get("num_inference_steps") or payload.get("numSteps")
+        elif endpoint == "/api/generate":
+            if payload.get("audioPath"):
+                info["steps"] = 11
+            else:
+                info["steps"] = 8
+        if payload.get("guidance_scale") or payload.get("cfg_guidance_scale"):
+            info["cfg"] = payload.get("guidance_scale") or payload.get("cfg_guidance_scale")
+        elif endpoint == "/api/generate":
+            info["cfg"] = 1.0
+
+        lora_paths = payload.get("loraPaths") or []
+        lora_strengths = payload.get("loraStrengths") or []
+        if not lora_paths and payload.get("loraPath"):
+            lora_paths = [payload["loraPath"]]
+            lora_strengths = [payload.get("loraStrength", 1.0)]
+        if lora_paths:
+            lora_names = []
+            lora_details = []
+            for i, p in enumerate(lora_paths):
+                name = Path(p).stem if isinstance(p, str) else str(p)
+                s = lora_strengths[i] if i < len(lora_strengths) else 1.0
+                lora_names.append(f"{name}({s})" if s != 1.0 else name)
+                detail: dict = {"name": name, "strength": s}
+                if isinstance(p, str) and p.strip():
+                    detail["path"] = p.strip()
+                lora_details.append(detail)
+            info["loras"] = lora_names
+            info["lora_details"] = lora_details
+
+        has_start = bool(payload.get("imagePath") or payload.get("startFramePath"))
+        has_end = bool(payload.get("endFramePath"))
+        has_keyframes = bool(payload.get("keyframePaths"))
+        has_video_ref = bool(payload.get("video_path"))
+        has_audio_ref = bool(payload.get("audioPath"))
+
+        if endpoint == "/api/generate-image":
+            info["gen_method"] = "图像生成"
+        elif has_keyframes:
+            info["gen_method"] = "智能多帧"
+        elif has_start and has_end:
+            info["gen_method"] = "首尾帧视频"
+        elif has_start:
+            info["gen_method"] = "图生视频"
+        elif has_audio_ref:
+            info["gen_method"] = "音频驱动视频"
+        elif has_video_ref:
+            info["gen_method"] = "视频迁移"
+        elif endpoint == "/api/generate-batch":
+            info["gen_method"] = "分段拼接"
+        elif endpoint == "/api/generate":
+            info["gen_method"] = "文生视频"
+        elif endpoint == "/api/ic-lora/generate":
+            info["gen_method"] = "视频迁移"
+
+        created = replay.get("created_at")
+        finished = replay.get("finished_at")
+        if created and finished:
+            try:
+                ct = float(created) if isinstance(created, (int, float)) else None
+                ft = float(finished) if isinstance(finished, (int, float)) else None
+                if ct is None and isinstance(created, str):
+                    from datetime import datetime as _dt
+                    ct = _dt.fromisoformat(created).timestamp()
+                if ft is None and isinstance(finished, str):
+                    from datetime import datetime as _dt
+                    ft = _dt.fromisoformat(finished).timestamp()
+                if ct and ft and ft > ct:
+                    elapsed = ft - ct
+                    if elapsed >= 60:
+                        info["elapsed"] = f"{int(elapsed // 60)}分{int(elapsed % 60)}秒"
+                    else:
+                        info["elapsed"] = f"{elapsed:.1f}秒"
+            except Exception:
+                pass
+
+        return info
 
     @app.get("/api/system/history")
     async def route_get_history(request: Request):
@@ -79,10 +186,12 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
                         else:
                             item_type = "image"
                         replay = _read_replay_sidecar(full_path)
+                        gen_info = _extract_gen_info(replay, item_type)
                         history.append({
                             "filename": filename, "type": item_type, "mtime": mtime,
                             "size": size, "fullpath": str(full_path),
                             "replay": replay, "replay_available": replay is not None,
+                            "gen_info": gen_info,
                         })
             history.sort(key=lambda x: x["mtime"], reverse=True)
             total_items = len(history)

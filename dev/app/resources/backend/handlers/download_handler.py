@@ -227,7 +227,7 @@ class DownloadHandler(StateHandlerBase):
             files_to_download[model_type] = spec.name
         return files_to_download
 
-    def _download_models_worker(self, files_to_download: dict[ModelFileType, str]) -> None:
+    def _download_models_worker(self, files_to_download: dict[ModelFileType, str], use_mirror: bool = False) -> None:
         if not files_to_download:
             self.finish_download()
             return
@@ -247,6 +247,7 @@ class DownloadHandler(StateHandlerBase):
                         repo_id=spec.repo_id,
                         local_dir=str(resolve_downloading_path(self.models_dir, self.config.model_download_specs, file_type)),
                         on_progress=progress_cb,
+                        use_mirror=use_mirror,
                     )
                 else:
                     self._model_downloader.download_file(
@@ -254,6 +255,7 @@ class DownloadHandler(StateHandlerBase):
                         filename=spec.name,
                         local_dir=str(resolve_downloading_path(self.models_dir, self.config.model_download_specs, file_type)),
                         on_progress=progress_cb,
+                        use_mirror=use_mirror,
                     )
 
                 self._move_to_final(file_type)
@@ -264,7 +266,7 @@ class DownloadHandler(StateHandlerBase):
         self.finish_download()
         self._models_handler.refresh_available_files()
 
-    def start_model_download(self, model_types: set[ModelFileType]) -> DownloadSessionId | None:
+    def start_model_download(self, model_types: set[ModelFileType], use_mirror: bool = False) -> DownloadSessionId | None:
         with self._lock:
             if self.state.downloading_session is not None:
                 return None
@@ -273,7 +275,7 @@ class DownloadHandler(StateHandlerBase):
         session_id = self.start_download(set(files_to_download.keys()))
 
         self._task_runner.run_background(
-            lambda: self._download_models_worker(files_to_download),
+            lambda: self._download_models_worker(files_to_download, use_mirror=use_mirror),
             task_name="model-download",
             on_error=self._on_background_download_error,
             daemon=True,

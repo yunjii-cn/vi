@@ -7,18 +7,22 @@ Endpoints:
   GET  /api/models/registry/dirs     - List all model directories
   POST /api/models/registry/custom-dir  - Add a custom directory
   DELETE /api/models/registry/custom-dir - Remove a custom directory
+  POST /api/models/registry/sync     - Sync registry from remote source
 
-The registry defines official and community quantized models with metadata
-including VRAM requirements, recommended hardware tiers, and download sources.
+The registry supports remote sync: on startup it loads a cached registry,
+and can fetch the latest model list from a remote JSON endpoint.
+Built-in defaults serve as fallback when no cache or remote is available.
 
 Upstream dependency: handler.pipelines.models_dir (for model storage path)
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -50,7 +54,7 @@ class ModelRegistryEntry:
     tags: list[str] = field(default_factory=list)
 
 
-MODEL_REGISTRY: dict[str, ModelRegistryEntry] = {
+_BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
     "ltx-2.3-22b-distilled": ModelRegistryEntry(
         model_id="ltx-2.3-22b-distilled",
         name="LTX 2.3 22B Distilled",
@@ -61,6 +65,21 @@ MODEL_REGISTRY: dict[str, ModelRegistryEntry] = {
         size_gb=43.0,
         quantization="bf16",
         variant="distilled",
+        min_vram_gb=24,
+        recommended_tiers=["ultra", "high"],
+        pipeline_mode="fast",
+        tags=["official", "distilled", "bf16"],
+    ),
+    "ltx-2.3-22b-distilled-1.1": ModelRegistryEntry(
+        model_id="ltx-2.3-22b-distilled-1.1",
+        name="LTX 2.3 22B Distilled v1.1",
+        description="Official distilled model v1.1, updated version with improved quality",
+        source="official",
+        repo_id="Lightricks/LTX-2.3",
+        filename="ltx-2.3-22b-distilled-1.1.safetensors",
+        size_gb=43.0,
+        quantization="bf16",
+        variant="distilled-v1.1",
         min_vram_gb=24,
         recommended_tiers=["ultra", "high"],
         pipeline_mode="fast",
@@ -113,36 +132,221 @@ MODEL_REGISTRY: dict[str, ModelRegistryEntry] = {
     ),
 }
 
+REGISTRY_REMOTE_URL = "https://raw.githubusercontent.com/yunjiai/ltx-model-registry/main/models.json"
+REGISTRY_MIRROR_URLS = [
+    "https://raw.githubusercontent.com/yunjiai/ltx-model-registry/main/models.json",
+    "https://ghp.ci/https://raw.githubusercontent.com/yunjiai/ltx-model-registry/main/models.json",
+    "https://cdn.jsdelivr.net/gh/yunjiai/ltx-model-registry@main/models.json",
+    "https://mirror.ghproxy.com/https://raw.githubusercontent.com/yunjiai/ltx-model-registry/main/models.json",
+]
+REGISTRY_CACHE_FILE = "model_registry_cache.json"
+REGISTRY_SYNC_INTERVAL = 3600
+
 _download_lock = threading.Lock()
 _download_status: dict[str, Any] = {"active": False, "model_id": None, "progress": 0.0, "error": None}
 _ctx: ExtensionContext | None = None
 _custom_models_dirs: list[Path] = []
+_merged_registry: dict[str, ModelRegistryEntry] = dict(_BUILTIN_REGISTRY)
+_last_sync_time: float = 0.0
+_last_sync_status: dict[str, Any] = {"time": None, "success": False, "added": 0, "error": None}
+_working_mirror_url: str | None = None
 
 _CUSTOM_DIRS_FILE = "custom_models_dirs.txt"
+
+
+def _entry_to_dict(entry: ModelRegistryEntry) -> dict[str, Any]:
+    return {
+        "model_id": entry.model_id,
+        "name": entry.name,
+        "description": entry.description,
+        "source": entry.source,
+        "repo_id": entry.repo_id,
+        "filename": entry.filename,
+        "size_gb": entry.size_gb,
+        "quantization": entry.quantization,
+        "variant": entry.variant,
+        "min_vram_gb": entry.min_vram_gb,
+        "recommended_tiers": entry.recommended_tiers,
+        "is_folder": entry.is_folder,
+        "pipeline_mode": entry.pipeline_mode,
+        "tags": entry.tags,
+    }
+
+
+def _dict_to_entry(d: dict[str, Any]) -> ModelRegistryEntry:
+    return ModelRegistryEntry(
+        model_id=d.get("model_id", ""),
+        name=d.get("name", d.get("model_id", "")),
+        description=d.get("description", ""),
+        source=d.get("source", "community"),
+        repo_id=d.get("repo_id", ""),
+        filename=d.get("filename", ""),
+        size_gb=float(d.get("size_gb", 0)),
+        quantization=d.get("quantization", "bf16"),
+        variant=d.get("variant", ""),
+        min_vram_gb=int(d.get("min_vram_gb", 0)),
+        recommended_tiers=d.get("recommended_tiers", []),
+        is_folder=bool(d.get("is_folder", False)),
+        pipeline_mode=d.get("pipeline_mode", "fast"),
+        tags=d.get("tags", []),
+    )
+
+
+def _load_cached_registry() -> dict[str, ModelRegistryEntry]:
+    if _ctx is None:
+        return {}
+    try:
+        cache_path = _ctx.config_dir / REGISTRY_CACHE_FILE
+        if cache_path.is_file():
+            with open(cache_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            entries = {}
+            for item in data.get("models", []):
+                try:
+                    e = _dict_to_entry(item)
+                    if e.model_id:
+                        entries[e.model_id] = e
+                except Exception:
+                    pass
+            return entries
+    except Exception as e:
+        logger.warning("Failed to load cached registry: %s", e)
+    return {}
+
+
+def _save_cached_registry(registry: dict[str, ModelRegistryEntry]) -> None:
+    if _ctx is None:
+        return
+    try:
+        _ctx.config_dir.mkdir(parents=True, exist_ok=True)
+        data = {
+            "version": 1,
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "models": [_entry_to_dict(e) for e in registry.values()],
+        }
+        cache_path = _ctx.config_dir / REGISTRY_CACHE_FILE
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.warning("Failed to save cached registry: %s", e)
+
+
+def _merge_registries(builtin: dict, cached: dict) -> dict[str, ModelRegistryEntry]:
+    merged = dict(builtin)
+    for mid, entry in cached.items():
+        if mid not in merged:
+            merged[mid] = entry
+        elif entry.source != "official" or builtin.get(mid, None) is None:
+            merged[mid] = entry
+    return merged
+
+
+def _sync_registry_from_remote() -> dict[str, Any]:
+    global _merged_registry, _last_sync_time, _last_sync_status, _working_mirror_url
+    result = {"success": False, "added": 0, "updated": 0, "error": None}
+
+    urls = list(REGISTRY_MIRROR_URLS)
+    if _working_mirror_url and _working_mirror_url in urls:
+        urls.remove(_working_mirror_url)
+        urls.insert(0, _working_mirror_url)
+
+    last_error = None
+    import httpx
+    for url in urls:
+        try:
+            with httpx.Client(timeout=httpx.Timeout(5.0)) as client:
+                resp = client.get(url)
+                resp.raise_for_status()
+                data = resp.json()
+
+            remote_entries: dict[str, ModelRegistryEntry] = {}
+            for item in data.get("models", []):
+                try:
+                    e = _dict_to_entry(item)
+                    if e.model_id:
+                        remote_entries[e.model_id] = e
+                except Exception:
+                    pass
+
+            if not remote_entries:
+                last_error = f"Remote registry returned empty model list (from {url})"
+                continue
+
+            added = 0
+            updated = 0
+            for mid, entry in remote_entries.items():
+                if mid not in _merged_registry:
+                    _merged_registry[mid] = entry
+                    added += 1
+                else:
+                    existing = _merged_registry[mid]
+                    if existing.source == "official" and entry.source == "official":
+                        _merged_registry[mid] = entry
+                        updated += 1
+                    elif existing.source != "official":
+                        _merged_registry[mid] = entry
+                        updated += 1
+
+            _save_cached_registry(_merged_registry)
+            _last_sync_time = time.time()
+            _working_mirror_url = url
+            _last_sync_status = {
+                "time": _last_sync_time,
+                "success": True,
+                "added": added,
+                "updated": updated,
+                "error": None,
+            }
+            result = {"success": True, "added": added, "updated": updated, "error": None}
+            logger.info("Registry sync: added=%d, updated=%d (from %s)", added, updated, url)
+            return result
+        except Exception as e:
+            last_error = e
+            logger.debug("Mirror %s failed: %s", url, e)
+            continue
+
+    error_msg = f"All mirrors failed. Last error: {last_error}. Please check your network connection."
+    result["error"] = error_msg
+    _last_sync_status = {"time": time.time(), "success": False, "added": 0, "error": error_msg}
+    logger.warning("Registry sync failed: all mirrors unreachable")
+    return result
 
 
 def _load_custom_dirs() -> list[Path]:
     global _custom_models_dirs
     if _custom_models_dirs:
         return _custom_models_dirs
-    if _ctx is None:
-        return []
-    try:
-        f = _ctx.config_dir / _CUSTOM_DIRS_FILE
-        if f.is_file():
-            dirs = []
-            for line in f.read_text(encoding="utf-8").splitlines():
-                line = line.strip().strip('"').strip("'")
-                if not line:
-                    continue
-                p = Path(line).expanduser()
-                if p.is_dir() and p not in dirs:
-                    dirs.append(p)
-            _custom_models_dirs = dirs
-            return dirs
-    except Exception:
-        pass
-    return []
+    dirs: list[Path] = []
+    if _ctx is not None:
+        try:
+            for candidate in [_ctx.config_dir, _ctx.config_dir / "config"]:
+                launcher_config = candidate / "launcher_config.json"
+                if launcher_config.is_file():
+                    with open(launcher_config, "r", encoding="utf-8") as f:
+                        cfg = json.load(f)
+                    for d in cfg.get("model_dirs", []):
+                        p = d.get("path", "").strip().strip('"').strip("'")
+                        if p:
+                            pp = Path(p).expanduser()
+                            if pp.is_dir() and pp not in dirs:
+                                dirs.append(pp)
+                    break
+        except Exception:
+            pass
+        try:
+            f = _ctx.config_dir / _CUSTOM_DIRS_FILE
+            if f.is_file():
+                for line in f.read_text(encoding="utf-8").splitlines():
+                    line = line.strip().strip('"').strip("'")
+                    if not line:
+                        continue
+                    p = Path(line).expanduser()
+                    if p.is_dir() and p not in dirs:
+                        dirs.append(p)
+        except Exception:
+            pass
+    _custom_models_dirs = dirs
+    return dirs
 
 
 def _save_custom_dirs() -> None:
@@ -218,7 +422,7 @@ def _check_model_exists(entry: ModelRegistryEntry, models_dir: Path) -> bool:
 def _get_registry_status() -> list[dict[str, Any]]:
     models_dirs = _get_models_dirs()
     results = []
-    for entry in MODEL_REGISTRY.values():
+    for entry in _merged_registry.values():
         exists = False
         local_path = None
         for md in models_dirs:
@@ -287,9 +491,71 @@ def _download_model_worker(entry: ModelRegistryEntry, models_dir: Path) -> None:
         }
 
 
+_MODEL_SCAN_SUFFIXES = {".safetensors", ".ckpt", ".pt", ".bin", ".pth"}
+_LORA_SCAN_SUFFIXES = {".safetensors", ".ckpt", ".pt", ".bin"}
+_HF_SHARD_RE = __import__("re").compile(r"^(model|diffusion_pytorch_model)-\d{5}-of-\d{5}$")
+
+
+def _scan_dir_for_models(root: Path) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    try:
+        for dirpath, _dirnames, filenames in os.walk(root):
+            for fn in filenames:
+                suf = Path(fn).suffix.lower()
+                if suf in _MODEL_SCAN_SUFFIXES:
+                    stem = Path(fn).stem
+                    if _HF_SHARD_RE.match(stem):
+                        continue
+                    full = Path(dirpath) / fn
+                    if full.is_file():
+                        try:
+                            size = full.stat().st_size
+                        except OSError:
+                            size = 0
+                        rel = str(full.relative_to(root))
+                        is_lora = "lora" in fn.lower() or "lora" in dirpath.lower()
+                        model_type = "lora" if is_lora else "checkpoint"
+                        found.append({
+                            "name": fn,
+                            "path": str(full.resolve()),
+                            "relative_path": rel,
+                            "size_bytes": size,
+                            "model_type": model_type,
+                        })
+    except OSError:
+        pass
+    found.sort(key=lambda x: x["name"].lower())
+    return found
+
+
+def _get_local_models_by_dir() -> list[dict[str, Any]]:
+    default_dir = _get_default_models_dir()
+    custom_dirs = _load_custom_dirs()
+    result = []
+    if default_dir is not None:
+        result.append({
+            "path": str(default_dir),
+            "is_default": True,
+            "models": _scan_dir_for_models(default_dir),
+        })
+    for cd in custom_dirs:
+        if default_dir is not None and str(cd) == str(default_dir):
+            continue
+        result.append({
+            "path": str(cd),
+            "is_default": False,
+            "models": _scan_dir_for_models(cd),
+        })
+    return result
+
+
 def install(app: FastAPI, ctx: ExtensionContext) -> None:
-    global _ctx
+    global _ctx, _merged_registry
     _ctx = ctx
+
+    cached = _load_cached_registry()
+    if cached:
+        _merged_registry = _merge_registries(_BUILTIN_REGISTRY, cached)
 
     @app.get("/api/models/registry")
     async def route_registry():
@@ -300,10 +566,35 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
                 "models": _get_registry_status(),
                 "default_models_dir": str(default_dir) if default_dir else None,
                 "custom_models_dirs": [str(d) for d in custom_dirs],
+                "local_dirs": _get_local_models_by_dir(),
+                "sync_status": _last_sync_status,
             }
         except Exception as e:
             logger.exception("registry list failed")
             return JSONResponse(status_code=500, content={"error": str(e)})
+
+    @app.post("/api/models/registry/sync")
+    async def route_sync_registry():
+        global _custom_models_dirs
+        _custom_models_dirs = []
+        _load_custom_dirs()
+        try:
+            result = _sync_registry_from_remote()
+            result["local_refreshed"] = True
+            return result
+        except Exception as e:
+            return {"success": False, "added": 0, "updated": 0, "error": str(e), "local_refreshed": True}
+
+    @app.post("/api/models/registry/refresh-dirs")
+    async def route_refresh_dirs():
+        global _custom_models_dirs
+        _custom_models_dirs = []
+        _load_custom_dirs()
+        return {"status": "ok"}
+
+    @app.get("/api/models/registry/sync-status")
+    async def route_sync_status():
+        return _last_sync_status
 
     @app.post("/api/models/registry/download")
     async def route_download(request: FastAPIRequest):
@@ -319,7 +610,7 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
         if not model_id:
             return JSONResponse(status_code=400, content={"error": "Missing 'model_id'"})
 
-        entry = MODEL_REGISTRY.get(model_id)
+        entry = _merged_registry.get(model_id)
         if entry is None:
             return JSONResponse(status_code=404, content={"error": f"Unknown model: {model_id}"})
 
@@ -410,5 +701,40 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
 
         _save_custom_dirs()
         return {"status": "removed", "custom_models_dirs": [str(d) for d in _custom_models_dirs]}
+
+    @app.post("/api/models/local/delete")
+    async def route_delete_local_model(request: FastAPIRequest):
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+
+        file_path = data.get("path", "").strip().strip('"').strip("'")
+        if not file_path:
+            return JSONResponse(status_code=400, content={"error": "Missing 'path'"})
+
+        p = Path(file_path).expanduser()
+        try:
+            resolved = str(p.resolve())
+        except OSError:
+            resolved = str(p)
+
+        default_dir = _get_default_models_dir()
+        if default_dir and resolved.startswith(str(default_dir)):
+            return JSONResponse(status_code=403, content={"error": "不允许删除系统默认目录中的模型文件"})
+
+        if not p.is_file():
+            return JSONResponse(status_code=404, content={"error": f"文件不存在: {file_path}"})
+
+        suf = p.suffix.lower()
+        if suf not in _MODEL_SCAN_SUFFIXES:
+            return JSONResponse(status_code=400, content={"error": f"不支持的文件类型: {suf}"})
+
+        try:
+            p.unlink()
+            logger.info("Deleted local model file: %s", resolved)
+            return {"status": "deleted", "path": resolved}
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": f"删除失败: {e}"})
 
     logger.info("community_models: module loaded")

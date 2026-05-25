@@ -40,13 +40,11 @@ class GenerationHandler(StateHandlerBase):
     def start_generation(self, generation_id: str) -> None:
         if self.is_generation_running():
             raise RuntimeError("Generation already in progress")
-        if self.state.gpu_slot is None:
-            raise RuntimeError("No active GPU pipeline")
 
         self.state.active_generation = GpuGeneration(
             state=GenerationRunning(
                 id=generation_id,
-                progress=GenerationProgress(phase="", progress=0, current_step=0, total_steps=0),
+                progress=GenerationProgress(phase="preparing", progress=2, current_step=0, total_steps=0),
             )
         )
 
@@ -65,7 +63,7 @@ class GenerationHandler(StateHandlerBase):
     @with_state_lock
     def _gpu_generation(self) -> GenerationState | None:
         match self.state.active_generation:
-            case GpuGeneration(state=generation) if self.state.gpu_slot is not None:
+            case GpuGeneration(state=generation):
                 return generation
             case _:
                 return None
@@ -81,7 +79,7 @@ class GenerationHandler(StateHandlerBase):
     @with_state_lock
     def _active_generation_state(self) -> tuple[GenerationSlot, GenerationState] | None:
         match self.state.active_generation:
-            case GpuGeneration(state=generation) if self.state.gpu_slot is not None:
+            case GpuGeneration(state=generation):
                 return "gpu", generation
             case ApiGeneration(state=generation):
                 return "api", generation
@@ -154,9 +152,11 @@ class GenerationHandler(StateHandlerBase):
         progress: int,
         current_step: int | None = None,
         total_steps: int | None = None,
+        log_message: str | None = None,
     ) -> None:
         running_generation = self._running_generation()
         if running_generation is None:
+            print(f"[progress] update_progress SKIP: no running generation (phase={phase}, progress={progress}, gpu_slot={self.state.gpu_slot is not None})")
             return
 
         _, running = running_generation
@@ -164,6 +164,8 @@ class GenerationHandler(StateHandlerBase):
         running.progress.progress = progress
         running.progress.current_step = current_step
         running.progress.total_steps = total_steps
+        if log_message is not None:
+            running.progress.log_message = log_message
 
     @with_state_lock
     def cancel_generation(self) -> CancelResponse:
@@ -206,6 +208,8 @@ class GenerationHandler(StateHandlerBase):
     @with_state_lock
     def get_generation_progress(self) -> GenerationProgressResponse:
         gen = self._generation_for_polling()
+        gpu_ok = self.state.gpu_slot is not None
+        ag_type = type(self.state.active_generation).__name__ if self.state.active_generation else "None"
 
         match gen:
             case GenerationRunning(progress=progress):
@@ -215,6 +219,7 @@ class GenerationHandler(StateHandlerBase):
                     progress=progress.progress,
                     currentStep=progress.current_step,
                     totalSteps=progress.total_steps,
+                    logMessage=progress.log_message,
                 )
             case GenerationComplete():
                 return GenerationProgressResponse(
@@ -241,6 +246,7 @@ class GenerationHandler(StateHandlerBase):
                     totalSteps=0,
                 )
             case _:
+                print(f"[progress] get_generation_progress: idle (ag_type={ag_type}, gpu_slot={gpu_ok})")
                 return GenerationProgressResponse(
                     status="idle",
                     phase="",

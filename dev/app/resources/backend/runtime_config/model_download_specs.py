@@ -25,6 +25,7 @@ class ModelFileDownloadSpec:
 
 MODEL_FILE_ORDER: tuple[ModelFileType, ...] = (
     "checkpoint",
+    "checkpoint_fp8",
     "upsampler",
     "distilled_lora",
     "ic_lora",
@@ -33,6 +34,7 @@ MODEL_FILE_ORDER: tuple[ModelFileType, ...] = (
     "pose_processor",
     "text_encoder",
     "zit",
+    "tts",
 )
 
 
@@ -42,63 +44,77 @@ DEFAULT_MODEL_DOWNLOAD_SPECS: dict[ModelFileType, ModelFileDownloadSpec] = {
         expected_size_bytes=43_000_000_000,
         is_folder=False,
         repo_id="Lightricks/LTX-2.3",
-        description="Main transformer model",
+        description="视频生成核心模型（文生视频/图生视频/智能多帧）",
+    ),
+    "checkpoint_fp8": ModelFileDownloadSpec(
+        relative_path=Path("ltx-2.3-22b-distilled-fp8.safetensors"),
+        expected_size_bytes=22_000_000_000,
+        is_folder=False,
+        repo_id="Lightricks/LTX-2.3",
+        description="FP8量化模型（视频生成，节省4GB显存，推荐10-24GB显卡）",
     ),
     "upsampler": ModelFileDownloadSpec(
         relative_path=Path("ltx-2.3-spatial-upscaler-x2-1.0.safetensors"),
         expected_size_bytes=1_900_000_000,
         is_folder=False,
         repo_id="Lightricks/LTX-2.3",
-        description="2x Upscaler",
+        description="2x画质增强模型（视频生成高清输出）",
     ),
     "distilled_lora": ModelFileDownloadSpec(
         relative_path=Path("ltx-2-19b-distilled-lora-384.safetensors"),
         expected_size_bytes=400_000_000,
         is_folder=False,
         repo_id="Lightricks/LTX-2",
-        description="LoRA for Pro model",
+        description="Pro模式LoRA（视频生成Pro高质量模式）",
     ),
     "ic_lora": ModelFileDownloadSpec(
         relative_path=Path("ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors"),
         expected_size_bytes=654_465_352,
         is_folder=False,
         repo_id="Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control",
-        description="Union IC-LoRA control model",
+        description="视频迁移控制模型（视频迁移功能必需）",
     ),
     "depth_processor": ModelFileDownloadSpec(
         relative_path=Path("dpt-hybrid-midas"),
         expected_size_bytes=500_000_000,
         is_folder=True,
         repo_id="Intel/dpt-hybrid-midas",
-        description="DPT-Hybrid MiDaS depth processor",
+        description="深度估计模型（视频迁移-深度控制）",
     ),
     "person_detector": ModelFileDownloadSpec(
         relative_path=Path("yolox_l.torchscript.pt"),
         expected_size_bytes=217_697_649,
         is_folder=False,
         repo_id="hr16/yolox-onnx",
-        description="YOLOX person detector for pose preprocessing",
+        description="人物检测模型（视频迁移-姿态控制）",
     ),
     "pose_processor": ModelFileDownloadSpec(
         relative_path=Path("dw-ll_ucoco_384_bs5.torchscript.pt"),
         expected_size_bytes=135_059_124,
         is_folder=False,
         repo_id="hr16/DWPose-TorchScript-BatchSize5",
-        description="DW Pose TorchScript processor",
+        description="姿态估计模型（视频迁移-姿态/动作控制）",
     ),
     "text_encoder": ModelFileDownloadSpec(
         relative_path=Path("gemma-3-12b-it-qat-q4_0-unquantized"),
         expected_size_bytes=25_000_000_000,
         is_folder=True,
         repo_id="Lightricks/gemma-3-12b-it-qat-q4_0-unquantized",
-        description="Gemma text encoder (bfloat16)",
+        description="文本编码器（所有生成功能的提示词理解）",
     ),
     "zit": ModelFileDownloadSpec(
         relative_path=Path("Z-Image-Turbo"),
         expected_size_bytes=31_000_000_000,
         is_folder=True,
         repo_id="Tongyi-MAI/Z-Image-Turbo",
-        description="Z-Image-Turbo model for text-to-image generation",
+        description="图像生成模型（AI图像生成功能必需）",
+    ),
+    "tts": ModelFileDownloadSpec(
+        relative_path=Path("VoxCPM2"),
+        expected_size_bytes=8_000_000_000,
+        is_folder=True,
+        repo_id="openbmb/VoxCPM2",
+        description="语音合成模型（TTS语音/声音克隆功能必需）",
     ),
 }
 

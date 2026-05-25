@@ -52,6 +52,7 @@ dev/app/resources/models/
 
 # 运行时数据
 dev/app/resources/data/
+dev/app/data/
 
 # UV包管理器
 dev/app/resources/uv/

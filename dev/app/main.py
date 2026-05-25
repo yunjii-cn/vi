@@ -56,6 +56,160 @@ except ImportError:
 _IS_FROZEN = sys.platform == 'win32' and getattr(sys, 'frozen', False)
 _EXE_DIR = os.path.dirname(sys.executable) if _IS_FROZEN else os.path.dirname(os.path.abspath(__file__))
 
+def _find_install_root(start_dir=None):
+    d = start_dir or _EXE_DIR
+    for _ in range(5):
+        if os.path.isdir(os.path.join(d, "app")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    return None
+
+
+def _bootstrap_download_resources(install_root, splash=None):
+    import zipfile
+    import ssl
+    import tempfile
+
+    app_dir = os.path.join(install_root, "app")
+    resources_dir = os.path.join(app_dir, "resources")
+    os.makedirs(resources_dir, exist_ok=True)
+    for sub in ("data", "models", "outputs", "uploads", "config"):
+        os.makedirs(os.path.join(install_root, "data", sub), exist_ok=True)
+    for sub in ("logs", "cache", "debug"):
+        os.makedirs(os.path.join(install_root, "temp", sub), exist_ok=True)
+
+    result_holder = [None]
+    lock = threading.Lock()
+
+    def try_download(key):
+        source = UPDATE_SOURCES[key]
+        url = source.get("resources_url", "")
+        if not url:
+            return
+        try:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+                data = resp.read()
+            with lock:
+                if result_holder[0] is None:
+                    result_holder[0] = (key, data)
+        except Exception:
+            pass
+
+    threads = []
+    for key in UPDATE_SOURCES:
+        t = threading.Thread(target=try_download, args=(key,), daemon=True)
+        threads.append(t)
+        t.start()
+
+    for t in threads:
+        t.join(timeout=45)
+
+    if result_holder[0] is None:
+        return False, "无法从任何源下载核心文件，请检查网络连接"
+
+    winning_key, zip_data = result_holder[0]
+    source_name = UPDATE_SOURCES[winning_key]["name"]
+
+    tmp_zip = os.path.join(tempfile.gettempdir(), "_vi_bootstrap.zip")
+    try:
+        with open(tmp_zip, "wb") as f:
+            f.write(zip_data)
+
+        with zipfile.ZipFile(tmp_zip, "r") as zf:
+            names = zf.namelist()
+
+            if winning_key == "gitee":
+                prefix = ""
+                for n in names:
+                    if n.endswith("dev/app/resources/"):
+                        prefix = n
+                        break
+                if not prefix:
+                    for n in names:
+                        m = re.search(r'^(.+?/)?dev/app/resources/', n)
+                        if m:
+                            prefix = m.group(0)
+                            break
+
+                if prefix:
+                    for name in names:
+                        if name.startswith(prefix) and not name.endswith("/"):
+                            rel = name[len(prefix):]
+                            if not rel:
+                                continue
+                            target = os.path.join(resources_dir, rel.replace("/", os.sep))
+                            os.makedirs(os.path.dirname(target), exist_ok=True)
+                            with zf.open(name) as src, open(target, "wb") as dst:
+                                dst.write(src.read())
+                else:
+                    for name in names:
+                        if "resources/" in name and not name.endswith("/"):
+                            idx = name.index("resources/")
+                            rel = name[idx + len("resources/"):]
+                            if not rel:
+                                continue
+                            target = os.path.join(resources_dir, rel.replace("/", os.sep))
+                            os.makedirs(os.path.dirname(target), exist_ok=True)
+                            with zf.open(name) as src, open(target, "wb") as dst:
+                                dst.write(src.read())
+            else:
+                resources_prefix = ""
+                for n in names:
+                    if n.endswith("app/resources/"):
+                        resources_prefix = n
+                        break
+                    m = re.search(r'^(.+?/)?app/resources/', n)
+                    if m:
+                        resources_prefix = m.group(0)
+                        break
+
+                if resources_prefix:
+                    for name in names:
+                        if name.startswith(resources_prefix) and not name.endswith("/"):
+                            rel = name[len(resources_prefix):]
+                            if not rel:
+                                continue
+                            target = os.path.join(resources_dir, rel.replace("/", os.sep))
+                            os.makedirs(os.path.dirname(target), exist_ok=True)
+                            with zf.open(name) as src, open(target, "wb") as dst:
+                                dst.write(src.read())
+                else:
+                    zf.extractall(app_dir)
+
+    except Exception as e:
+        return False, f"解压核心文件失败: {e}"
+    finally:
+        try:
+            os.unlink(tmp_zip)
+        except Exception:
+            pass
+
+    backend_dir = os.path.join(resources_dir, "backend")
+    patches_dir = os.path.join(resources_dir, "patches")
+    ui_dir = os.path.join(resources_dir, "ui")
+    has_backend = os.path.isdir(backend_dir) and len(os.listdir(backend_dir)) > 0
+    has_patches = os.path.isdir(patches_dir) and len(os.listdir(patches_dir)) > 0
+    has_ui = os.path.isdir(ui_dir) and len(os.listdir(ui_dir)) > 0
+
+    if not (has_backend and has_patches and has_ui):
+        missing = []
+        if not has_backend:
+            missing.append("backend")
+        if not has_patches:
+            missing.append("patches")
+        if not has_ui:
+            missing.append("ui")
+        return False, f"核心文件不完整，缺少: {', '.join(missing)}"
+
+    return True, f"核心文件下载完成（via {source_name}）"
+
 def _find_debug_flag():
     if _IS_FROZEN:
         temp_debug = os.path.join(_EXE_DIR, "temp", "debug", ".debug")
@@ -236,6 +390,54 @@ def _cleanup_single_instance():
     except Exception:
         pass
 
+
+def _validate_exe_filename():
+    if not _IS_FROZEN:
+        return
+    try:
+        exe_path = sys.executable
+        exe_name = os.path.basename(exe_path)
+        if APP_NAME not in exe_name:
+            import ctypes
+            correct_name = APP_NAME + ".exe"
+            result = ctypes.windll.user32.MessageBoxW(
+                0,
+                f"检测到程序文件名已被修改！\n\n"
+                f"当前文件名: {exe_name}\n"
+                f"正确文件名: {correct_name}\n\n"
+                f"文件名被修改可能影响程序正常运行。\n"
+                f"是否自动修正文件名并重新启动？\n\n"
+                f"点击「是」自动修正并重启\n"
+                f"点击「否」退出程序",
+                f"{APP_NAME} - 文件名异常",
+                0x24
+            )
+            if result == 6:
+                exe_dir = os.path.dirname(exe_path)
+                target_path = os.path.join(exe_dir, correct_name)
+                try:
+                    shutil.copy2(exe_path, target_path)
+                    subprocess.Popen(
+                        f'ping -n 2 127.0.0.1 >nul & start "" "{target_path}"',
+                        shell=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                    sys.exit(0)
+                except Exception:
+                    ctypes.windll.user32.MessageBoxW(
+                        0,
+                        f"自动修正失败，请手动将文件重命名为:\n{correct_name}",
+                        f"{APP_NAME} - 修正失败",
+                        0x10
+                    )
+                    sys.exit(1)
+            else:
+                sys.exit(1)
+    except SystemExit:
+        raise
+    except Exception:
+        pass
+
 # 调试模式初始化
 if _DEBUG_MODE:
     try:
@@ -270,7 +472,13 @@ if _DEBUG_MODE:
         pass
 
 if sys.platform == 'win32':
-    _HIDDEN_FLAGS = subprocess.CREATE_NO_WINDOW | 0x00000008  # DETACHED_PROCESS
+    _HIDDEN_FLAGS = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+    try:
+        import ctypes
+        _SEM = 0x0001 | 0x0002 | 0x0004 | 0x8000
+        ctypes.windll.kernel32.SetErrorMode(_SEM)
+    except Exception:
+        pass
 else:
     _HIDDEN_FLAGS = 0
 
@@ -302,6 +510,7 @@ def hidden_run(*args, **kwargs):
             kwargs['creationflags'] = kwargs['creationflags'] | _HIDDEN_FLAGS
         else:
             kwargs['creationflags'] = _HIDDEN_FLAGS
+        kwargs.setdefault('stdin', subprocess.DEVNULL)
     if args and isinstance(args[0], list) and args[0] and 'python' in os.path.basename(args[0][0]).lower():
         kwargs = _clean_python_env(kwargs)
     return subprocess.run(*args, **kwargs)
@@ -317,6 +526,7 @@ def hidden_popen(*args, **kwargs):
             kwargs['creationflags'] = kwargs['creationflags'] | _HIDDEN_FLAGS
         else:
             kwargs['creationflags'] = _HIDDEN_FLAGS
+        kwargs.setdefault('stdin', subprocess.DEVNULL)
     if args and isinstance(args[0], list) and args[0] and 'python' in os.path.basename(args[0][0]).lower():
         kwargs = _clean_python_env(kwargs)
     return subprocess.Popen(*args, **kwargs)
@@ -334,7 +544,7 @@ from PyQt6.QtWidgets import (
     QColorDialog, QFontDialog, QInputDialog, QWizard, QDialog,
     QButtonGroup, QAbstractButton, QHeaderView,
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QRectF, pyqtProperty, QProcess, QPropertyAnimation
+from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal, QTimer, QRectF, pyqtProperty, QProcess, QPropertyAnimation
 from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QLinearGradient, QPen, QPalette
 
 
@@ -485,34 +695,36 @@ QGroupBox::title {
 """
 
 
-class ServiceMonitor(QThread):
+class ServiceMonitor(QObject):
     status_changed = pyqtSignal(str, bool)
 
-    def __init__(self, check_interval=3):
-        super().__init__()
+    def __init__(self, check_interval=3, parent=None):
+        super().__init__(parent)
         self.check_interval = check_interval
-        self.running = True
         self._status_cache = {}
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._check_all)
 
-    def run(self):
-        while self.running:
-            for sid, svc in SERVICES.items():
-                alive = self._check_port(svc["port"])
-                if self._status_cache.get(sid) != alive:
-                    self._status_cache[sid] = alive
-                    self.status_changed.emit(sid, alive)
-            time.sleep(self.check_interval)
+    def start(self):
+        self._timer.start(self.check_interval * 1000)
+
+    def _check_all(self):
+        for sid, svc in SERVICES.items():
+            alive = self._check_port(svc["port"])
+            if self._status_cache.get(sid) != alive:
+                self._status_cache[sid] = alive
+                self.status_changed.emit(sid, alive)
 
     def _check_port(self, port):
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(1)
-                return s.connect_ex(('127.0.0.1', port)) == 0
-        except:
+            conn = socket.create_connection(('127.0.0.1', port), timeout=1)
+            conn.close()
+            return True
+        except Exception:
             return False
 
     def stop(self):
-        self.running = False
+        self._timer.stop()
 
 
 class ServiceProcess(QThread):
@@ -529,6 +741,12 @@ class ServiceProcess(QThread):
 
     def run(self):
         try:
+            if sys.platform == 'win32':
+                try:
+                    import ctypes
+                    ctypes.windll.ole32.CoInitializeEx(None, 0x0)
+                except Exception:
+                    pass
             self.process = hidden_popen(
                 self.cmd,
                 cwd=self.cwd,
@@ -547,6 +765,13 @@ class ServiceProcess(QThread):
         except Exception as e:
             self.output_received.emit(self.service_id, f"[ERROR] {e}")
             self.process_finished.emit(1, 0)
+        finally:
+            if sys.platform == 'win32':
+                try:
+                    import ctypes
+                    ctypes.windll.ole32.CoUninitialize()
+                except Exception:
+                    pass
 
     def terminate(self):
         if self.process:
@@ -564,10 +789,33 @@ class ServiceProcess(QThread):
                     pass
 
 
-GITEE_TOKEN = "b767b1a28e961d3a39789920fc5ac481"
-GITEE_API_REPO = "https://gitee.com/api/v5/repos/yunjizhineng/video-creative-station"
-VERSION_CHECK_URL = f"{GITEE_API_REPO}/contents/ver/version.json?ref=main&access_token={GITEE_TOKEN}"
-VERSION_DOWNLOAD_URL = f"{GITEE_API_REPO}/contents/ver/"
+_gitee_token_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".gitee_token")
+GITEE_TOKEN = ""
+if os.path.exists(_gitee_token_path):
+    try:
+        with open(_gitee_token_path, "r") as _f:
+            GITEE_TOKEN = _f.read().strip()
+    except Exception:
+        pass
+
+UPDATE_SOURCES = {
+    "gitee": {
+        "name": "Gitee",
+        "version_url": f"https://gitee.com/api/v5/repos/yunjii/vi/contents/ver/version.json?ref=main&access_token={GITEE_TOKEN}",
+        "commits_url": f"https://gitee.com/api/v5/repos/yunjii/vi/commits?access_token={GITEE_TOKEN}&per_page=20",
+        "download_url_tpl": "https://gitee.com/yunjii/vi/raw/main/ver/{filename}?access_token={GITEE_TOKEN}",
+        "resources_url": f"https://gitee.com/yunjii/vi/repository/archive/main.zip?access_token={GITEE_TOKEN}",
+        "is_api": True,
+    },
+    "github": {
+        "name": "GitHub",
+        "version_url": "https://raw.githubusercontent.com/yunjii-cn/vi/main/ver/version.json",
+        "commits_url": "https://api.github.com/repos/yunjii-cn/vi/commits?per_page=20",
+        "download_url_tpl": "https://github.com/yunjii-cn/vi/releases/download/v{version}/{filename}",
+        "resources_url": "https://github.com/yunjii-cn/vi/releases/latest/download/resources.zip",
+        "is_api": False,
+    },
+}
 
 MIRRORS = {
     "pip": "https://pypi.tuna.tsinghua.edu.cn/simple/",
@@ -709,6 +957,7 @@ LTX_MODELS = {
         "required": True,
         "desc": "LTX-2.3 蒸馏版 FP8 (推荐，显存友好)",
         "category": "基础模型",
+        "modelscope_id": "Lightricks/LTX-2.3-fp8",
     },
     "ltx-2.3-distilled": {
         "repo": "Lightricks/LTX-2.3",
@@ -717,6 +966,16 @@ LTX_MODELS = {
         "required": False,
         "desc": "LTX-2.3 蒸馏版完整精度",
         "category": "基础模型",
+        "modelscope_id": "Lightricks/LTX-2.3",
+    },
+    "ltx-2.3-distilled-1.1": {
+        "repo": "Lightricks/LTX-2.3",
+        "file": "ltx-2.3-22b-distilled-1.1.safetensors",
+        "size_bytes": 46149345038,
+        "required": False,
+        "desc": "LTX-2.3 蒸馏版 v1.1 (更新版本，质量提升)",
+        "category": "基础模型",
+        "modelscope_id": "Lightricks/LTX-2.3",
     },
     "ltx-2.3-dev-fp8": {
         "repo": "Lightricks/LTX-2.3-fp8",
@@ -725,6 +984,7 @@ LTX_MODELS = {
         "required": False,
         "desc": "LTX-2.3 开发版 FP8 (高质量，需更多显存)",
         "category": "基础模型",
+        "modelscope_id": "Lightricks/LTX-2.3-fp8",
     },
     "ltx-2.3-spatial-upscaler": {
         "repo": "Lightricks/LTX-2.3",
@@ -733,6 +993,7 @@ LTX_MODELS = {
         "required": True,
         "desc": "LTX-2.3 空间超分辨率 x2",
         "category": "超分辨率",
+        "modelscope_id": "Lightricks/LTX-2.3",
     },
     "ltx-2.3-temporal-upscaler": {
         "repo": "Lightricks/LTX-2.3",
@@ -741,6 +1002,7 @@ LTX_MODELS = {
         "required": False,
         "desc": "LTX-2.3 时间超分辨率 x2",
         "category": "超分辨率",
+        "modelscope_id": "Lightricks/LTX-2.3",
     },
     "ltx-2.3-ic-lora-union": {
         "repo": "Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control",
@@ -749,6 +1011,7 @@ LTX_MODELS = {
         "required": False,
         "desc": "IC-LoRA 联合控制 (动作迁移/深度/边缘)",
         "category": "控制模型",
+        "modelscope_id": "Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control",
     },
     "text-encoder": {
         "repo": "Lightricks/gemma-3-12b-it-qat-q4_0-unquantized",
@@ -758,8 +1021,11 @@ LTX_MODELS = {
         "desc": "Gemma 文本编码器 (本地文本编码必需，约23GB)",
         "is_folder": True,
         "category": "文本编码器",
+        "modelscope_id": "Lightricks/gemma-3-12b-it-qat-q4_0-unquantized",
     },
 }
+
+TORCH_VERSION_CONSTRAINT = ">=2.5,<3.0"
 
 LTX_DESKTOP_VERSION = "1.0.4"
 
@@ -768,8 +1034,9 @@ LTX_PIP_DEPS = [
     "uvicorn[standard]>=0.30.0",
     "safetensors>=0.4.0",
     "accelerate>=0.24.0",
-    "transformers>=4.52,<5.6",
-    "diffusers>=0.25.0",
+    "transformers>=4.57,<4.58",
+    "tokenizers>=0.22,<0.23",
+    "diffusers>=0.25.0,<1.0",
     "Pillow>=10.3.0",
     "sentencepiece>=0.1.99",
     "huggingface_hub>=0.30.0,<1.0",
@@ -778,7 +1045,7 @@ LTX_PIP_DEPS = [
     "ftfy>=6.0.0",
     "imageio>=2.37.2",
     "imageio-ffmpeg>=0.6.0",
-    "peft>=0.13.2",
+    "peft>=0.13.2,<1.0",
     "protobuf>=3.20.0",
     "opencv-python-headless>=4.8.0",
     "tqdm>=4.66.0",
@@ -787,14 +1054,14 @@ LTX_PIP_DEPS = [
     "scipy>=1.14",
     "av",
     "triton-windows",
-    # TTS (VoxCPM2) dependencies
     "voxcpm>=2.0.0",
     "soundfile",
     "librosa",
 ]
 
 LTX_PIP_VERSION_LOCKS = {
-    "transformers": ">=4.52,<5.6",
+    "transformers": ">=4.57,<4.58",
+    "tokenizers": ">=0.22,<0.23",
     "diffusers": ">=0.25,<1.0",
     "accelerate": ">=0.24,<2.0",
     "safetensors": ">=0.4,<1.0",
@@ -858,14 +1125,14 @@ try:
 except:
     print("NVDROP|")
 
-deps = ["fastapi","uvicorn","safetensors","accelerate","transformers","diffusers",
+deps = ["fastapi","uvicorn","safetensors","accelerate","transformers","tokenizers","diffusers",
         "Pillow","sentencepiece","huggingface_hub","sageattention","pydantic",
         "python-multipart","ftfy","imageio","imageio-ffmpeg","peft","protobuf",
         "opencv-python-headless","tqdm","pynvml","einops","scipy","av","triton-windows"]
-locks = {"transformers":(Version("4.52"),Version("5.6")),"diffusers":(Version("0.25"),Version("1.0")),
+locks = {"transformers":(Version("4.57"),Version("4.58")),"tokenizers":(Version("0.22"),Version("0.23")),"diffusers":(Version("0.25"),Version("1.0")),
          "accelerate":(Version("0.24"),Version("2.0")),"safetensors":(Version("0.4"),Version("1.0")),
          "peft":(Version("0.13"),Version("1.0")),"pydantic":(Version("2.7"),Version("3.0")),
-         "huggingface_hub":(Version("0.23"),Version("1.0")),"sentencepiece":(Version("0.1.99"),Version("1.0")),
+         "huggingface_hub":(Version("0.30"),Version("1.0")),"sentencepiece":(Version("0.1.99"),Version("1.0")),
          "ftfy":(Version("6.0"),Version("7.0")),"imageio":(Version("2.37"),Version("3.0")),
          "imageio-ffmpeg":(Version("0.6"),Version("1.0")),"protobuf":(Version("3.20"),Version("7.0")),
          "opencv-python-headless":(Version("4.8"),Version("5.0")),"tqdm":(Version("4.66"),Version("5.0")),
@@ -873,6 +1140,7 @@ locks = {"transformers":(Version("4.52"),Version("5.6")),"diffusers":(Version("0
          "scipy":(Version("1.14"),Version("2.0")),"av":(Version("16.0"),Version("17.0"))}
 for d in deps:
     try:
+
         v = importlib.metadata.version(d)
         if d in locks:
             lo,hi = locks[d]
@@ -894,7 +1162,8 @@ for d in deps:
                         if mode == "CPU":
                             self.env_update.emit("pytorch", f"× {ver} CPU版", "err", True)
                         else:
-                            self.env_update.emit("pytorch", f"√ {ver}+{variant}", "ok", False)
+                            display_ver = ver if '+' in ver else f"{ver}+{variant}"
+                            self.env_update.emit("pytorch", f"√ {display_ver}", "ok", False)
                     elif parts[0] == "CUDA" and len(parts) >= 2:
                         ver = parts[1]
                         if ver:
@@ -1374,7 +1643,7 @@ class DeployWorker(QThread):
         python_exe = self._venv_python
         if not os.path.exists(python_exe):
             return False
-        key_deps = ["fastapi", "uvicorn", "safetensors", "diffusers", "transformers",
+        key_deps = ["torch", "fastapi", "uvicorn", "safetensors", "diffusers", "transformers",
                      "accelerate", "PIL", "sentencepiece", "huggingface_hub",
                      "ltx_core", "ltx_pipelines"]
         for dep in key_deps:
@@ -1396,7 +1665,7 @@ class DeployWorker(QThread):
             result = hidden_run(
                 [python_exe, "-c", """
 import importlib.util
-deps = ["fastapi","uvicorn","safetensors","accelerate","transformers","diffusers",
+deps = ["fastapi","uvicorn","safetensors","accelerate","transformers","tokenizers","diffusers",
         "Pillow","sentencepiece","huggingface_hub","sageattention","pydantic",
         "multipart","ftfy","imageio","imageio_ffmpeg","peft","protobuf",
         "cv2","tqdm","pynvml","einops","scipy","av","triton",
@@ -1442,7 +1711,8 @@ for d in deps:
 import importlib.util, importlib.metadata, re, sys
 
 VERSION_LOCKS = {
-    "transformers": (">=4.52,<5.6"),
+    "transformers": (">=4.57,<4.58"),
+    "tokenizers": (">=0.22,<0.23"),
     "diffusers": (">=0.25,<1.0"),
     "accelerate": (">=0.24,<2.0"),
     "safetensors": (">=0.4,<1.0"),
@@ -1566,7 +1836,7 @@ for dep_name, spec in VERSION_LOCKS.items():
         return False
 
     def _check_models_ok(self):
-        models_dir = os.path.join(self._data_dir, "models")
+        models_dir = self._models_dir or os.path.join(self._data_dir or "", "models")
         if not os.path.exists(models_dir):
             return False
         for model_id, info in LTX_MODELS.items():
@@ -1713,46 +1983,80 @@ for dep_name, spec in VERSION_LOCKS.items():
 
             try:
                 check_result = hidden_run(
-                    [python_exe, "-c", "import torch; print(torch.__version__)"],
+                    [python_exe, "-c", "import torch; print(torch.__version__); print(torch.cuda.is_available())"],
                     capture_output=True, text=True, timeout=10
                 )
                 if check_result.returncode == 0:
-                    ver = check_result.stdout.strip()
-                    if "+cpu" in ver or "False" in str(check_result.stdout):
+                    ver = check_result.stdout.strip().split('\n')[0].strip() if check_result.stdout.strip() else ""
+                    no_cuda = 'False' in check_result.stdout.strip().split('\n')[-1] if check_result.stdout.strip() else True
+                    if "+cpu" in ver or no_cuda:
                         self.log.emit(f"  检测到 CPU 版本 PyTorch {ver}，将卸载后重装 CUDA 版本", "warn")
-                        hidden_run(
+                        uninst_env = os.environ.copy()
+                        uninst_env.pop("PYTHONHOME", None)
+                        uninst = hidden_run(
                             [uv_exe, "pip", "uninstall", "--python", python_exe,
-                             "torch", "torchvision", "torchaudio", "-y"],
-                            capture_output=True, text=True, timeout=60
+                             "torch", "torchvision", "torchaudio"],
+                            capture_output=True, text=True, timeout=120, env=uninst_env
+                        )
+                        if uninst.returncode != 0:
+                            err_msg = uninst.stderr.strip()[:200] if uninst.stderr else f"返回码 {uninst.returncode}"
+                            self.log.emit(f"  △ 卸载旧版本失败: {err_msg}", "warn")
+                        else:
+                            self.log.emit("  √ 旧版本已卸载", "info")
+                        hidden_run(
+                            [uv_exe, "cache", "clean"],
+                            capture_output=True, text=True, timeout=30
                         )
             except Exception:
                 pass
             self.env_update.emit("pytorch", "↻ PyTorch 安装中...", "pending", False)
+            torch_env = os.environ.copy()
+            torch_env.pop("UV_INDEX_URL", None)
+            torch_env.pop("UV_EXTRA_INDEX_URL", None)
+            torch_env.pop("UV_DEFAULT_INDEX", None)
+            torch_env.pop("UV_INDEX", None)
+            torch_env.pop("PYTHONHOME", None)
             result = self._retry_run(
                 [uv_exe, "pip", "install", "--python", python_exe,
-                 "torch", "torchvision", "torchaudio",
-                 "--index-url", torch_index],
+                 f"torch{TORCH_VERSION_CONSTRAINT}",
+                 f"torchvision{TORCH_VERSION_CONSTRAINT}",
+                 f"torchaudio{TORCH_VERSION_CONSTRAINT}",
+                 "--default-index", torch_index,
+                 "--index-strategy", "first-index",
+                 "--no-cache"],
                 label=f"PyTorch ({cuda_variant or 'CUDA'})",
                 max_retries=2,
-                capture_output=True, text=True, timeout=1800, env=env
+                capture_output=True, text=True, timeout=1800, env=torch_env
             )
             if isinstance(result, str):
                 self.log.emit("  △ CUDA 索引安装失败，尝试带PyPI镜像重试...", "warn")
+                fallback_env = torch_env.copy()
+                fallback_env["UV_INDEX"] = self._resolved_mirrors["pip"]
                 result = self._retry_run(
                     [uv_exe, "pip", "install", "--python", python_exe,
-                     "torch", "torchvision", "torchaudio",
-                     "--index-url", torch_index,
-                     "--extra-index-url", self._resolved_mirrors["pip"]],
+                     f"torch{TORCH_VERSION_CONSTRAINT}",
+                     f"torchvision{TORCH_VERSION_CONSTRAINT}",
+                     f"torchaudio{TORCH_VERSION_CONSTRAINT}",
+                     "--default-index", torch_index,
+                     "--index", self._resolved_mirrors["pip"],
+                     "--index-strategy", "first-index",
+                     "--no-cache"],
                     label=f"PyTorch ({cuda_variant or 'CUDA'}+PyPI fallback)",
                     max_retries=2,
-                    capture_output=True, text=True, timeout=1800, env=env
+                    capture_output=True, text=True, timeout=1800, env=fallback_env
                 )
             if isinstance(result, str):
                 raise Exception(f"PyTorch 安装失败: {result}，PyTorch 包较大(约2GB)，请确保网络稳定")
 
             if not self._check_torch_ok():
-                raise Exception("PyTorch 安装后验证失败，可能安装了 CPU 版本")
+                diag = hidden_run(
+                    [python_exe, "-c", "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.__file__)"],
+                    capture_output=True, text=True, timeout=10
+                )
+                diag_info = diag.stdout.strip()[:200] if diag.returncode == 0 else "无法导入 torch"
+                raise Exception(f"PyTorch 安装后验证失败，当前状态: {diag_info}")
             any_installed = True
+            deps_ok = False
 
         if not deps_ok:
             self.log.emit("  安装项目依赖...", "info")
@@ -1876,14 +2180,14 @@ try:
 except:
     print("NVDROP|")
 
-deps = ["fastapi","uvicorn","safetensors","accelerate","transformers","diffusers",
+deps = ["fastapi","uvicorn","safetensors","accelerate","transformers","tokenizers","diffusers",
         "Pillow","sentencepiece","huggingface_hub","sageattention","pydantic",
         "python-multipart","ftfy","imageio","imageio-ffmpeg","peft","protobuf",
         "opencv-python-headless","tqdm","pynvml","einops","scipy","av","triton-windows"]
-locks = {"transformers":(Version("4.52"),Version("5.6")),"diffusers":(Version("0.25"),Version("1.0")),
+locks = {"transformers":(Version("4.57"),Version("4.58")),"tokenizers":(Version("0.22"),Version("0.23")),"diffusers":(Version("0.25"),Version("1.0")),
          "accelerate":(Version("0.24"),Version("2.0")),"safetensors":(Version("0.4"),Version("1.0")),
          "peft":(Version("0.13"),Version("1.0")),"pydantic":(Version("2.7"),Version("3.0")),
-         "huggingface_hub":(Version("0.23"),Version("1.0")),"sentencepiece":(Version("0.1.99"),Version("1.0")),
+         "huggingface_hub":(Version("0.30"),Version("1.0")),"sentencepiece":(Version("0.1.99"),Version("1.0")),
          "ftfy":(Version("6.0"),Version("7.0")),"imageio":(Version("2.37"),Version("3.0")),
          "imageio-ffmpeg":(Version("0.6"),Version("1.0")),"protobuf":(Version("3.20"),Version("7.0")),
          "opencv-python-headless":(Version("4.8"),Version("5.0")),"tqdm":(Version("4.66"),Version("5.0")),
@@ -2064,52 +2368,46 @@ for d in deps:
 
         self.log.emit("  安装 SageAttention (性能加速)...", "info")
 
-        import sys as _sys
         torch_ver = ""
-        py_ver = ""
+        cuda_ver = ""
         try:
             r = hidden_run([python_exe, "-c", "import torch; print(torch.__version__)"], capture_output=True, text=True, timeout=5)
             if r.returncode == 0:
                 torch_ver = r.stdout.strip().split("+")[0]
-            r2 = hidden_run([python_exe, "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"], capture_output=True, text=True, timeout=5)
-            if r2.returncode == 0:
-                py_ver = r2.stdout.strip().replace(".", "")
-        except:
-            pass
-
-        cuda_ver = ""
-        try:
             r3 = hidden_run([python_exe, "-c", "import torch; print(torch.version.cuda or '')"], capture_output=True, text=True, timeout=5)
             if r3.returncode == 0:
                 cuda_ver = r3.stdout.strip().replace(".", "")
         except:
             pass
 
+        sa_pypi_spec = "sageattention>=1.0,<3.0"
+
         wheel_urls = []
-        if torch_ver and cuda_ver and py_ver:
+        if torch_ver and cuda_ver:
             torch_major_minor = ".".join(torch_ver.split(".")[:2])
-            wheel_urls.append(
-                f"https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0/sageattention-2.2.0+cu{cuda_ver}torch{torch_major_minor}-cp{py_ver}-cp{py_ver}-win_amd64.whl"
-            )
+            for tag in ["v2.2.0-windows.post2", "v2.2.0-windows.post1", "v2.2.0-windows"]:
+                ver_base = tag.lstrip("v").split("-")[0]
+                wheel_urls.append(
+                    (f"预编译 wheel ({tag})",
+                     f"https://github.com/woct0rdho/SageAttention/releases/download/{tag}/sageattention-{ver_base}+cu{cuda_ver}torch{torch_major_minor}-cp39-abi3-win_amd64.whl")
+                )
 
-        sa_github_url = "git+https://github.com/thu-ml/SageAttention.git"
-        sa_gitcode_url = "git+https://gitcode.com/thu-ml/SageAttention.git"
-
-        attempts = []
-        if wheel_urls:
-            attempts.append(("预编译 wheel", wheel_urls[0]))
-        attempts.append(("GitCode 镜像 (git)", sa_gitcode_url))
-        attempts.append(("GitHub 源码 (git)", sa_github_url))
+        attempts = [("PyPI (Triton版)", sa_pypi_spec)]
+        for label, url in wheel_urls:
+            attempts.append((label, url))
 
         for label, url in attempts:
             if self._should_stop:
                 return
             self.log.emit(f"  尝试 {label}...", "info")
             try:
+                is_url = url.startswith("http://") or url.startswith("https://")
+                cmd = [uv_exe, "pip", "install", "--python", python_exe, url]
+                if not is_url:
+                    cmd += ["--index-url", self._resolved_mirrors["pip"],
+                            "--extra-index-url", self._resolved_mirrors["pip_fallback"]]
                 result = self._retry_run(
-                    [uv_exe, "pip", "install", "--python", python_exe, url,
-                     "--index-url", self._resolved_mirrors["pip"],
-                     "--extra-index-url", self._resolved_mirrors["pip_fallback"]],
+                    cmd,
                     label=f"SageAttention ({label})",
                     max_retries=1,
                     capture_output=True, text=True, timeout=600, env=env
@@ -2401,8 +2699,9 @@ for d in deps:
             env["UV_INDEX_URL"] = self._resolved_mirrors["pip"]
             env.pop("PYTHONHOME", None)
             self._retry_run(
-                [uv_exe, "pip", "install", "--python", python_exe, "huggingface_hub",
-                 "--index-url", self._resolved_mirrors["pip"]],
+                [uv_exe, "pip", "install", "--python", python_exe, "huggingface_hub>=0.30,<1.0",
+                 "--default-index", self._resolved_mirrors["pip"],
+                 "--index-strategy", "first-index"],
                 label="huggingface_hub",
                 capture_output=True, text=True, timeout=120, env=env
             )
@@ -2496,7 +2795,7 @@ for d in deps:
                         python_exe, "-c",
                         f"from huggingface_hub import hf_hub_download; "
                         f"hf_hub_download(repo_id='{info['repo']}', filename='{info['file']}', "
-                        f"local_dir=r'{models_dir}')"
+                        f"local_dir=r'{models_dir}', force_download={'True' if attempt > 1 else 'False'})"
                     ]
                     proc = hidden_run(cmd, capture_output=True, text=True, timeout=7200, env=env)
                     if proc.returncode == 0 and os.path.exists(target_file) and os.path.getsize(target_file) > expected_bytes * 0.9:
@@ -2504,18 +2803,18 @@ for d in deps:
                         self.log.emit(f"  √ {info['file']} 下载完成 (HF镜像)", "ok")
                         break
                     else:
-                        err = proc.stderr[:200] if proc.stderr else "未知错误"
+                        err = proc.stderr[:300] if proc.stderr else "未知错误"
                         self.log.emit(f"  △ HF镜像第{attempt}次下载失败: {err}", "warn")
                         if attempt < self.MAX_RETRIES:
-                            time.sleep(3)
+                            time.sleep(5 * attempt)
                 except subprocess.TimeoutExpired:
                     self.log.emit(f"  △ HF镜像第{attempt}次下载超时", "warn")
                     if attempt < self.MAX_RETRIES:
-                        time.sleep(3)
+                        time.sleep(5 * attempt)
                 except Exception as e:
                     self.log.emit(f"  △ HF镜像下载异常: {e}", "warn")
                     if attempt < self.MAX_RETRIES:
-                        time.sleep(3)
+                        time.sleep(5 * attempt)
 
             if not success:
                 self.log.emit("  尝试 ModelScope 镜像...", "info")
@@ -2529,18 +2828,56 @@ for d in deps:
                         label="modelscope",
                         capture_output=True, text=True, timeout=120, env=ms_env
                     )
-                    cmd = [
-                        python_exe, "-c",
-                        f"from modelscope.hub.file_download import model_file_download; "
-                        f"model_file_download(model_id='{info['repo'].replace('/', '-')}', "
-                        f"file_path='{info['file']}', cache_dir=r'{models_dir}')"
-                    ]
+                    ms_model_id = info.get("modelscope_id", info["repo"])
+                    is_folder = info.get("is_folder", False)
+                    if is_folder:
+                        cmd = [
+                            python_exe, "-c",
+                            f"from modelscope.hub.snapshot_download import snapshot_download; "
+                            f"snapshot_download(model_id='{ms_model_id}', "
+                            f"local_dir=r'{target_path}')"
+                        ]
+                    else:
+                        cmd = [
+                            python_exe, "-c",
+                            f"from modelscope.hub.file_download import model_file_download; "
+                            f"p = model_file_download(model_id='{ms_model_id}', "
+                            f"file_path='{info['file']}', cache_dir=r'{models_dir}'); "
+                            f"import shutil, os; "
+                            f"td = os.path.join(r'{models_dir}', '{info['file']}'); "
+                            f"shutil.copy2(p, td) if os.path.exists(p) and p != td else None"
+                        ]
                     proc = hidden_run(cmd, capture_output=True, text=True, timeout=7200)
                     if proc.returncode == 0 and os.path.exists(target_file) and os.path.getsize(target_file) > expected_bytes * 0.9:
                         success = True
                         self.log.emit(f"  √ {info['file']} 下载完成 (ModelScope)", "ok")
+                    else:
+                        err = proc.stderr[:300] if proc.stderr else "未知错误"
+                        self.log.emit(f"  △ ModelScope 也失败: {err}", "warn")
                 except Exception as e:
-                    self.log.emit(f"  △ ModelScope 也失败: {e}", "warn")
+                    self.log.emit(f"  △ ModelScope 异常: {e}", "warn")
+
+            if not success:
+                self.log.emit("  尝试 HF 直连下载...", "info")
+                try:
+                    direct_env = os.environ.copy()
+                    direct_env.pop("HF_ENDPOINT", None)
+                    direct_env.pop("PYTHONHOME", None)
+                    cmd = [
+                        python_exe, "-c",
+                        f"from huggingface_hub import hf_hub_download; "
+                        f"hf_hub_download(repo_id='{info['repo']}', filename='{info['file']}', "
+                        f"local_dir=r'{models_dir}', force_download=True)"
+                    ]
+                    proc = hidden_run(cmd, capture_output=True, text=True, timeout=7200, env=direct_env)
+                    if proc.returncode == 0 and os.path.exists(target_file) and os.path.getsize(target_file) > expected_bytes * 0.9:
+                        success = True
+                        self.log.emit(f"  √ {info['file']} 下载完成 (HF直连)", "ok")
+                    else:
+                        err = proc.stderr[:300] if proc.stderr else "未知错误"
+                        self.log.emit(f"  △ HF直连也失败: {err}", "warn")
+                except Exception as e:
+                    self.log.emit(f"  △ HF直连异常: {e}", "warn")
 
             if not success:
                 if info["required"]:
@@ -2889,7 +3226,7 @@ class SplashScreen(QSplashScreen):
                 base = sys._MEIPASS
             else:
                 base = os.path.dirname(os.path.abspath(__file__))
-            for name in ('icon.png', 'icon.ico'):
+            for name in ('ico.png', 'icon.png', 'icon.ico'):
                 p = os.path.join(base, name)
                 if os.path.exists(p):
                     self._icon_pixmap = QPixmap(p)
@@ -2990,9 +3327,14 @@ class MainWindow(QMainWindow):
 
         try:
             if hasattr(sys, '_MEIPASS'):
-                icon_path = os.path.join(sys._MEIPASS, 'icon.ico')
+                icon_path = os.path.join(sys._MEIPASS, 'ico.png')
             else:
-                icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'icon.ico')
+                icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ico.png')
+            if not os.path.exists(icon_path):
+                if hasattr(sys, '_MEIPASS'):
+                    icon_path = os.path.join(sys._MEIPASS, 'icon.ico')
+                else:
+                    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'icon.ico')
             if os.path.exists(icon_path):
                 self.setWindowIcon(QIcon(icon_path))
         except:
@@ -3016,6 +3358,11 @@ class MainWindow(QMainWindow):
         self.is_starting = False
         self.auto_scroll = True
         self._debug_mode = False
+        self._debug_log_file = None
+        self._fe_debug_log_path = ""
+        self._fe_debug_read_pos = 0
+        self._fe_debug_timer = QTimer(self)
+        self._fe_debug_timer.timeout.connect(self._poll_fe_debug_log)
         self.browsers = {"系统默认": "system"}
         self.selected_browser = "system"
         self.custom_browser_path = ""
@@ -3044,29 +3391,23 @@ class MainWindow(QMainWindow):
 
     def _resolve_base_dir(self):
         if hasattr(sys, 'frozen'):
-            exe_dir = os.path.abspath(os.path.dirname(sys.executable))
-            app_dir = os.path.join(exe_dir, "app")
-            if os.path.isdir(app_dir):
-                self._app_dir = app_dir
+            install_root = _find_install_root()
+            if install_root:
+                self._app_dir = os.path.join(install_root, "app")
+                self._project_root = install_root
+                self._exe_data_dir = os.path.join(install_root, "data")
+                self._exe_temp_dir = os.path.join(install_root, "temp")
             else:
+                exe_dir = os.path.abspath(os.path.dirname(sys.executable))
                 self._app_dir = exe_dir
-            self._project_root = os.path.dirname(exe_dir)
-            exe_data_dir = os.path.join(exe_dir, "data")
-            if os.path.isdir(exe_data_dir):
-                self._exe_data_dir = exe_data_dir
-            else:
+                self._project_root = os.path.dirname(exe_dir)
                 self._exe_data_dir = None
-            exe_temp_dir = os.path.join(exe_dir, "temp")
-            if os.path.isdir(exe_temp_dir):
-                self._exe_temp_dir = exe_temp_dir
-            else:
                 self._exe_temp_dir = None
         else:
             self._app_dir = os.path.dirname(os.path.abspath(__file__))
-            self._project_root = os.path.dirname(os.path.dirname(self._app_dir))
+            self._project_root = os.path.dirname(self._app_dir)
             self._app_resources = os.path.join(self._app_dir, "resources")
-            project_data_dir = os.path.join(self._project_root, "data")
-            self._exe_data_dir = project_data_dir
+            self._exe_data_dir = os.path.join(self._project_root, "data")
             dev_temp_dir = os.path.join(self._project_root, "temp")
             if os.path.isdir(dev_temp_dir):
                 self._exe_temp_dir = dev_temp_dir
@@ -3160,9 +3501,13 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.page_stack, 1)
 
         self._build_service_page()
+        print("[DEBUG] Service page built")
         self._build_env_page()
+        print("[DEBUG] Env page built")
         self._build_models_page()
+        print("[DEBUG] Models page built")
         self.page_stack.addWidget(self._build_update_page())
+        print("[DEBUG] Update page built")
 
         self.resize(1100, 800)
 
@@ -3555,6 +3900,18 @@ class MainWindow(QMainWindow):
         """)
         self._full_detect_btn.clicked.connect(self._full_detect)
         env_header.addWidget(self._full_detect_btn)
+
+        self._copy_env_btn = QPushButton("📋 复制清单")
+        self._copy_env_btn.setFixedSize(82, 26)
+        self._copy_env_btn.setToolTip("复制环境检测清单到剪贴板")
+        self._copy_env_btn.setStyleSheet("""
+            QPushButton { background-color: #333333; border: 1px solid #444444; border-radius: 6px;
+                          color: #AAAAAA; font-size: 10px; padding: 3px 6px; }
+            QPushButton:hover { background-color: #444444; border-color: #666666; color: #FFFFFF; }
+        """)
+        self._copy_env_btn.clicked.connect(self._copy_env_check_list)
+        env_header.addWidget(self._copy_env_btn)
+
         env_layout.addLayout(env_header)
 
         self._env_check_scroll_content = QVBoxLayout()
@@ -3571,19 +3928,19 @@ class MainWindow(QMainWindow):
                 ("nvidia_driver", "NVIDIA驱动", "CUDA 12.8 最低驱动版本 560.70"),
             ]),
             ("inference", "📦 推理依赖", [
-                ("transformers", "transformers", "官方要求 >=4.52,<5.6"),
+                ("transformers", "transformers", "官方要求 >=4.57,<4.58"),
                 ("diffusers", "diffusers", "官方要求 >=0.25,<1.0（git特定commit）"),
                 ("accelerate", "accelerate", "官方要求 >=0.24,<2.0"),
                 ("safetensors", "safetensors", "官方要求 >=0.4,<1.0"),
                 ("peft", "peft", "官方要求 >=0.13,<1.0"),
-                ("huggingface_hub", "hf_hub", "官方要求 >=0.30,<1.0（推荐接近1.0版本）"),
+                ("huggingface_hub", "huggingface_hub", "官方要求 >=0.30,<1.0"),
             ]),
             ("tools", "🛠 工具库", [
                 ("ffmpeg", "ffmpeg", "无版本要求，推荐最新便携版"),
-                ("opencv-python-headless", "opencv", "官方要求 >=4.8,<5.0"),
+                ("opencv-python-headless", "opencv-headless", "官方要求 >=4.8,<5.0"),
                 ("Pillow", "Pillow", "图像处理库"),
                 ("imageio", "imageio", "官方要求 >=2.37,<3.0"),
-                ("imageio-ffmpeg", "img-ffmpeg", "官方要求 >=0.6,<1.0"),
+                ("imageio-ffmpeg", "imageio-ffmpeg", "官方要求 >=0.6,<1.0"),
                 ("scipy", "scipy", "官方要求 >=1.14,<2.0"),
                 ("einops", "einops", "官方要求 >=0.8,<1.0"),
                 ("av", "av", "官方要求 >=16.0,<17.0"),
@@ -3593,9 +3950,9 @@ class MainWindow(QMainWindow):
                 ("ftfy", "ftfy", "官方要求 >=6.0,<7.0"),
                 ("pynvml", "pynvml", "官方要求 >=11.5,<14.0"),
                 ("pydantic", "pydantic", "官方要求 >=2.7,<3.0"),
-                ("python-multipart", "multipart", "FastAPI文件上传依赖"),
-                ("sageattention", "sage-attn", "Ampere+架构推荐安装"),
-                ("triton-windows", "triton", "Windows Triton后端"),
+                ("python-multipart", "python-multipart", "FastAPI文件上传依赖"),
+                ("sageattention", "sageattention", "Ampere+架构推荐安装"),
+                ("triton-windows", "triton-windows", "Windows Triton后端"),
             ]),
             ("app", "📁 应用组件", [
                 ("ltx", "LTX Desktop", "核心引擎，整合包内置"),
@@ -3623,26 +3980,30 @@ class MainWindow(QMainWindow):
                 cell.setSpacing(6)
 
                 name_lbl = QLabel(display_name)
-                name_lbl.setFixedWidth(62)
+                name_lbl.setFixedWidth(85)
                 name_lbl.setToolTip(tooltip_text)
                 name_lbl.setStyleSheet("font-size: 9px; color: #888888; background: transparent;")
                 cell.addWidget(name_lbl)
 
                 val_lbl = QLabel("未检测")
                 val_lbl.setStyleSheet("font-size: 9px; color: #42A5F5; background: transparent;")
-                val_lbl.setWordWrap(True)
+                val_lbl.setMaximumWidth(200)
+                val_lbl.setWordWrap(False)
+                val_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                val_lbl._full_text = ""
                 cell.addWidget(val_lbl, 1)
 
                 fix_btn = QPushButton("修复")
-                fix_btn.setFixedHeight(22)
+                fix_btn.setFixedSize(30, 16)
                 fix_btn.setStyleSheet("""
-                    QPushButton { background-color: #1565C0; border: 1px solid #1976D2; border-radius: 4px;
-                                  color: #FFFFFF; font-size: 10px; font-weight: bold;
-                                  padding: 2px 8px; }
-                    QPushButton:hover { background-color: #1976D2; border-color: #42A5F5; }
+                    QPushButton { background-color: #333333; border: 1px solid #444444; border-radius: 2px;
+                                  color: #AAAAAA; font-size: 8px;
+                                  padding: 0px; margin-left: 4px; }
+                    QPushButton:hover { background-color: #1565C0; border-color: #42A5F5; color: #FFFFFF; }
                     QPushButton:pressed { background-color: #0D47A1; }
                 """)
-                fix_btn.setVisible(False)
+                fix_btn.setFixedWidth(0)
+                fix_btn.setText("")
                 fix_btn.clicked.connect(lambda checked, k=key: self._fix_single_component(k))
                 cell.addWidget(fix_btn)
 
@@ -3845,31 +4206,41 @@ class MainWindow(QMainWindow):
         layout.setSpacing(8)
         layout.setContentsMargins(15, 15, 15, 15)
 
-        dir_container = QWidget()
-        dir_container.setStyleSheet("background: transparent;")
-        dir_vlayout = QVBoxLayout(dir_container)
-        dir_vlayout.setContentsMargins(0, 0, 0, 0)
-        dir_vlayout.setSpacing(4)
+        dir_row = QHBoxLayout()
+        dir_row.setSpacing(6)
 
-        self._model_dir_rows = []
-        self._model_dir_container = dir_vlayout
+        dir_label = QLabel("模型目录:")
+        dir_label.setStyleSheet("font-size: 12px; color: #AAAAAA; font-weight: bold; background: transparent;")
+        dir_row.addWidget(dir_label)
 
-        dirs_config = self.config.get("model_dirs", [])
-        if not dirs_config:
-            dirs_config = [{"path": self._models_dir, "label": "默认"}]
+        self._model_dir_combo = QComboBox()
+        self._model_dir_combo.setStyleSheet("""
+            QComboBox { background-color: #252525; color: #FFFFFF; border: 1px solid #333333; border-radius: 4px; padding: 6px 28px 6px 10px; font-size: 11px; min-width: 300px; }
+            QComboBox::drop-down { border: none; width: 20px; }
+            QComboBox::down-arrow { image: none; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 5px solid #888888; }
+            QComboBox QAbstractItemView { background-color: #252525; border: 1px solid #333333; selection-background-color: #C62828; }
+        """)
+        dir_row.addWidget(self._model_dir_combo, 1)
 
-        for i, d in enumerate(dirs_config):
-            row = self._create_model_dir_row(d.get("path", ""), d.get("label", ""), is_default=(i == 0 and d.get("label") == "默认"))
-            dir_vlayout.addLayout(row)
-
-        dir_vlayout.addStretch()
+        self._remove_dir_btn = QPushButton("✕ 删除")
+        self._remove_dir_btn.setFixedWidth(55)
+        self._remove_dir_btn.setStyleSheet("""
+            QPushButton { background-color: transparent; border: 1px solid #555555; border-radius: 4px; color: #888888; font-size: 10px; padding: 4px 6px; }
+            QPushButton:hover { background-color: #C62828; border-color: #E53935; color: #FFFFFF; }
+            QPushButton:disabled { color: #444444; border-color: #333333; }
+        """)
+        self._remove_dir_btn.setToolTip("删除选中的自定义目录")
+        self._remove_dir_btn.clicked.connect(self._remove_selected_model_dir)
+        dir_row.addWidget(self._remove_dir_btn)
 
         add_dir_btn = QPushButton("+ 添加目录")
-        add_dir_btn.setStyleSheet("QPushButton { background-color: #C62828; color: #FFFFFF; border: 1px solid #E53935; border-radius: 4px; padding: 4px 10px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: #E53935; }")
+        add_dir_btn.setStyleSheet("QPushButton { background-color: #C62828; color: #FFFFFF; border: 1px solid #E53935; border-radius: 4px; padding: 4px 12px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: #E53935; }")
         add_dir_btn.clicked.connect(self._add_model_dir)
+        dir_row.addWidget(add_dir_btn)
 
         source_label = QLabel("下载源:")
         source_label.setStyleSheet("font-size: 11px; color: #AAAAAA; background: transparent; font-weight: bold;")
+        dir_row.addWidget(source_label)
 
         self.model_source_combo = QComboBox()
         self.model_source_combo.setStyleSheet("""
@@ -3881,49 +4252,71 @@ class MainWindow(QMainWindow):
         self.model_source_combo.addItem("HF-Mirror (国内)", "hf_mirror")
         self.model_source_combo.addItem("HuggingFace (官方)", "hf_official")
         self.model_source_combo.addItem("ModelScope (国内)", "modelscope")
+        dir_row.addWidget(self.model_source_combo)
 
-        dir_ctrl_row = QHBoxLayout()
-        dir_ctrl_row.setSpacing(8)
-        dir_ctrl_row.addWidget(add_dir_btn)
-        dir_ctrl_row.addStretch()
-        dir_ctrl_row.addWidget(source_label)
-        dir_ctrl_row.addWidget(self.model_source_combo)
+        layout.addLayout(dir_row)
 
-        layout.addWidget(dir_container)
-        layout.addLayout(dir_ctrl_row)
+        self._model_dir_combo.currentIndexChanged.connect(lambda: self._update_remove_dir_btn_state())
+        self._populate_model_dir_combo()
 
         self._model_table = QTableWidget()
-        self._model_table.setColumnCount(7)
-        self._model_table.setHorizontalHeaderLabels(["☑", "模型名称", "分类", "标签", "大小", "状态", "操作"])
+        self._model_table.setColumnCount(8)
+        self._model_table.setHorizontalHeaderLabels(["", "模型名称", "描述", "分类", "标签", "大小", "状态", "操作"])
         self._model_table.setStyleSheet("""
             QTableWidget { background-color: #111113; border: 1px solid #333333; border-radius: 6px; gridline-color: #222222; font-size: 12px; color: #DDDDDD; }
-            QTableWidget::item { padding: 4px 8px; border-bottom: 1px solid #222222; }
-            QTableWidget::item:selected { background-color: #C62828; }
+            QTableWidget::item { padding: 4px 6px; border-bottom: 1px solid #222222; border: none; outline: none; }
+            QTableWidget::item:selected { background-color: transparent; color: inherit; border: none; outline: none; }
+            QTableWidget::item:focus { background-color: transparent; outline: none; border: none; }
             QHeaderView::section { background-color: #1A1A1A; color: #AAAAAA; border: none; border-bottom: 2px solid #333333; border-right: 1px solid #222222; padding: 6px 8px; font-size: 11px; font-weight: bold; }
+            QHeaderView::section:hover { background-color: #252525; color: #FFFFFF; }
             QCheckBox { spacing: 4px; }
             QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #555555; border-radius: 3px; background-color: #252525; }
             QCheckBox::indicator:checked { background-color: #C62828; border-color: #E53935; }
+            QCheckBox::indicator:hover { border-color: #888888; }
         """)
-        self._model_table.horizontalHeader().setStretchLastSection(True)
+        self._model_table.horizontalHeader().setSectionsMovable(False)
+        self._model_table.horizontalHeader().setStretchLastSection(False)
         self._model_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self._model_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self._model_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self._model_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        self._model_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self._model_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        self._model_table.setColumnWidth(0, 36)
-        self._model_table.setColumnWidth(2, 100)
-        self._model_table.setColumnWidth(3, 100)
-        self._model_table.setColumnWidth(4, 80)
-        self._model_table.setColumnWidth(5, 80)
+        self._model_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self._model_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self._model_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
+        self._model_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
+        self._model_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
+        self._model_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Interactive)
+        self._model_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+        self._model_table.setColumnWidth(0, 40)
+        self._model_table.setColumnWidth(1, 300)
+        self._model_table.setColumnWidth(3, 80)
+        self._model_table.setColumnWidth(4, 50)
+        self._model_table.setColumnWidth(5, 65)
+        self._model_table.setColumnWidth(6, 90)
+        self._model_table.setColumnWidth(7, 140)
         self._model_table.verticalHeader().setVisible(False)
         self._model_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._model_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._model_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self._model_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._model_sort_col = -1
+        self._model_sort_asc = True
+        self._model_table.horizontalHeader().sectionClicked.connect(self._on_model_header_clicked)
+        self._model_table.setMouseTracking(True)
+        self._model_table.cellEntered.connect(self._on_model_row_hover)
+        self._model_table.installEventFilter(self)
+        self._hover_row = -1
+
+        self._select_all_cb = QCheckBox("全选")
+        self._select_all_cb.setStyleSheet("QCheckBox { color: #AAAAAA; font-size: 11px; spacing: 4px; background: transparent; } QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #555555; border-radius: 3px; background-color: #252525; } QCheckBox::indicator:checked { background-color: #C62828; border-color: #E53935; }")
+        self._select_all_cb.stateChanged.connect(self._toggle_select_all_models)
+
+        self._model_table.setHorizontalHeaderItem(0, QTableWidgetItem(""))
+        self._model_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+
         layout.addWidget(self._model_table, 1)
 
         self._populate_model_table()
 
         btn_row = QHBoxLayout()
+        btn_row.addWidget(self._select_all_cb)
+        btn_row.addSpacing(10)
         self._batch_download_btn = QPushButton("▼ 批量下载")
         self._batch_download_btn.setStyleSheet("""
             QPushButton { background-color: #1B5E20; color: #FFFFFF; border: 1px solid #2E7D32; border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: bold; }
@@ -3931,6 +4324,14 @@ class MainWindow(QMainWindow):
         """)
         self._batch_download_btn.clicked.connect(self._batch_download_models)
         btn_row.addWidget(self._batch_download_btn)
+
+        self._batch_edit_btn = QPushButton("✎ 批量编辑")
+        self._batch_edit_btn.setStyleSheet("""
+            QPushButton { background-color: #1B5E20; color: #FFFFFF; border: 1px solid #2E7D32; border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: bold; }
+            QPushButton:hover { background-color: #2E7D32; }
+        """)
+        self._batch_edit_btn.clicked.connect(self._batch_edit_models)
+        btn_row.addWidget(self._batch_edit_btn)
 
         check_btn = QPushButton("◆ 检测完整性")
         check_btn.setStyleSheet("""
@@ -3940,15 +4341,10 @@ class MainWindow(QMainWindow):
         check_btn.clicked.connect(self._check_model_integrity)
         btn_row.addWidget(check_btn)
 
-        refresh_btn = QPushButton("↻ 刷新状态")
-        refresh_btn.setStyleSheet("QPushButton { background-color: #333333; color: #AAAAAA; border: 1px solid #444444; border-radius: 8px; padding: 10px 20px; font-size: 13px; } QPushButton:hover { background-color: #444444; color: #FFFFFF; }")
-        refresh_btn.clicked.connect(self._refresh_model_status)
+        refresh_btn = QPushButton("↻ 同步更新")
+        refresh_btn.setStyleSheet("QPushButton { background-color: #1565C0; color: #FFFFFF; border: 1px solid #1976D2; border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: bold; } QPushButton:hover { background-color: #1976D2; }")
+        refresh_btn.clicked.connect(self._sync_model_updates)
         btn_row.addWidget(refresh_btn)
-
-        fetch_update_btn = QPushButton("↑ 获取更新")
-        fetch_update_btn.setStyleSheet("QPushButton { background-color: #1565C0; color: #FFFFFF; border: 1px solid #1976D2; border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: bold; } QPushButton:hover { background-color: #1976D2; }")
-        fetch_update_btn.clicked.connect(self._fetch_model_updates)
-        btn_row.addWidget(fetch_update_btn)
 
         layout.addLayout(btn_row)
         self.page_stack.addWidget(page)
@@ -3967,45 +4363,143 @@ class MainWindow(QMainWindow):
 
     def _infer_tag(self, dir_path):
         name = os.path.basename(dir_path).lower()
-        tag_map = {"风格": "风格", "人物": "人物", "style": "风格", "character": "人物", "lora": "LoRA", "model": "模型", "base": "基础"}
+        has_safetensors = any(f.endswith('.safetensors') for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f)))
+        if has_safetensors:
+            safetensors_files = [f for f in os.listdir(dir_path) if f.endswith('.safetensors')]
+            if safetensors_files:
+                first_file = safetensors_files[0].lower()
+                if 'lora' in first_file:
+                    return "LoRA"
+                if 'upscaler' in first_file:
+                    return "超分辨率"
+                if 'control' in first_file or 'ic-lora' in first_file:
+                    return "Control"
+        tag_map = {
+            "lora": "LoRA", "control": "Control", "upscaler": "超分辨率",
+            "text-encoder": "文本编码器", "text_encoder": "文本编码器",
+            "vae": "VAE", "unet": "UNet", "style": "风格LoRA",
+            "character": "人物LoRA", "人物": "人物LoRA", "风格": "风格LoRA",
+        }
         for key, tag in tag_map.items():
             if key in name:
                 return tag
-        return ""
+        return name
 
     def _populate_model_table(self):
-        self._model_table.setRowCount(0)
         self._model_checkboxes = {}
-        row = 0
-        for model_id, info in LTX_MODELS.items():
-            self._model_table.insertRow(row)
-            cb = QCheckBox()
-            cb_widget = QWidget()
-            cb_layout = QHBoxLayout(cb_widget)
-            cb_layout.addWidget(cb)
-            cb_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            cb_layout.setContentsMargins(0, 0, 0, 0)
-            self._model_table.setCellWidget(row, 0, cb_widget)
-            self._model_checkboxes[model_id] = cb
+        self._model_rows = []
+        try:
+            import httpx
+            with httpx.Client(timeout=httpx.Timeout(15.0)) as client:
+                resp = client.get(f"http://127.0.0.1:{self._backend_port}/api/models/registry")
+                if resp.status_code != 200:
+                    self._populate_model_table_fallback()
+                    return
+                data = resp.json()
+        except Exception:
+            self._populate_model_table_fallback()
+            return
 
-            name_item = QTableWidgetItem(info.get("file", model_id))
-            name_item.setToolTip(info.get("desc", ""))
-            self._model_table.setItem(row, 1, name_item)
+        registry_models = data.get("models", [])
+        local_dirs = data.get("local_dirs", [])
+
+        local_files_map = {}
+        for ld in local_dirs:
+            for m in ld.get("models", []):
+                p = m.get("path", "")
+                if p not in local_files_map:
+                    local_files_map[p] = m
+
+        seen_filenames = set()
+
+        for rm in registry_models:
+            fname = rm.get("filename", "")
+            if fname in seen_filenames:
+                continue
+            seen_filenames.add(fname)
+
+            category = "基础模型" if "distilled" in fname or "dev" in fname else \
+                       "超分辨率" if "upscaler" in fname else \
+                       "文本编码器" if "gemma" in fname or "text-encoder" in rm.get("model_id", "") else \
+                       "控制模型" if "ic-lora" in fname else "其他"
+
+            tag_text = "必需" if rm.get("tags") and "recommended" in rm.get("tags", []) else "可选"
+            size_gb = rm.get("size_gb", 0)
+            downloaded = rm.get("downloaded", False)
+
+            self._model_rows.append({
+                "name": rm.get("name", fname),
+                "description": rm.get("description", ""),
+                "category": category,
+                "tag": tag_text,
+                "size_gb": size_gb,
+                "status": "已下载" if downloaded else "未下载",
+                "status_icon": "√" if downloaded else "×",
+                "status_color": "#66BB6A" if downloaded else "#EF5350",
+                "model_id": rm.get("model_id", ""),
+                "local_path": rm.get("local_path", ""),
+                "downloaded": downloaded,
+                "source": "registry",
+                "repo_id": rm.get("repo_id", ""),
+                "filename": rm.get("filename", ""),
+                "quantization": rm.get("quantization", ""),
+                "variant": rm.get("variant", ""),
+                "is_folder": rm.get("is_folder", False),
+                "modelscope_id": rm.get("modelscope_id", ""),
+            })
+
+        for path_str, lm in local_files_map.items():
+            fname = lm.get("name", "")
+            if fname in seen_filenames:
+                continue
+            seen_filenames.add(fname)
+
+            model_type = lm.get("model_type", "checkpoint")
+            cat_text = "LoRA" if model_type == "lora" else "基础模型"
+            size_bytes = lm.get("size_bytes", 0)
+            size_gb = size_bytes / 1024 / 1024 / 1024 if size_bytes else 0
+            desc = "LoRA风格模型" if model_type == "lora" else "本地模型文件"
+
+            self._model_rows.append({
+                "name": fname,
+                "description": desc,
+                "category": cat_text,
+                "tag": "本地",
+                "size_gb": size_gb,
+                "status": "本地",
+                "status_icon": "√",
+                "status_color": "#66BB6A",
+                "model_id": "",
+                "local_path": path_str,
+                "downloaded": True,
+                "source": "local",
+            })
+
+        meta = self._load_model_meta()
+        for r in self._model_rows:
+            key = r.get("model_id") or r.get("name", "")
+            if key in meta:
+                m = meta[key]
+                if m.get("description"):
+                    r["description"] = m["description"]
+                if m.get("tag"):
+                    r["tag"] = m["tag"]
+
+        self._apply_model_sort_and_render()
+
+    def _populate_model_table_fallback(self):
+        self._model_checkboxes = {}
+        self._model_rows = []
+        seen_filenames = set()
+        for model_id, info in LTX_MODELS.items():
+            fname = info.get("file", "")
+            if fname in seen_filenames:
+                continue
+            seen_filenames.add(fname)
 
             category = self._classify_model(model_id, info)
-            cat_item = QTableWidgetItem(category)
-            self._model_table.setItem(row, 2, cat_item)
-
             tag = "必需" if info.get("required") else "可选"
-            tag_item = QTableWidgetItem(tag)
-            if info.get("required"):
-                tag_item.setForeground(QColor("#E53935"))
-            self._model_table.setItem(row, 3, tag_item)
-
             size_gb = info["size_bytes"] / 1024 / 1024 / 1024
-            size_item = QTableWidgetItem(f"{size_gb:.1f} GB")
-            size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self._model_table.setItem(row, 4, size_item)
 
             model_path = os.path.join(self._models_dir, info["file"])
             exists = os.path.exists(model_path)
@@ -4020,120 +4514,492 @@ class MainWindow(QMainWindow):
                 is_complete = exists and os.path.getsize(model_path) > expected_bytes * 0.9 if exists else False
 
             if is_complete:
-                status_item = QTableWidgetItem("√ 完整")
-                status_item.setForeground(QColor("#66BB6A"))
+                status = "完整"
+                status_icon = "√"
+                status_color = "#66BB6A"
             elif exists:
-                status_item = QTableWidgetItem("△ 不完整")
-                status_item.setForeground(QColor("#FFA726"))
+                status = "不完整"
+                status_icon = "△"
+                status_color = "#FFA726"
             else:
-                status_item = QTableWidgetItem("× 未下载")
-                status_item.setForeground(QColor("#EF5350"))
-            self._model_table.setItem(row, 5, status_item)
+                status = "未下载"
+                status_icon = "×"
+                status_color = "#EF5350"
+
+            self._model_rows.append({
+                "name": info.get("file", model_id),
+                "description": info.get("desc", ""),
+                "category": category,
+                "tag": tag,
+                "size_gb": size_gb,
+                "status": status,
+                "status_icon": status_icon,
+                "status_color": status_color,
+                "model_id": model_id,
+                "local_path": model_path if exists else "",
+                "downloaded": is_complete,
+                "source": "fallback",
+                "is_complete": is_complete,
+                "exists": exists,
+            })
+
+        scan_suffixes = {".safetensors", ".ckpt", ".pt", ".bin", ".pth"}
+        hf_shard_pattern = __import__('re').compile(r'^model-\d{5}-of-\d{5}$')
+        scan_dirs = [self._models_dir]
+        dirs_config = self.config.get("model_dirs", [])
+        for d in dirs_config:
+            p = d.get("path", "")
+            if p and os.path.isdir(p) and p not in scan_dirs:
+                scan_dirs.append(p)
+
+        for scan_dir in scan_dirs:
+            if not os.path.isdir(scan_dir):
+                continue
+            for dirpath, _dirnames, filenames in os.walk(scan_dir):
+                for fn in filenames:
+                    if Path(fn).suffix.lower() not in scan_suffixes:
+                        continue
+                    if hf_shard_pattern.match(Path(fn).stem):
+                        continue
+                    if fn in seen_filenames:
+                        continue
+                    seen_filenames.add(fn)
+                    full_path = os.path.join(dirpath, fn)
+                    if not os.path.isfile(full_path):
+                        continue
+                    try:
+                        fsize = os.path.getsize(full_path)
+                    except OSError:
+                        fsize = 0
+                    is_lora = "lora" in fn.lower() or "lora" in dirpath.lower()
+                    cat_text = "LoRA" if is_lora else "基础模型"
+                    size_gb = fsize / 1024 / 1024 / 1024 if fsize else 0
+                    desc = "LoRA风格模型" if is_lora else "本地模型文件"
+
+                    self._model_rows.append({
+                        "name": fn,
+                        "description": desc,
+                        "category": cat_text,
+                        "tag": "本地",
+                        "size_gb": size_gb,
+                        "status": "本地",
+                        "status_icon": "√",
+                        "status_color": "#66BB6A",
+                        "model_id": "",
+                        "local_path": full_path,
+                        "downloaded": True,
+                        "source": "local_scan",
+                    })
+
+        self._apply_model_sort_and_render()
+
+    def _toggle_select_all_models(self, state):
+        checked = state == Qt.CheckState.Checked.value if isinstance(state, int) else bool(state)
+        if hasattr(self, '_model_checkboxes'):
+            for _, cb in self._model_checkboxes.items():
+                cb.setChecked(checked)
+
+    def _on_model_header_clicked(self, col):
+        if col == 0 or col == 7:
+            return
+        if self._model_sort_col == col:
+            self._model_sort_asc = not self._model_sort_asc
+        else:
+            self._model_sort_col = col
+            self._model_sort_asc = True
+        self._apply_model_sort_and_render()
+
+    def _apply_model_sort_and_render(self):
+        if self._model_sort_col >= 0 and hasattr(self, '_model_rows') and self._model_rows:
+            col = self._model_sort_col
+            asc = self._model_sort_asc
+
+            def sort_key(row):
+                if col == 1:
+                    return row.get("name", "").lower()
+                elif col == 2:
+                    return row.get("description", "").lower()
+                elif col == 3:
+                    return row.get("category", "").lower()
+                elif col == 4:
+                    tag_order = {"必需": 0, "可选": 1, "本地": 2}
+                    return tag_order.get(row.get("tag", ""), 9)
+                elif col == 5:
+                    return row.get("size_gb", 0)
+                elif col == 6:
+                    status_order = {"已下载": 0, "完整": 0, "本地": 0, "不完整": 1, "未下载": 2}
+                    return status_order.get(row.get("status", ""), 9)
+                return ""
+
+            self._model_rows.sort(key=sort_key, reverse=not asc)
+
+        self._render_model_table()
+
+    def _render_model_table(self):
+        self._stop_download_progress_timer()
+        self._model_table.setRowCount(0)
+        self._model_checkboxes = {}
+        if not hasattr(self, '_model_rows'):
+            return
+
+        base_labels = ["", "模型名称", "描述", "分类", "标签", "大小", "状态", "操作"]
+        if 1 <= self._model_sort_col <= 6:
+            arrow = " ▲" if self._model_sort_asc else " ▼"
+            base_labels[self._model_sort_col] = base_labels[self._model_sort_col] + arrow
+        self._model_table.setHorizontalHeaderLabels(base_labels)
+
+        for row, r in enumerate(self._model_rows):
+            self._model_table.insertRow(row)
+
+            cb = QCheckBox()
+            cb_widget = QWidget()
+            cb_layout = QHBoxLayout(cb_widget)
+            cb_layout.addWidget(cb)
+            cb_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            cb_layout.setContentsMargins(0, 0, 0, 0)
+            self._model_table.setCellWidget(row, 0, cb_widget)
+            mid = r.get("model_id", "")
+            self._model_checkboxes[row] = cb
+
+            name_item = QTableWidgetItem(r.get("name", ""))
+            self._model_table.setItem(row, 1, name_item)
+
+            desc_text = r.get("description", "")
+            desc_item = QTableWidgetItem(desc_text)
+            desc_item.setForeground(QColor("#999999"))
+            if desc_text:
+                desc_item.setToolTip(desc_text)
+            self._model_table.setItem(row, 2, desc_item)
+
+            self._model_table.setItem(row, 3, QTableWidgetItem(r.get("category", "")))
+
+            tag_item = QTableWidgetItem(r.get("tag", ""))
+            if r.get("tag") == "必需":
+                tag_item.setForeground(QColor("#E53935"))
+            self._model_table.setItem(row, 4, tag_item)
+
+            size_gb = r.get("size_gb", 0)
+            self._model_table.setItem(row, 5, QTableWidgetItem(f"{size_gb:.1f} GB" if size_gb > 0 else ""))
+
+            status_text = f"{r.get('status_icon', '')} {r.get('status', '')}"
+            status_item = QTableWidgetItem(status_text)
+            status_item.setForeground(QColor(r.get("status_color", "#DDDDDD")))
+            self._model_table.setItem(row, 6, status_item)
 
             ops_widget = QWidget()
             ops_layout = QHBoxLayout(ops_widget)
             ops_layout.setContentsMargins(4, 2, 4, 2)
             ops_layout.setSpacing(4)
 
-            dl_btn = QPushButton("▼ 下载" if not is_complete else "√ 已有")
-            dl_btn.setEnabled(not is_complete)
-            if is_complete:
-                dl_btn.setStyleSheet("QPushButton { background-color: #2E7D32; color: white; border: none; border-radius: 3px; padding: 3px 8px; font-size: 10px; }")
-            else:
-                dl_btn.setStyleSheet("QPushButton { background-color: #C62828; color: white; border: none; border-radius: 3px; padding: 3px 8px; font-size: 10px; } QPushButton:hover { background-color: #E53935; }")
-            dl_btn.clicked.connect(lambda checked, mid=model_id: self._download_model(mid))
-            ops_layout.addWidget(dl_btn)
+            downloaded = r.get("downloaded", False)
+            source = r.get("source", "")
 
-            if exists:
-                rm_btn = QPushButton("×")
-                rm_btn.setStyleSheet("QPushButton { background-color: #B71C1C; color: white; border: none; border-radius: 3px; padding: 3px 6px; font-size: 10px; } QPushButton:hover { background-color: #E53935; }")
-                rm_btn.clicked.connect(lambda checked, mid=model_id: self._uninstall_model(mid))
+            if source in ("registry", "fallback"):
+                if not downloaded:
+                    dl_btn = QPushButton("▼ 下载")
+                    dl_btn.setStyleSheet("QPushButton { background-color: #C62828; color: white; border: none; border-radius: 3px; padding: 3px 8px; font-size: 10px; } QPushButton:hover { background-color: #E53935; } QPushButton:pressed { background-color: #B71C1C; }")
+                    dl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                    dl_btn.clicked.connect(lambda checked, m=mid: self._download_model(m))
+                    ops_layout.addWidget(dl_btn)
+
+                if downloaded and r.get("local_path"):
+                    rm_btn = QPushButton("× 删除")
+                    rm_btn.setStyleSheet("QPushButton { background-color: #1565C0; color: white; border: none; border-radius: 3px; padding: 3px 8px; font-size: 10px; } QPushButton:hover { background-color: #1976D2; } QPushButton:pressed { background-color: #0D47A1; }")
+                    rm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                    lp = r.get("local_path", "")
+                    rm_btn.clicked.connect(lambda checked, p=lp: self._delete_local_model_file(p))
+                    ops_layout.addWidget(rm_btn)
+            else:
+                rm_btn = QPushButton("× 删除")
+                rm_btn.setStyleSheet("QPushButton { background-color: #1565C0; color: white; border: none; border-radius: 3px; padding: 3px 8px; font-size: 10px; } QPushButton:hover { background-color: #1976D2; } QPushButton:pressed { background-color: #0D47A1; }")
+                rm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                lp = r.get("local_path", "")
+                rm_btn.clicked.connect(lambda checked, p=lp: self._delete_local_model_file(p))
                 ops_layout.addWidget(rm_btn)
 
             ops_layout.addStretch()
-            self._model_table.setCellWidget(row, 6, ops_widget)
-            row += 1
+            self._model_table.setCellWidget(row, 7, ops_widget)
 
-        self._model_table.resizeRowsToContents()
+        for r in range(self._model_table.rowCount()):
+            self._model_table.setRowHeight(r, 32)
 
-    def _create_model_dir_row(self, path, label, is_default=False):
-        row = QHBoxLayout()
-        row.setSpacing(6)
+        if hasattr(self, '_download_procs') and self._download_procs:
+            self._start_download_progress_timer()
 
-        label_lbl = QLabel(f"[{label}]" if label else "[目录]")
-        label_lbl.setFixedWidth(60)
-        label_lbl.setStyleSheet("font-size: 10px; color: #FF9800; background: transparent; font-weight: bold;")
-        row.addWidget(label_lbl)
+    def _on_model_row_hover(self, row, col):
+        if row == self._hover_row:
+            return
+        old = self._hover_row
+        self._hover_row = row
+        hover_bg = QColor("#2A2A2E")
+        clear_bg = QColor("transparent")
+        for c in range(self._model_table.columnCount()):
+            if old >= 0:
+                item = self._model_table.item(old, c)
+                if item:
+                    item.setBackground(clear_bg)
+                w = self._model_table.cellWidget(old, c)
+                if w:
+                    w.setAutoFillBackground(False)
+            if row >= 0:
+                item = self._model_table.item(row, c)
+                if item:
+                    item.setBackground(hover_bg)
+                w = self._model_table.cellWidget(row, c)
+                if w:
+                    w.setAutoFillBackground(True)
+                    pal = w.palette()
+                    pal.setColor(w.backgroundRole(), hover_bg)
+                    w.setPalette(pal)
 
-        path_lbl = QLabel(path or "未设置")
-        path_lbl.setStyleSheet("font-size: 10px; color: #CCCCCC; background: transparent;")
-        path_lbl.setWordWrap(False)
-        row.addWidget(path_lbl, 1)
+    def eventFilter(self, obj, event):
+        if obj is getattr(self, '_model_table', None):
+            if event.type() == event.Type.Leave:
+                if self._hover_row >= 0:
+                    old = self._hover_row
+                    self._hover_row = -1
+                    for c in range(self._model_table.columnCount()):
+                        item = self._model_table.item(old, c)
+                        if item:
+                            item.setBackground(QColor("transparent"))
+                        w = self._model_table.cellWidget(old, c)
+                        if w:
+                            w.setAutoFillBackground(False)
+        return super().eventFilter(obj, event)
 
-        if not is_default:
-            rm_btn = QPushButton("✕")
-            rm_btn.setFixedSize(20, 20)
-            rm_btn.setToolTip("移除此目录")
-            rm_btn.setStyleSheet("""
-                QPushButton { background-color: transparent; border: 1px solid #555555; border-radius: 10px; color: #888888; font-size: 9px; }
-                QPushButton:hover { background-color: #C62828; border-color: #E53935; color: #FFFFFF; }
-            """)
-            rm_btn.clicked.connect(lambda checked, p=path: self._remove_model_dir_by_path(p))
-            row.addWidget(rm_btn)
-        else:
-            default_tag = QLabel("默认")
-            default_tag.setFixedSize(36, 20)
-            default_tag.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            default_tag.setStyleSheet("font-size: 8px; color: #66BB6A; background: rgba(102,187,106,30); border: 1px solid rgba(102,187,106,80); border-radius: 10px;")
-            row.addWidget(default_tag)
+    def _delete_local_model_file(self, file_path):
+        if not file_path or not os.path.exists(file_path):
+            self._log(f"⚠ 文件不存在: {file_path}", "warn")
+            return
 
-        return row
+        is_dir = os.path.isdir(file_path)
+        size_str = ""
+        try:
+            if is_dir:
+                total = 0
+                for dp, dn, fns in os.walk(file_path):
+                    for fn in fns:
+                        try:
+                            total += os.path.getsize(os.path.join(dp, fn))
+                        except OSError:
+                            pass
+                size_str = f" ({total/1024/1024/1024:.1f}GB)"
+            else:
+                size_str = f" ({os.path.getsize(file_path)/1024/1024/1024:.1f}GB)"
+        except OSError:
+            pass
 
-    def _rebuild_model_dir_rows(self):
-        while self._model_dir_container.count():
-            item = self._model_dir_container.takeAt(0)
-            if item.layout():
-                while item.layout().count():
-                    child = item.layout().takeAt(0)
-                    if child.widget():
-                        child.widget().deleteLater()
-            elif item.widget():
-                item.widget().deleteLater()
-        self._model_dir_rows.clear()
+        name = os.path.basename(file_path)
+        msg = QMessageBox(self)
+        msg.setWindowTitle("删除模型文件")
+        msg.setText(f"确定要删除此模型文件吗？\n\n{name}{size_str}\n\n此操作不可恢复！")
+        msg.setIcon(QMessageBox.Icon.Question)
+        btn_yes = msg.addButton("是，删除", QMessageBox.ButtonRole.YesRole)
+        btn_no = msg.addButton("否，取消", QMessageBox.ButtonRole.NoRole)
+        msg.setDefaultButton(btn_no)
+        msg.exec()
+        if msg.clickedButton() != btn_yes:
+            return
 
+        try:
+            if is_dir:
+                shutil.rmtree(file_path, ignore_errors=True)
+            else:
+                os.remove(file_path)
+            self._log(f"√ 已删除: {name}", "ok")
+            self._refresh_model_status()
+        except Exception as e:
+            self._log(f"⚠ 删除失败: {e}", "warn")
+
+    def _get_meta_file(self):
+        return os.path.join(self._models_dir, ".models_metadata.json")
+
+    def _load_model_meta(self):
+        try:
+            path = self._get_meta_file()
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return {}
+
+    def _save_model_meta(self, data):
+        try:
+            path = self._get_meta_file()
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _batch_edit_models(self):
+        selected = []
+        for row_idx, cb in self._model_checkboxes.items():
+            if cb.isChecked() and 0 <= row_idx < len(self._model_rows):
+                selected.append(self._model_rows[row_idx])
+
+        if not selected:
+            QMessageBox.information(self, "批量编辑", "请先勾选要编辑的模型")
+            return
+
+        meta = self._load_model_meta()
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("批量编辑模型信息")
+        dlg.resize(700, 500)
+        dlg.setStyleSheet("QDialog { background-color: #1A1A1A; } QLabel { color: #DDDDDD; font-size: 12px; }")
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        hint = QLabel("修改描述和标签，点击保存后生效。留空保留原值。")
+        hint.setStyleSheet("color: #888888; font-size: 11px; margin-bottom: 8px;")
+        layout.addWidget(hint)
+
+        table = QTableWidget()
+        table.setColumnCount(3)
+        table.setHorizontalHeaderLabels(["模型名称", "描述", "标签"])
+        table.setRowCount(len(selected))
+        table.setStyleSheet("""
+            QTableWidget { background-color: #111113; border: 1px solid #333333; color: #DDDDDD; font-size: 12px; }
+            QTableWidget::item { padding: 4px 6px; }
+            QHeaderView::section { background-color: #1A1A1A; color: #AAAAAA; border-bottom: 2px solid #333333; padding: 6px 8px; font-size: 11px; }
+        """)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        table.setColumnWidth(0, 200)
+        table.setColumnWidth(2, 100)
+
+        for i, r in enumerate(selected):
+            key = r.get("model_id") or r.get("name", "")
+            name_item = QTableWidgetItem(r.get("name", key))
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(i, 0, name_item)
+
+            cur_meta = meta.get(key, {})
+            desc_item = QTableWidgetItem(cur_meta.get("description", r.get("description", "")))
+            table.setItem(i, 1, desc_item)
+
+            tag_item = QTableWidgetItem(cur_meta.get("tag", r.get("tag", "")))
+            table.setItem(i, 2, tag_item)
+
+            table.setRowHeight(i, 30)
+
+        layout.addWidget(table)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        cancel_btn = QPushButton("取消")
+        cancel_btn.setStyleSheet("QPushButton { background-color: #333333; color: #DDDDDD; border: 1px solid #555555; border-radius: 6px; padding: 8px 20px; font-size: 13px; } QPushButton:hover { background-color: #444444; }")
+        cancel_btn.clicked.connect(dlg.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        save_btn = QPushButton("保存")
+        save_btn.setStyleSheet("QPushButton { background-color: #C62828; color: white; border: none; border-radius: 6px; padding: 8px 20px; font-size: 13px; font-weight: bold; } QPushButton:hover { background-color: #E53935; }")
+        save_btn.clicked.connect(dlg.accept)
+        btn_layout.addWidget(save_btn)
+
+        layout.addLayout(btn_layout)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        changed = 0
+        for i, r in enumerate(selected):
+            key = r.get("model_id") or r.get("name", "")
+            if not key:
+                continue
+            desc_item = table.item(i, 1)
+            tag_item = table.item(i, 2)
+            new_desc = desc_item.text().strip() if desc_item else ""
+            new_tag = tag_item.text().strip() if tag_item else ""
+
+            if new_desc or new_tag:
+                meta[key] = {"description": new_desc, "tag": new_tag}
+                changed += 1
+            elif key in meta:
+                del meta[key]
+                changed += 1
+
+        if changed:
+            self._save_model_meta(meta)
+            self._log(f"✎ 已更新 {changed} 个模型的描述/标签", "ok")
+            self._refresh_model_status()
+
+    def _populate_model_dir_combo(self):
+        if not hasattr(self, '_model_dir_combo'):
+            return
+        self._model_dir_combo.blockSignals(True)
+        self._model_dir_combo.clear()
         dirs_config = self.config.get("model_dirs", [])
         if not dirs_config:
             dirs_config = [{"path": self._models_dir, "label": "默认"}]
-
         for i, d in enumerate(dirs_config):
-            row = self._create_model_dir_row(d.get("path", ""), d.get("label", ""), is_default=(i == 0 and d.get("label") == "默认"))
-            self._model_dir_container.addLayout(row)
+            path = d.get("path", "")
+            label = d.get("label", "")
+            is_default = (i == 0 and label == "默认")
+            if is_default:
+                display = f"[系统默认] {path}"
+            else:
+                display = f"[{label}] {path}"
+            self._model_dir_combo.addItem(display)
+        self._model_dir_combo.blockSignals(False)
+        if self._model_dir_combo.count() > 0:
+            self._model_dir_combo.setCurrentIndex(0)
+        self._update_remove_dir_btn_state()
 
-        self._model_dir_container.addStretch()
-
-    def _load_model_dirs(self):
-        self._rebuild_model_dir_rows()
+    def _update_remove_dir_btn_state(self):
+        if not hasattr(self, '_remove_dir_btn') or not hasattr(self, '_model_dir_combo'):
+            return
+        idx = self._model_dir_combo.currentIndex()
+        dirs_config = self.config.get("model_dirs", [])
+        if not dirs_config:
+            dirs_config = [{"path": self._models_dir, "label": "默认"}]
+        is_default = (idx == 0 and dirs_config and dirs_config[0].get("label") == "默认")
+        self._remove_dir_btn.setEnabled(not is_default)
+        self._remove_dir_btn.setToolTip("系统默认目录不可删除" if is_default else "删除选中的自定义目录")
 
     def _save_model_dirs(self, dirs_config):
         self.config.set("model_dirs", dirs_config)
         self.config.save()
+
+    def _remove_selected_model_dir(self):
+        if not hasattr(self, '_model_dir_combo'):
+            return
+        idx = self._model_dir_combo.currentIndex()
+        if idx < 0:
+            return
+        dirs_config = self.config.get("model_dirs", [])
+        if not dirs_config:
+            return
+        if idx == 0 and dirs_config[0].get("label") == "默认":
+            self._log("⚠ 系统默认目录不可移除", "warn")
+            return
+        removed = dirs_config.pop(idx)
+        self._save_model_dirs(dirs_config)
+        self._populate_model_dir_combo()
+        self._notify_backend_dirs_changed()
+        self._refresh_model_status()
+        self._log(f"√ 已移除目录: {removed.get('path', '')}", "ok")
 
     def _add_model_dir(self):
         dir_path = QFileDialog.getExistingDirectory(self, "选择模型目录")
         if not dir_path:
             return
         dir_name = os.path.basename(dir_path)
-        tag = self._infer_tag(dir_path)
-        label, ok = QInputDialog.getText(self, "目录标签", f"为该目录设置标签（如：风格LoRA、人物LoRA）:", text=tag or dir_name)
-        if not ok or not label:
-            label = dir_name
+        label = self._infer_tag(dir_path) or dir_name
         dirs_config = self.config.get("model_dirs", [])
         if not dirs_config:
             dirs_config = [{"path": self._models_dir, "label": "默认"}]
         dirs_config.append({"path": dir_path, "label": label})
         self._save_model_dirs(dirs_config)
-        self._rebuild_model_dir_rows()
+        self._populate_model_dir_combo()
+        self._notify_backend_dirs_changed()
         self._refresh_model_status()
+        self._log(f"√ 已添加目录 [{label}] {dir_path}", "ok")
 
     def _remove_model_dir_by_path(self, path):
         dirs_config = self.config.get("model_dirs", [])
@@ -4143,21 +5009,61 @@ class MainWindow(QMainWindow):
         if len(new_config) == len(dirs_config):
             return
         self._save_model_dirs(new_config)
-        self._rebuild_model_dir_rows()
+        self._populate_model_dir_combo()
+        self._notify_backend_dirs_changed()
+
+    def _notify_backend_dirs_changed(self):
+        try:
+            import httpx
+            with httpx.Client(timeout=httpx.Timeout(5.0)) as client:
+                client.post(f"http://127.0.0.1:{self._backend_port}/api/models/registry/refresh-dirs")
+        except Exception:
+            pass
 
     def _remove_model_dir(self):
         pass
 
     def _batch_download_models(self):
-        selected = [mid for mid, cb in self._model_checkboxes.items() if cb.isChecked()]
-        if not selected:
-            QMessageBox.information(self, "提示", "请先勾选要下载的模型")
+        selected_mids = []
+        for row_idx, cb in self._model_checkboxes.items():
+            if cb.isChecked() and 0 <= row_idx < len(self._model_rows):
+                mid = self._model_rows[row_idx].get("model_id", "")
+                if mid:
+                    selected_mids.append(mid)
+        if not selected_mids:
+            self._log("⚠ 请先勾选要下载的模型", "warn")
             return
-        for mid in selected:
+        for mid in selected_mids:
             self._download_model(mid)
 
-    def _fetch_model_updates(self):
-        QMessageBox.information(self, "获取更新", "正在检查模型更新...\n此功能将在后续版本中完善。")
+    def _sync_model_updates(self):
+        self._log("正在同步模型注册表...", "info")
+        try:
+            import httpx
+            with httpx.Client(timeout=httpx.Timeout(30.0)) as client:
+                try:
+                    client.post(f"http://127.0.0.1:{self._backend_port}/api/models/registry/refresh-dirs")
+                except Exception:
+                    pass
+                resp = client.post(f"http://127.0.0.1:{self._backend_port}/api/models/registry/sync")
+                data = resp.json()
+            if data.get("success"):
+                added = data.get("added", 0)
+                updated = data.get("updated", 0)
+                if added > 0 or updated > 0:
+                    self._log(f"√ 同步完成：新增 {added} 个，更新 {updated} 个模型", "ok")
+                else:
+                    self._log("√ 已同步，暂无新模型", "ok")
+            elif data.get("error"):
+                if data.get("local_refreshed"):
+                    self._log(f"△ 远程同步失败: {data['error']}，已刷新本地列表", "warn")
+                else:
+                    self._log(f"△ 同步失败: {data['error']}", "warn")
+            else:
+                self._log("√ 已刷新模型列表", "ok")
+        except Exception as e:
+            self._log(f"△ 同步异常: {e}，已刷新本地列表", "warn")
+        self._refresh_model_status()
 
     def _build_update_page(self):
         page = QWidget()
@@ -4165,15 +5071,58 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        current_card = QFrame()
+        current_card.setStyleSheet(
+            "QFrame { background-color: #1a2e1a; border: 1px solid #2a4a2a; border-radius: 8px; }"
+        )
+        current_card.setContentsMargins(0, 0, 0, 0)
+        cc_layout = QVBoxLayout(current_card)
+        cc_layout.setContentsMargins(16, 10, 16, 10)
+        cc_layout.setSpacing(4)
+        cc_top = QHBoxLayout()
+        cc_top.setSpacing(10)
+        ver_icon = QLabel("🚀")
+        ver_icon.setStyleSheet("font-size: 16pt; border: none;")
+        cc_top.addWidget(ver_icon)
+        cc_ver = QLabel(f"当前版本  v{VERSION}")
+        cc_ver.setStyleSheet("font-size: 11pt; font-weight: bold; color: #4CAF50; border: none;")
+        cc_top.addWidget(cc_ver)
+        cc_top.addStretch()
+        btn_check_remote = QPushButton("🔄 检查更新")
+        btn_check_remote.setFixedSize(110, 30)
+        btn_check_remote.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_check_remote.setStyleSheet(
+            "QPushButton { background-color: #2E7D32; color: #fff; border: none; border-radius: 6px; font-size: 9pt; font-weight: bold; }"
+            "QPushButton:hover { background-color: #388E3C; }"
+        )
+        btn_check_remote.clicked.connect(self._check_remote_versions)
+        cc_top.addWidget(btn_check_remote)
+        cc_layout.addLayout(cc_top)
+        self._ver_current_desc_label = QLabel("")
+        self._ver_current_desc_label.setWordWrap(True)
+        self._ver_current_desc_label.setStyleSheet("font-size: 9pt; color: #8aaa8a; border: none;")
+        cc_layout.addWidget(self._ver_current_desc_label)
+        cc_detail_row = QHBoxLayout()
+        cc_detail_row.setSpacing(16)
+        self._ver_current_build_label = QLabel("")
+        self._ver_current_build_label.setStyleSheet("font-size: 8pt; color: #5a7a5a; border: none;")
+        cc_detail_row.addWidget(self._ver_current_build_label)
+        self._ver_current_commit_label = QLabel("")
+        self._ver_current_commit_label.setStyleSheet("font-family: Consolas; font-size: 8pt; color: #5a7a5a; border: none;")
+        cc_detail_row.addWidget(self._ver_current_commit_label)
+        cc_detail_row.addStretch()
+        cc_layout.addLayout(cc_detail_row)
+        layout.addWidget(current_card)
+
         tab_bar = QFrame()
         tab_bar.setStyleSheet("background-color: #1e1e1e; border: none;")
-        tab_bar.setFixedHeight(48)
+        tab_bar.setFixedHeight(44)
         tab_layout = QHBoxLayout(tab_bar)
-        tab_layout.setContentsMargins(10, 7, 10, 7)
+        tab_layout.setContentsMargins(10, 5, 10, 5)
         tab_layout.setSpacing(4)
 
         self._ver_tab_stable_btn = QPushButton("📦 EXE稳定版")
-        self._ver_tab_stable_btn.setFixedSize(140, 34)
+        self._ver_tab_stable_btn.setFixedSize(130, 32)
         self._ver_tab_stable_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._ver_tab_stable_btn.setStyleSheet(
             "QPushButton { background-color: #C62828; color: #FFFFFF; border: none; border-radius: 6px; font-size: 9pt; font-weight: bold; }"
@@ -4183,7 +5132,7 @@ class MainWindow(QMainWindow):
         tab_layout.addWidget(self._ver_tab_stable_btn)
 
         self._ver_tab_git_btn = QPushButton("🔧 Git开发版")
-        self._ver_tab_git_btn.setFixedSize(140, 34)
+        self._ver_tab_git_btn.setFixedSize(130, 32)
         self._ver_tab_git_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._ver_tab_git_btn.setStyleSheet(
             "QPushButton { background-color: #444; color: #FFFFFF; border: none; border-radius: 6px; font-size: 9pt; font-weight: bold; }"
@@ -4198,22 +5147,12 @@ class MainWindow(QMainWindow):
         self._ver_status_label.setStyleSheet("font-size: 8pt; color: #888; border: none;")
         tab_layout.addWidget(self._ver_status_label)
 
-        btn_check_remote = QPushButton("🔄 检查更新")
-        btn_check_remote.setFixedSize(100, 30)
-        btn_check_remote.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_check_remote.setStyleSheet(
-            "QPushButton { background-color: #2E7D32; color: #fff; border: none; border-radius: 6px; font-size: 8pt; font-weight: bold; }"
-            "QPushButton:hover { background-color: #388E3C; }"
-        )
-        btn_check_remote.clicked.connect(self._check_remote_versions)
-        tab_layout.addWidget(btn_check_remote)
-
-        self._ver_expand_btn = QPushButton("📋 展开详情")
-        self._ver_expand_btn.setFixedSize(100, 30)
+        self._ver_expand_btn = QPushButton("📋 收起详情")
+        self._ver_expand_btn.setFixedSize(100, 28)
         self._ver_expand_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._ver_expand_btn.setStyleSheet(
-            "QPushButton { background-color: #1565C0; color: #fff; border: none; border-radius: 6px; font-size: 8pt; font-weight: bold; }"
-            "QPushButton:hover { background-color: #1976D2; }"
+            "QPushButton { background-color: #FF9800; color: #fff; border: none; border-radius: 6px; font-size: 8pt; font-weight: bold; }"
+            "QPushButton:hover { background-color: #FFB74D; }"
         )
         self._ver_expand_btn.clicked.connect(self._toggle_expand_all)
         tab_layout.addWidget(self._ver_expand_btn)
@@ -4241,12 +5180,19 @@ class MainWindow(QMainWindow):
         self._ver_current_version = VERSION
         self._ver_active_tab = "stable"
         self._ver_info_text = "点击「检查更新」查看最新版本"
-        self._ver_expanded = False
+        self._ver_expanded = True
+        self._ver_detail_page_size = 10
+        self._ver_list_page_size = 20
+        self._ver_rendered_count = 0
+        self._ver_cache_file = os.path.join(self._app_dir, "data", "update_cache.json") if self._app_dir else ""
+        self._active_update_source = "gitee"
+        self._ver_race_winner = ""
         self._latest_version = ""
         self._latest_info = None
 
+        self._update_current_version_card()
         self._ver_status_label.setText("加载中...")
-        QTimer.singleShot(100, self._check_remote_versions)
+        self._ver_cache_check_scheduled = False
 
         return page
 
@@ -4273,19 +5219,32 @@ class MainWindow(QMainWindow):
     def _render_active_tab(self):
         if self._ver_scroll_content is None:
             return
-        while self._ver_scroll_layout.count():
-            item = self._ver_scroll_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-            elif item.layout():
-                while item.layout().count():
-                    sub = item.layout().takeAt(0)
-                    if sub.widget():
-                        sub.widget().deleteLater()
-        if self._ver_active_tab == "stable":
-            self._render_stable_tab()
-        else:
-            self._render_git_tab()
+        if getattr(self, '_ver_rendering', False):
+            return
+        self._ver_rendering = True
+        try:
+            old_widgets = []
+            while self._ver_scroll_layout.count():
+                item = self._ver_scroll_layout.takeAt(0)
+                w = item.widget()
+                if w:
+                    old_widgets.append(w)
+                else:
+                    sub_layout = item.layout()
+                    if sub_layout:
+                        while sub_layout.count():
+                            sub = sub_layout.takeAt(0)
+                            if sub.widget():
+                                old_widgets.append(sub.widget())
+            for w in old_widgets:
+                w.setParent(None)
+                w.deleteLater()
+            if self._ver_active_tab == "stable":
+                self._render_stable_tab()
+            else:
+                self._render_git_tab()
+        finally:
+            self._ver_rendering = False
 
     def _toggle_expand_all(self):
         self._ver_expanded = not self._ver_expanded
@@ -4299,8 +5258,8 @@ class MainWindow(QMainWindow):
             else:
                 self._ver_expand_btn.setText("📋 展开详情")
                 self._ver_expand_btn.setStyleSheet(
-                    "QPushButton { background-color: #1565C0; color: #fff; border: none; border-radius: 6px; font-size: 8pt; font-weight: bold; }"
-                    "QPushButton:hover { background-color: #1976D2; }"
+                    "QPushButton { background-color: #2E7D32; color: #fff; border: none; border-radius: 6px; font-size: 8pt; font-weight: bold; }"
+                    "QPushButton:hover { background-color: #388E3C; }"
                 )
         self._render_active_tab()
 
@@ -4318,6 +5277,12 @@ class MainWindow(QMainWindow):
         info_label.setStyleSheet("font-size: 9pt; color: #888; border: none;")
         info_row.addWidget(info_label, stretch=1)
 
+        if self._ver_race_winner:
+            src_name = UPDATE_SOURCES.get(self._ver_race_winner, {}).get("name", self._ver_race_winner)
+            src_label = QLabel(f"via {src_name}")
+            src_label.setStyleSheet("font-size: 8pt; color: #555; border: none;")
+            info_row.addWidget(src_label)
+
         self._ver_info_expand_btn = QPushButton("▶ 详情")
         self._ver_info_expand_btn.setFixedSize(60, 22)
         self._ver_info_expand_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -4331,12 +5296,15 @@ class MainWindow(QMainWindow):
 
         self._ver_info_detail_frame = None
         self._ver_scroll_layout.addWidget(info_frame)
+        self._ver_rendered_count = 0
         self._render_stable_versions(self._ver_stable_data, self._ver_current_version)
 
     def _toggle_current_version_detail(self):
         if self._ver_info_detail_frame is not None:
-            self._ver_info_detail_frame.deleteLater()
+            old = self._ver_info_detail_frame
             self._ver_info_detail_frame = None
+            old.setParent(None)
+            old.deleteLater()
             if self._ver_info_expand_btn:
                 self._ver_info_expand_btn.setText("▶ 详情")
             return
@@ -4398,13 +5366,15 @@ class MainWindow(QMainWindow):
             loading_lbl.setStyleSheet("font-size: 9pt; color: #888; border: none;")
             loading_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._ver_scroll_layout.addWidget(loading_lbl)
-            QTimer.singleShot(100, self._fetch_remote_commits)
+            if not getattr(self, '_commits_race_procs', None):
+                QTimer.singleShot(500, self._fetch_remote_commits)
         else:
             self._render_git_history(self._ver_git_data)
 
     def _toggle_card_detail(self, card, data, card_type):
         detail_widget = card.findChild(QWidget, "_detail")
         if detail_widget is not None:
+            detail_widget.setParent(None)
             detail_widget.deleteLater()
             toggle_btn = card.findChild(QPushButton, "_toggle_btn")
             if toggle_btn:
@@ -4468,18 +5438,7 @@ class MainWindow(QMainWindow):
             self._ver_scroll_layout.addWidget(lbl)
             return
         expanded = self._ver_expanded
-        header_row = QFrame()
-        header_row.setStyleSheet("background-color: #1a1a1a; border: none; border-bottom: 1px solid #2a2a2a;")
-        header_layout = QHBoxLayout(header_row)
-        header_layout.setContentsMargins(10, 5, 10, 5)
-        header_layout.setSpacing(0)
-        for text, width, stretch in [("版本", 130, 0), ("描述", 0, 1), ("状态", 100, 0), ("操作", 120, 0)]:
-            lbl = QLabel(text)
-            if width > 0:
-                lbl.setFixedWidth(width)
-            lbl.setStyleSheet("font-size: 8pt; color: #555; border: none; font-weight: bold;")
-            header_layout.addWidget(lbl, stretch=stretch)
-        self._ver_scroll_layout.addWidget(header_row)
+        page_size = self._ver_detail_page_size if expanded else self._ver_list_page_size
 
         current_v = None
         other_versions = []
@@ -4493,7 +5452,9 @@ class MainWindow(QMainWindow):
             ordered.append(current_v)
         ordered.extend(other_versions)
 
-        for v in ordered:
+        end = min(self._ver_rendered_count + page_size, len(ordered))
+        for idx in range(self._ver_rendered_count, end):
+            v = ordered[idx]
             ver = v["version"]
             is_current = (ver == current_version)
             is_available = v.get("available", False)
@@ -4516,7 +5477,7 @@ class MainWindow(QMainWindow):
 
             card = QFrame()
             card.setProperty("card_bg", row_bg)
-            card.setStyleSheet(f"background-color: {row_bg}; border: 1px solid {border_color}; border-radius: 0px;")
+            card.setStyleSheet(f"background-color: {row_bg}; border: 1px solid {border_color}; border-radius: 6px;")
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(0, 0, 0, 0)
             card_layout.setSpacing(0)
@@ -4524,13 +5485,13 @@ class MainWindow(QMainWindow):
             row = QFrame()
             row.setStyleSheet(f"background-color: {row_bg}; border: none;")
             row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(10, 5, 10, 5)
-            row_layout.setSpacing(6)
+            row_layout.setContentsMargins(12, 6, 12, 6)
+            row_layout.setSpacing(8)
 
             ver_color = "#4CAF50" if is_current else ("#42A5F5" if is_remote_new else ("#DDDDDD" if is_available else "#888"))
             ver_label = QLabel(f"v{ver}")
             ver_label.setFixedWidth(130)
-            ver_label.setStyleSheet(f"font-family: Consolas; font-size: 9pt; font-weight: bold; color: {ver_color}; border: none;")
+            ver_label.setStyleSheet(f"font-family: Consolas; font-size: 10pt; font-weight: bold; color: {ver_color}; border: none;")
             row_layout.addWidget(ver_label)
 
             desc_text = ""
@@ -4546,7 +5507,7 @@ class MainWindow(QMainWindow):
             desc_label = QLabel(desc_text if desc_text else "暂无描述")
             desc_label.setWordWrap(True)
             desc_color = "#999" if desc_text else "#444"
-            desc_label.setStyleSheet(f"font-size: 8pt; color: {desc_color}; border: none;")
+            desc_label.setStyleSheet(f"font-size: 9pt; color: {desc_color}; border: none;")
             row_layout.addWidget(desc_label, stretch=1)
 
             status_label = QLabel("")
@@ -4578,7 +5539,7 @@ class MainWindow(QMainWindow):
                 switch_btn.setFixedSize(60, 22)
                 switch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 switch_btn.setStyleSheet(
-                    "QPushButton { background-color: #2E7D32; color: #fff; border: none; border-radius: 3px; font-size: 8pt; font-weight: bold; padding: 2px 8px; }"
+                    "QPushButton { background-color: #2E7D32; color: #fff; border: none; border-radius: 4px; font-size: 8pt; font-weight: bold; padding: 2px 8px; }"
                     "QPushButton:hover { background-color: #388E3C; }"
                 )
                 exe_path = exe_info["path"]
@@ -4590,7 +5551,7 @@ class MainWindow(QMainWindow):
                 dl_btn.setFixedSize(60, 22)
                 dl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 dl_btn.setStyleSheet(
-                    "QPushButton { background-color: #1565C0; color: #fff; border: none; border-radius: 3px; font-size: 8pt; font-weight: bold; padding: 2px 8px; }"
+                    "QPushButton { background-color: #1565C0; color: #fff; border: none; border-radius: 4px; font-size: 8pt; font-weight: bold; padding: 2px 8px; }"
                     "QPushButton:hover { background-color: #1976D2; }"
                 )
                 rinfo = v.get("remote_info")
@@ -4644,6 +5605,19 @@ class MainWindow(QMainWindow):
                 card_layout.addWidget(detail)
             self._ver_scroll_layout.addWidget(card)
 
+        self._ver_rendered_count = end
+
+        if end < len(ordered):
+            load_more_btn = QPushButton(f"加载更多（{len(ordered) - end} 条剩余）")
+            load_more_btn.setFixedHeight(32)
+            load_more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            load_more_btn.setStyleSheet(
+                "QPushButton { background-color: #1a1a1a; color: #888; border: 1px solid #2a2a2a; border-radius: 6px; font-size: 9pt; }"
+                "QPushButton:hover { background-color: #222; color: #aaa; }"
+            )
+            load_more_btn.clicked.connect(lambda: self._load_more_stable(ordered, current_version))
+            self._ver_scroll_layout.addWidget(load_more_btn)
+
     def _render_git_history(self, commits):
         if not commits:
             lbl = QLabel("暂无开发动态")
@@ -4652,7 +5626,10 @@ class MainWindow(QMainWindow):
             self._ver_scroll_layout.addWidget(lbl)
             return
         expanded = self._ver_expanded
-        for commit in commits:
+        page_size = self._ver_list_page_size
+        end = min(self._ver_rendered_count + page_size, len(commits))
+        for idx in range(self._ver_rendered_count, end):
+            commit = commits[idx]
             sha = commit.get("sha", "")[:8]
             message = commit.get("message", "")
             author = commit.get("author", "")
@@ -4721,126 +5698,252 @@ class MainWindow(QMainWindow):
                 card_layout.addWidget(detail)
             self._ver_scroll_layout.addWidget(card)
 
+        self._ver_rendered_count = end
+
+        if end < len(commits):
+            load_more_btn = QPushButton(f"加载更多（{len(commits) - end} 条剩余）")
+            load_more_btn.setFixedHeight(32)
+            load_more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            load_more_btn.setStyleSheet(
+                "QPushButton { background-color: #1a1a1a; color: #888; border: 1px solid #2a2a2a; border-radius: 6px; font-size: 9pt; }"
+                "QPushButton:hover { background-color: #222; color: #aaa; }"
+            )
+            load_more_btn.clicked.connect(lambda: self._load_more_git(commits))
+            self._ver_scroll_layout.addWidget(load_more_btn)
+
     def _check_remote_versions(self):
         if self._ver_status_label is not None:
             self._ver_status_label.setText("正在检查远程更新...")
+        self._check_remote_versions_race()
 
-        def do_check():
+    def _check_remote_versions_race(self):
+        self._cancel_race_procs()
+        self._ver_race_done = False
+        self._ver_race_results = {}
+        self._ver_race_procs = {}
+        for key in UPDATE_SOURCES:
+            source = UPDATE_SOURCES[key]
+            url = source["version_url"]
+            proc = QProcess(self)
+            proc.setProperty("race_key", key)
+            proc.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+            proc.finished.connect(lambda ec, es, k=key: self._ver_race_finished(ec, es, k))
+            proc.start("curl.exe", [
+                "-s", "-k", "-L", "--connect-timeout", "8", "-m", "15",
+                "-H", "User-Agent: Mozilla/5.0", url
+            ])
+            self._ver_race_procs[key] = proc
+
+    def _ver_race_finished(self, exit_code, exit_status, key):
+        if self._ver_race_done:
+            return
+        proc = self._ver_race_procs.get(key)
+        if proc is None:
+            return
+        if exit_code == 0:
             try:
-                import base64, ssl
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-                req = urllib.request.Request(VERSION_CHECK_URL, headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
-                    api_data = json.loads(resp.read().decode())
-                if isinstance(api_data, list):
-                    file_data = api_data[0] if api_data else {}
+                raw = bytes(proc.readAllStandardOutput()).decode("utf-8", errors="replace")
+                source = UPDATE_SOURCES[key]
+                import base64
+                if source.get("is_api"):
+                    api_data = json.loads(raw)
+                    if isinstance(api_data, list):
+                        file_data = api_data[0] if api_data else {}
+                    else:
+                        file_data = api_data
+                    content_b64 = file_data.get("content", "")
+                    content_json = base64.b64decode(content_b64).decode("utf-8")
+                    data = json.loads(content_json)
                 else:
-                    file_data = api_data
-                content_b64 = file_data.get("content", "")
-                content_json = base64.b64decode(content_b64).decode("utf-8")
-                data = json.loads(content_json)
-                remote_latest = data.get("latest", "")
-                remote_versions_list = data.get("versions", [])
-                stable_exes = self._list_stable_exes()
-                exe_versions = {e["version"]: e for e in stable_exes}
-                local_versions = self._get_local_version_history()
-                current_version = VERSION
-                all_versions = []
-                seen = set()
-                for rinfo in remote_versions_list:
-                    rv = rinfo.get("version", "")
-                    ver_num = self._normalize_version(rv)
-                    if not ver_num or ver_num in seen:
-                        continue
-                    seen.add(ver_num)
-                    is_new = (ver_num != current_version and ver_num not in exe_versions)
-                    all_versions.append({
-                        "version": ver_num,
-                        "name": rinfo.get("name", f"v{ver_num}"),
-                        "changes": rinfo.get("changes", []),
-                        "build_time": rinfo.get("build_time", rinfo.get("date", "")),
-                        "git_commit": rinfo.get("git_commit", ""),
-                        "available": ver_num in exe_versions,
-                        "exe_info": exe_versions.get(ver_num),
-                        "is_remote_new": is_new,
-                        "remote_info": rinfo,
-                    })
-                for v in local_versions:
-                    ver = v.get("version", "")
-                    ver_num = self._normalize_version(ver)
-                    if not ver_num or ver_num in seen:
-                        continue
-                    seen.add(ver_num)
-                    all_versions.append({
-                        "version": ver_num,
-                        "name": v.get("name", f"v{ver_num}"),
-                        "changes": v.get("changes", []),
-                        "build_time": v.get("build_time", v.get("date", "")),
-                        "git_commit": v.get("git_commit", ""),
-                        "available": ver_num in exe_versions,
-                        "exe_info": exe_versions.get(ver_num),
-                        "is_remote_new": False,
-                    })
-                for ver, exe in exe_versions.items():
-                    if ver not in seen:
-                        seen.add(ver)
-                        all_versions.append({
-                            "version": ver,
-                            "name": exe["filename"],
-                            "changes": [],
-                            "build_time": "",
-                            "git_commit": "",
-                            "available": True,
-                            "exe_info": exe,
-                            "is_remote_new": False,
-                        })
-                all_versions.sort(key=lambda x: x["version"], reverse=True)
-                self._latest_version = remote_latest
-                self._latest_info = next((v for v in remote_versions_list if v.get("version") == remote_latest), None)
-                self._ver_stable_data = all_versions
-                self._ver_git_data = []
-                self._ver_current_version = current_version
-                has_update = remote_latest and remote_latest != VERSION and remote_latest not in exe_versions
-                if has_update:
-                    self._ver_info_text = f"🆕 发现新版本 v{remote_latest}"
-                else:
-                    self._ver_info_text = "✅ 已是最新版本"
-                self._version_data_ready.emit()
+                    data = json.loads(raw)
+                self._ver_race_done = True
+                self._ver_race_winner = key
+                self._cancel_race_procs()
+                self._ver_curl_done(key, data)
+                return
             except Exception:
-                self._load_all_versions_fallback()
-                self._version_data_ready.emit()
+                pass
+        else:
+            self._ver_race_results[key] = None
+        self._ver_race_procs.pop(key, None)
+        try:
+            proc.finished.disconnect()
+        except Exception:
+            pass
+        proc.deleteLater()
+        all_done = all(k not in self._ver_race_procs for k in UPDATE_SOURCES)
+        if all_done and not self._ver_race_done:
+            self._ver_race_done = True
+            self._ver_curl_done(None, None)
 
-        threading.Thread(target=do_check, daemon=True).start()
+    def _cancel_race_procs(self, exclude=None):
+        procs = getattr(self, '_ver_race_procs', None)
+        if not procs:
+            return
+        keys_to_remove = [k for k in procs if k != exclude]
+        for k in keys_to_remove:
+            proc = procs.pop(k, None)
+            if proc:
+                try:
+                    proc.finished.disconnect()
+                except Exception:
+                    pass
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                proc.deleteLater()
+
+    def _ver_curl_done(self, winning_source, data):
+        if winning_source is None or data is None:
+            self._load_all_versions_fallback()
+            self._version_data_ready.emit()
+            return
+
+        self._active_update_source = winning_source
+        remote_latest = data.get("latest", "")
+        remote_versions_list = data.get("versions", [])
+        stable_exes = self._list_stable_exes()
+        exe_versions = {e["version"]: e for e in stable_exes}
+        local_versions = self._get_local_version_history()
+        current_version = VERSION
+        all_versions = []
+        seen = set()
+        for rinfo in remote_versions_list:
+            rv = rinfo.get("version", "")
+            ver_num = self._normalize_version(rv)
+            if not ver_num or ver_num in seen:
+                continue
+            seen.add(ver_num)
+            is_new = (ver_num != current_version and ver_num not in exe_versions)
+            all_versions.append({
+                "version": ver_num,
+                "name": rinfo.get("name", f"v{ver_num}"),
+                "changes": rinfo.get("changes", []),
+                "build_time": rinfo.get("build_time", rinfo.get("date", "")),
+                "git_commit": rinfo.get("git_commit", ""),
+                "available": ver_num in exe_versions,
+                "exe_info": exe_versions.get(ver_num),
+                "is_remote_new": is_new,
+                "remote_info": rinfo,
+            })
+        for v in local_versions:
+            ver = v.get("version", "")
+            ver_num = self._normalize_version(ver)
+            if not ver_num or ver_num in seen:
+                continue
+            seen.add(ver_num)
+            all_versions.append({
+                "version": ver_num,
+                "name": v.get("name", f"v{ver_num}"),
+                "changes": v.get("changes", []),
+                "build_time": v.get("build_time", v.get("date", "")),
+                "git_commit": v.get("git_commit", ""),
+                "available": ver_num in exe_versions,
+                "exe_info": exe_versions.get(ver_num),
+                "is_remote_new": False,
+            })
+        for ver, exe in exe_versions.items():
+            if ver not in seen:
+                seen.add(ver)
+                all_versions.append({
+                    "version": ver,
+                    "name": exe["filename"],
+                    "changes": [],
+                    "build_time": "",
+                    "git_commit": "",
+                    "available": True,
+                    "exe_info": exe,
+                    "is_remote_new": False,
+                })
+        all_versions.sort(key=lambda x: x["version"], reverse=True)
+        self._latest_version = remote_latest
+        self._latest_info = next((v for v in remote_versions_list if v.get("version") == remote_latest), None)
+        self._ver_stable_data = all_versions
+        if not self._ver_git_data:
+            self._ver_git_data = []
+        self._ver_current_version = current_version
+        has_update = remote_latest and remote_latest != VERSION and remote_latest not in exe_versions
+        src_name = UPDATE_SOURCES[winning_source]["name"]
+        if has_update:
+            self._ver_info_text = f"🆕 发现新版本 v{remote_latest}（via {src_name}）"
+        else:
+            self._ver_info_text = f"✅ 已是最新版本（via {src_name}）"
+        self._save_update_cache()
+        self._version_data_ready.emit()
+        if not self._ver_git_data:
+            self._fetch_remote_commits()
 
     def _fetch_remote_commits(self):
-        def do_fetch():
+        self._cancel_commits_race_procs()
+        self._commits_race_done = False
+        self._commits_race_procs = {}
+        for key in UPDATE_SOURCES:
+            source = UPDATE_SOURCES[key]
+            url = source["commits_url"]
+            proc = QProcess(self)
+            proc.setProperty("race_key", key)
+            proc.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+            proc.finished.connect(lambda ec, es, k=key: self._commits_race_finished(ec, es, k))
+            proc.start("curl.exe", [
+                "-s", "-k", "-L", "--connect-timeout", "8", "-m", "15",
+                "-H", "User-Agent: Mozilla/5.0", url
+            ])
+            self._commits_race_procs[key] = proc
+
+    def _cancel_commits_race_procs(self, exclude=None):
+        keys_to_remove = [k for k in getattr(self, '_commits_race_procs', {}) if k != exclude]
+        for k in keys_to_remove:
+            proc = self._commits_race_procs.pop(k, None)
+            if proc:
+                try:
+                    proc.finished.disconnect()
+                except Exception:
+                    pass
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                proc.deleteLater()
+
+    def _commits_race_finished(self, exit_code, exit_status, key):
+        if self._commits_race_done:
+            return
+        proc = self._commits_race_procs.get(key)
+        if proc is None:
+            return
+        if exit_code == 0:
             try:
-                import ssl
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-                url = f"{GITEE_API_REPO}/commits?access_token={GITEE_TOKEN}&per_page=20"
-                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
-                    data = json.loads(resp.read().decode())
+                raw = proc.readAllStandardOutput().data().decode('utf-8', errors='replace')
+                data = json.loads(raw)
                 commits = []
                 for c in data:
-                    commit_info = c.get("commit", {})
+                    commit_info = c.get("commit", c)
                     commits.append({
                         "sha": c.get("sha", ""),
                         "message": commit_info.get("message", ""),
-                        "author": commit_info.get("author", {}).get("name", ""),
-                        "date": commit_info.get("author", {}).get("date", ""),
+                        "author": commit_info.get("author", {}).get("name", "") if isinstance(commit_info.get("author"), dict) else commit_info.get("author", ""),
+                        "date": commit_info.get("author", {}).get("date", "") if isinstance(commit_info.get("author"), dict) else commit_info.get("date", ""),
                     })
+                self._commits_race_done = True
+                self._cancel_commits_race_procs()
                 self._ver_git_data = commits
+                self._save_update_cache()
                 self._version_data_ready.emit()
+                return
             except Exception:
-                self._ver_git_data = []
-                self._version_data_ready.emit()
-
-        threading.Thread(target=do_fetch, daemon=True).start()
+                pass
+        self._commits_race_procs.pop(key, None)
+        try:
+            proc.finished.disconnect()
+        except Exception:
+            pass
+        proc.deleteLater()
+        all_done = all(k not in self._commits_race_procs for k in UPDATE_SOURCES)
+        if all_done and not self._commits_race_done:
+            self._commits_race_done = True
+            self._ver_git_data = []
+            self._version_data_ready.emit()
 
     def _refresh_git_history(self):
         self._ver_git_data = []
@@ -4849,11 +5952,112 @@ class MainWindow(QMainWindow):
             self._fetch_remote_commits()
 
     def _on_version_data_ready(self):
+        QTimer.singleShot(0, self._deferred_render_version_tab)
+
+    def _deferred_render_version_tab(self):
         self._render_active_tab()
+        self._update_current_version_card()
         if self._ver_status_label is not None:
             count = len(self._ver_stable_data)
             hist = len(self._ver_git_data)
-            self._ver_status_label.setText(f"稳定版 {count} 个 | 版本历史 {hist} 条")
+            cache_tag = "（缓存）" if getattr(self, '_ver_cache_check_scheduled', False) and not getattr(self, '_ver_race_done', True) else ""
+            self._ver_status_label.setText(f"稳定版 {count} 个 | 版本历史 {hist} 条{cache_tag}")
+
+    def _update_current_version_card(self):
+        current_v = next((v for v in self._ver_stable_data if v["version"] == self._ver_current_version), None)
+        if hasattr(self, '_ver_current_desc_label') and self._ver_current_desc_label:
+            if current_v:
+                changes = current_v.get("changes", [])
+                desc = "、".join(changes) if changes else "暂无描述"
+                self._ver_current_desc_label.setText(desc)
+            else:
+                self._ver_current_desc_label.setText(f"v{self._ver_current_version}")
+        if hasattr(self, '_ver_current_build_label') and self._ver_current_build_label:
+            if current_v:
+                bt = current_v.get("build_time", "")
+                self._ver_current_build_label.setText(f"🕐 构建时间: {bt}" if bt else "")
+            else:
+                self._ver_current_build_label.setText("")
+        if hasattr(self, '_ver_current_commit_label') and self._ver_current_commit_label:
+            if current_v:
+                gc = current_v.get("git_commit", "")
+                self._ver_current_commit_label.setText(f"🔗 {gc}" if gc else "")
+            else:
+                self._ver_current_commit_label.setText("")
+
+    def _save_update_cache(self):
+        if not self._ver_cache_file:
+            return
+        try:
+            cache_dir = os.path.dirname(self._ver_cache_file)
+            if cache_dir and not os.path.exists(cache_dir):
+                os.makedirs(cache_dir, exist_ok=True)
+            cache_data = {
+                "timestamp": time.time(),
+                "stable_data": self._ver_stable_data,
+                "git_data": self._ver_git_data,
+                "info_text": self._ver_info_text,
+                "race_winner": getattr(self, '_ver_race_winner', ''),
+                "active_source": self._active_update_source,
+                "latest_version": self._latest_version,
+            }
+            with open(self._ver_cache_file, "w", encoding="utf-8") as f:
+                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _load_update_cache(self):
+        if not self._ver_cache_file or not os.path.exists(self._ver_cache_file):
+            return None
+        try:
+            with open(self._ver_cache_file, "r", encoding="utf-8") as f:
+                cache_data = json.load(f)
+            ts = cache_data.get("timestamp", 0)
+            if time.time() - ts > 3600:
+                return None
+            return cache_data
+        except Exception:
+            return None
+
+    def _load_update_cache_and_check(self):
+        cache = self._load_update_cache()
+        if cache:
+            self._ver_stable_data = cache.get("stable_data", [])
+            self._ver_git_data = cache.get("git_data", [])
+            self._ver_info_text = cache.get("info_text", "")
+            self._ver_race_winner = cache.get("race_winner", "")
+            self._active_update_source = cache.get("active_source", "gitee")
+            self._latest_version = cache.get("latest_version", "")
+            QTimer.singleShot(0, self._deferred_render_version_tab)
+            self._check_remote_versions()
+        else:
+            self._check_remote_versions()
+
+    def _load_more_stable(self, ordered, current_version):
+        btn = None
+        for i in range(self._ver_scroll_layout.count()):
+            item = self._ver_scroll_layout.itemAt(i)
+            if item and item.widget() and isinstance(item.widget(), QPushButton):
+                btn = item.widget()
+                break
+        if btn:
+            self._ver_scroll_layout.removeWidget(btn)
+            btn.setParent(None)
+            btn.deleteLater()
+        self._render_stable_versions(ordered, current_version)
+
+    def _load_more_git(self, commits):
+        btn = None
+        for i in range(self._ver_scroll_layout.count()):
+            item = self._ver_scroll_layout.itemAt(i)
+            if item and item.widget() and isinstance(item.widget(), QPushButton):
+                btn = item.widget()
+                break
+        if btn:
+            self._ver_scroll_layout.removeWidget(btn)
+            btn.setParent(None)
+            btn.deleteLater()
+        self._render_git_history(commits)
 
     def _list_stable_exes(self):
         ver_dir = os.path.join(self._project_root, "ver") if self._project_root else ""
@@ -4934,14 +6138,17 @@ class MainWindow(QMainWindow):
         if not remote_info:
             return
         filename = remote_info.get("filename", "")
+        version = remote_info.get("version", "")
         if not filename:
             return
-        url = f"https://gitee.com/yunjizhineng/video-creative-station/raw/main/ver/{filename}?access_token={GITEE_TOKEN}"
+        source_key = getattr(self, '_active_update_source', 'gitee')
+        source = UPDATE_SOURCES.get(source_key, UPDATE_SOURCES['gitee'])
+        url = source["download_url_tpl"].format(filename=filename, version=version, GITEE_TOKEN=GITEE_TOKEN)
         try:
             import webbrowser
             webbrowser.open(url)
         except Exception as e:
-            QMessageBox.warning(self, "下载失败", f"无法打开下载链接:\n{e}")
+            self._log(f"× 无法打开下载链接: {e}", "err")
 
     def _on_download_update(self):
         if not hasattr(self, '_latest_info') or not self._latest_info:
@@ -4950,7 +6157,7 @@ class MainWindow(QMainWindow):
 
     def _switch_to_exe(self, exe_path, git_commit=""):
         if not os.path.exists(exe_path):
-            QMessageBox.critical(self, "错误", f"版本文件不存在:\n{exe_path}")
+            self._log(f"× 版本文件不存在: {exe_path}", "err")
             return
         exe_filename = os.path.basename(exe_path)
         if self._project_root:
@@ -5009,26 +6216,65 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _download_model(self, model_id):
+        if not model_id:
+            self._log("× 模型ID为空，无法下载", "err")
+            return
+
         info = LTX_MODELS.get(model_id)
         if not info:
-            return
-        models_dir = os.path.join(self._data_dir, "models")
+            if hasattr(self, '_model_rows'):
+                for r in self._model_rows:
+                    if r.get("model_id") == model_id and r.get("source") in ("registry", "fallback"):
+                        info = {
+                            "repo": r.get("repo_id", "Lightricks/LTX-2.3"),
+                            "file": r.get("filename", r.get("name", "")),
+                            "size_bytes": r.get("size_gb", 0) * 1024 * 1024 * 1024,
+                            "required": r.get("tag") == "必需",
+                            "desc": r.get("description", ""),
+                            "is_folder": r.get("is_folder", False),
+                            "modelscope_id": r.get("modelscope_id", r.get("repo_id", "Lightricks/LTX-2.3")),
+                        }
+                        break
+            if not info:
+                self._log(f"× 未找到模型信息: {model_id}", "err")
+                return
+
+        models_dir = self._models_dir or os.path.join(self._data_dir or "", "models")
         os.makedirs(models_dir, exist_ok=True)
+
         python_exe = self._python_exe
         if not python_exe or not os.path.exists(python_exe):
-            python_exe = os.path.join(self._app_resources, "venv", "Scripts", "python.exe")
-        if not os.path.exists(python_exe):
-            python_exe = os.path.join(self._app_resources, "python", "python.exe")
-        if not os.path.exists(python_exe):
-            self._log("× Python 环境未安装，请先在部署维护中安装", "err")
+            for candidate in [
+                os.path.join(self._data_dir, ".venv", "Scripts", "python.exe"),
+                os.path.join(self._data_dir, "venv", "Scripts", "python.exe"),
+                os.path.join(self._app_resources, "venv", "Scripts", "python.exe"),
+                os.path.join(self._app_resources, "python", "python.exe"),
+            ]:
+                if os.path.exists(candidate):
+                    python_exe = candidate
+                    break
+        if not python_exe or not os.path.exists(python_exe):
+            self._log("× 找不到Python环境，无法下载", "err")
             return
 
         source = self.model_source_combo.currentData() if hasattr(self, 'model_source_combo') else "hf_mirror"
+        source_name = {"hf_mirror": "HF-Mirror", "hf_official": "HuggingFace", "modelscope": "ModelScope"}.get(source, source)
+
+        self._log(f"▼ 开始下载 {info['file']} ({info['size_bytes']/1024/1024/1024:.1f}GB) [{source_name}]", "info")
+        self._log(f"  [DBG] model_id={model_id}, repo={info['repo']}, is_folder={info.get('is_folder', False)}, size_bytes={info['size_bytes']}", "info")
+        self._log(f"  [DBG] python_exe={python_exe}", "info")
+        self._log(f"  [DBG] models_dir={models_dir}", "info")
+
+        if not hasattr(self, '_download_procs'):
+            self._download_procs = {}
+
+        is_folder = info.get("is_folder", False)
+        target_path = os.path.join(models_dir, info["file"])
 
         env = os.environ.copy()
         env.pop("PYTHONHOME", None)
-
-        if source == "hf_mirror":
+        env["PYTHONUNBUFFERED"] = "1"
+        if source == "hf_mirror" or source == "modelscope":
             deploy_source = self.deploy_source_combo.currentData() if hasattr(self, 'deploy_source_combo') else "tsinghua"
             if deploy_source in MIRROR_SOURCES:
                 env["HF_ENDPOINT"] = MIRROR_SOURCES[deploy_source]["hf_endpoint"]
@@ -5037,76 +6283,514 @@ class MainWindow(QMainWindow):
         elif source == "hf_official":
             env.pop("HF_ENDPOINT", None)
 
-        source_name = {"hf_mirror": "HF-Mirror", "hf_official": "HuggingFace", "modelscope": "ModelScope"}.get(source, source)
-        self._log(f"▼ 开始下载模型 {info['file']} ({info['size_bytes']/1024/1024/1024:.1f}GB) [{source_name}]...", "info")
+        progress_path = os.path.join(models_dir, f".dl_progress_{model_id}")
+        try:
+            if os.path.exists(progress_path):
+                os.remove(progress_path)
+        except OSError:
+            pass
 
-        def do_download():
+        self._log(f"  [DBG] HF_ENDPOINT={env.get('HF_ENDPOINT', '(not set)')}", "info")
+
+        if is_folder:
+            dl_script = (
+                "import sys\n"
+                f"try:\n"
+                f"    from huggingface_hub import snapshot_download\n"
+                f"    snapshot_download(repo_id='{info['repo']}', local_dir=r'{target_path}', local_dir_use_symlinks=False)\n"
+                f"except Exception as e:\n"
+                f"    sys.stderr.write(f'SCRIPT_ERROR:{{e}}\\n')\n"
+            )
+        else:
+            dl_script = (
+                "import sys\n"
+                f"try:\n"
+                f"    from huggingface_hub import hf_hub_download\n"
+                f"    hf_hub_download(repo_id='{info['repo']}', filename='{info['file']}', local_dir=r'{models_dir}', resume_download=True)\n"
+                f"except Exception as e:\n"
+                f"    sys.stderr.write(f'SCRIPT_ERROR:{{e}}\\n')\n"
+            )
+
+        script_path = os.path.join(models_dir, f".dl_script_{model_id}.py")
+        with open(script_path, 'w', encoding='utf-8') as sf:
+            sf.write(dl_script)
+
+        cmd = [python_exe, "-u", script_path]
+
+        self._download_procs[model_id] = {
+            "cmd": cmd, "env": env, "paused": False, "cancelled": False,
+            "target_path": target_path, "is_folder": is_folder,
+            "expected_bytes": info["size_bytes"],
+            "progress_path": progress_path, "script_path": script_path,
+            "current_pct": 0,
+        }
+
+        self._set_model_downloading(model_id, True)
+        self._start_download_progress_timer()
+
+        def run_download():
+            all_stderr = ""
             try:
-                if source in ("hf_mirror", "hf_official"):
-                    is_folder = info.get("is_folder", False)
-                    if is_folder:
-                        target_path = os.path.join(models_dir, info["file"])
-                        cmd = [
-                            python_exe, "-c",
-                            f"from huggingface_hub import snapshot_download; "
-                            f"snapshot_download(repo_id='{info['repo']}', local_dir=r'{target_path}', local_dir_use_symlinks=False)"
-                        ]
-                        proc = hidden_run(cmd, capture_output=True, text=True, timeout=14400, env=env)
-                        if proc.returncode == 0:
-                            QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, True, source_name))
-                        else:
-                            err = proc.stderr[:300] if proc.stderr else "未知错误"
-                            QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, False, source_name, err))
-                    else:
-                        target_file = os.path.join(models_dir, info["file"])
-                        cmd = [
-                            python_exe, "-c",
-                            f"from huggingface_hub import hf_hub_download; "
-                            f"hf_hub_download(repo_id='{info['repo']}', filename='{info['file']}', "
-                            f"local_dir=r'{models_dir}', force_download=True)"
-                        ]
-                        proc = hidden_run(cmd, capture_output=True, text=True, timeout=14400, env=env)
-                        if proc.returncode == 0 and os.path.exists(target_file):
-                            QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, True, source_name))
-                        else:
-                            err = proc.stderr[:300] if proc.stderr else "未知错误"
-                            QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, False, source_name, err))
-                elif source == "modelscope":
-                    uv_exe = os.path.join(self._app_resources, "uv", "uv.exe")
-                    deploy_source = self.deploy_source_combo.currentData() if hasattr(self, 'deploy_source_combo') else "tsinghua"
-                    pip_url = MIRROR_SOURCES.get(deploy_source, MIRROR_SOURCES["tsinghua"])["pip"]
-                    ms_env = os.environ.copy()
-                    ms_env["UV_INDEX_URL"] = pip_url
-                    ms_env.pop("PYTHONHOME", None)
-                    hidden_run(
-                        [uv_exe, "pip", "install", "--python", python_exe, "modelscope", "--index-url", pip_url],
-                        capture_output=True, text=True, timeout=120, env=ms_env
-                    )
-                    cmd = [
-                        python_exe, "-c",
-                        f"from modelscope.hub.file_download import model_file_download; "
-                        f"model_file_download(model_id='{info['repo'].replace('/', '-')}', "
-                        f"file_path='{info['file']}', cache_dir=r'{models_dir}')"
-                    ]
-                    proc = hidden_run(cmd, capture_output=True, text=True, timeout=7200)
-                    if proc.returncode == 0:
-                        QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, True, "ModelScope"))
-                    else:
-                        err = proc.stderr[:300] if proc.stderr else "未知错误"
-                        QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, False, "ModelScope", err))
+                proc = hidden_popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env)
             except Exception as e:
-                QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, False, source_name, str(e)))
+                QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, False, source_name, f"启动失败: {e}"))
+                self._download_procs.pop(model_id, None)
+                return
 
-        threading.Thread(target=do_download, daemon=True).start()
+            self._download_procs[model_id]["proc"] = proc
+            self._log(f"  下载进程已启动 PID={proc.pid}, 进度文件={progress_path}", "info")
+
+            debug_log_path = os.path.join(models_dir, f".dl_debug_{model_id}.log")
+            try:
+                with open(debug_log_path, 'w', encoding='utf-8') as df:
+                    df.write(f"=== Download Debug Log ===\n")
+                    df.write(f"model_id={model_id}\n")
+                    df.write(f"repo={info['repo']}\n")
+                    df.write(f"file={info['file']}\n")
+                    df.write(f"is_folder={is_folder}\n")
+                    df.write(f"expected_bytes={info['size_bytes']}\n")
+                    df.write(f"target_path={target_path}\n")
+                    df.write(f"progress_path={progress_path}\n")
+                    df.write(f"script_path={script_path}\n")
+                    df.write(f"models_dir={models_dir}\n")
+                    df.write(f"HF_ENDPOINT={env.get('HF_ENDPOINT', 'not set')}\n")
+                    df.write(f"PYTHONUNBUFFERED={env.get('PYTHONUNBUFFERED', 'not set')}\n")
+                    df.write(f"python_exe={python_exe}\n")
+                    df.write(f"cmd={' '.join(cmd)}\n")
+                    df.flush()
+            except Exception:
+                pass
+
+            def dbg_log(msg):
+                try:
+                    with open(debug_log_path, 'a', encoding='utf-8') as df:
+                        ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                        df.write(f"[{ts}] {msg}\n")
+                        df.flush()
+                except Exception:
+                    pass
+
+            def drain_stderr():
+                nonlocal all_stderr
+                first_lines = []
+                try:
+                    while True:
+                        chunk = proc.stderr.read(4096)
+                        if not chunk:
+                            break
+                        text = chunk.decode("utf-8", errors="replace")
+                        all_stderr += text
+                        if len(first_lines) < 5:
+                            for line in text.split("\n"):
+                                line = line.strip()
+                                if line and len(first_lines) < 5:
+                                    first_lines.append(line[:200])
+                            if len(first_lines) >= 1:
+                                dbg_log(f"STDERR_FIRST: {first_lines}")
+                except Exception:
+                    pass
+                if all_stderr:
+                    dbg_log(f"STDERR_TOTAL_LEN={len(all_stderr)}")
+
+            drain_thread = threading.Thread(target=drain_stderr, daemon=True)
+            drain_thread.start()
+
+            def progress_monitor():
+                try:
+                    expected = info["size_bytes"]
+                    last_pct = 0
+                    tick_count = 0
+                    dbg_log(f"START expected={expected} target_path={target_path} is_folder={is_folder}")
+                    while proc.poll() is None:
+                        tick_count += 1
+                        if self._download_procs.get(model_id, {}).get("cancelled"):
+                            dbg_log(f"tick={tick_count} CANCELLED")
+                            break
+                        pct = 0
+                        downloaded_bytes = 0
+                        try:
+                            if is_folder:
+                                if os.path.isdir(target_path):
+                                    for dp, dn, fns in os.walk(target_path):
+                                        for fn in fns:
+                                            try:
+                                                downloaded_bytes += os.path.getsize(os.path.join(dp, fn))
+                                            except OSError:
+                                                pass
+                            else:
+                                cache_dir = os.path.join(models_dir, ".cache", "huggingface", "download")
+                                if os.path.isdir(cache_dir):
+                                    for dp, dn, fns in os.walk(cache_dir):
+                                        for fn in fns:
+                                            if fn.endswith(".incomplete"):
+                                                try:
+                                                    downloaded_bytes += os.path.getsize(os.path.join(dp, fn))
+                                                except OSError:
+                                                    pass
+                                if os.path.exists(target_path):
+                                    try:
+                                        downloaded_bytes += os.path.getsize(target_path)
+                                    except OSError:
+                                        pass
+                            if downloaded_bytes > 0 and expected > 0:
+                                pct = min(100, int(downloaded_bytes * 100 / expected))
+                        except Exception:
+                            pass
+                        if tick_count <= 5 or pct > last_pct:
+                            dbg_log(f"tick={tick_count} pct={pct} last_pct={last_pct} downloaded_bytes={downloaded_bytes if downloaded_bytes else 0}")
+                        if pct > last_pct:
+                            last_pct = pct
+                            try:
+                                self._download_procs[model_id]["current_pct"] = pct
+                            except (KeyError, TypeError):
+                                break
+                        time.sleep(1)
+                    try:
+                        self._download_procs[model_id]["current_pct"] = 100
+                    except (KeyError, TypeError):
+                        pass
+                    dbg_log(f"LOOP_END proc_returncode={proc.poll()} tick_count={tick_count} last_pct={last_pct}")
+                except Exception as e:
+                    dbg_log(f"CRASH {e}")
+                    import traceback
+                    dbg_log(f"TRACEBACK {traceback.format_exc()}")
+
+            pmon_thread = threading.Thread(target=progress_monitor, daemon=True)
+            pmon_thread.start()
+
+            try:
+                proc.wait()
+            except Exception:
+                pass
+
+            drain_thread.join(timeout=5)
+
+            for p in (progress_path, script_path):
+                try:
+                    if os.path.exists(p):
+                        os.remove(p)
+                except OSError:
+                    pass
+
+            if self._download_procs.get(model_id, {}).get("cancelled"):
+                if proc.poll() is None:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, False, source_name, "已取消"))
+            elif proc.returncode == 0:
+                if is_folder or os.path.exists(target_path):
+                    QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, True, source_name))
+                else:
+                    QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, False, source_name, "文件未找到"))
+            else:
+                err_text = all_stderr[:500] if all_stderr else f"exit code {proc.returncode}"
+                if all_stderr:
+                    self._log(f"  [DBG] subprocess stderr (first 300): {all_stderr[:300]}", "info")
+                QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, False, source_name, err_text))
+
+        threading.Thread(target=run_download, daemon=True).start()
+
+    def _set_model_downloading(self, model_id, downloading):
+        if not hasattr(self, '_download_procs'):
+            self._download_procs = {}
+        if not hasattr(self, '_model_table'):
+            return
+        for row in range(self._model_table.rowCount()):
+            ops_widget = self._model_table.cellWidget(row, 7)
+            if not ops_widget:
+                continue
+            if hasattr(self, '_model_rows') and row < len(self._model_rows):
+                r = self._model_rows[row]
+                if r.get("model_id") != model_id:
+                    continue
+            else:
+                continue
+
+            layout = ops_widget.layout()
+            if not layout:
+                continue
+            while layout.count():
+                item = layout.takeAt(0)
+                w = item.widget()
+                if w:
+                    w.hide()
+                    w.setParent(None)
+                    w.deleteLater()
+
+            if downloading:
+                status_item = self._model_table.item(row, 6)
+                if status_item:
+                    status_item.setText("进度 0%")
+                    status_item.setForeground(QColor("#FFA726"))
+
+                pause_btn = QPushButton("⏸ 暂停")
+                pause_btn.setObjectName(f"dl_pause_{model_id}")
+                pause_btn.setFixedHeight(24)
+                pause_btn.setStyleSheet("""
+                    QPushButton { background-color: #E65100; color: white; border: none; border-radius: 3px;
+                        padding: 3px 8px; font-size: 10px; }
+                    QPushButton:hover { background-color: #F57C00; }
+                    QPushButton:pressed { background-color: #BF360C; }
+                """)
+                pause_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                pause_btn.clicked.connect(lambda checked, mid=model_id: self._toggle_pause_download(mid))
+                layout.addWidget(pause_btn)
+
+                cancel_btn = QPushButton("× 取消")
+                cancel_btn.setFixedHeight(24)
+                cancel_btn.setStyleSheet("""
+                    QPushButton { background-color: #B71C1C; color: white; border: none; border-radius: 3px;
+                        padding: 3px 8px; font-size: 10px; }
+                    QPushButton:hover { background-color: #E53935; }
+                    QPushButton:pressed { background-color: #7f0000; }
+                """)
+                cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                cancel_btn.clicked.connect(lambda checked, mid=model_id: self._cancel_download(mid))
+                layout.addWidget(cancel_btn)
+            else:
+                pass
+
+            layout.addStretch()
+
+    def _start_download_progress_timer(self):
+        if not hasattr(self, '_dl_progress_timer'):
+            self._dl_progress_timer = QTimer(self)
+            self._dl_progress_timer.timeout.connect(self._poll_download_progress)
+        if not self._dl_progress_timer.isActive():
+            self._dl_progress_timer.start(1000)
+
+    def _stop_download_progress_timer(self):
+        if hasattr(self, '_dl_progress_timer') and self._dl_progress_timer.isActive():
+            self._dl_progress_timer.stop()
+
+    def _poll_download_progress(self):
+        if not hasattr(self, '_download_procs') or not self._download_procs:
+            self._stop_download_progress_timer()
+            return
+        if not hasattr(self, '_model_table') or not hasattr(self, '_model_rows'):
+            return
+        try:
+            row_count = self._model_table.rowCount()
+        except RuntimeError:
+            self._stop_download_progress_timer()
+            return
+        done_ids = []
+        for model_id, dl in list(self._download_procs.items()):
+            pct = dl.get("current_pct", 0)
+            proc = dl.get("proc")
+            proc_done = proc is not None and proc.poll() is not None
+            if proc_done:
+                done_ids.append(model_id)
+                continue
+            for row_idx, r in enumerate(self._model_rows):
+                if r.get("model_id") == model_id:
+                    if row_idx < row_count:
+                        try:
+                            status_item = self._model_table.item(row_idx, 6)
+                            if status_item:
+                                if pct >= 100:
+                                    status_item.setText("处理中…")
+                                    status_item.setForeground(QColor("#42A5F5"))
+                                else:
+                                    status_item.setText(f"进度 {pct}%")
+                                    status_item.setForeground(QColor("#FFA726"))
+                        except RuntimeError:
+                            pass
+                    break
+        for mid in done_ids:
+            for row_idx, r in enumerate(self._model_rows):
+                if r.get("model_id") == mid:
+                    if row_idx < row_count:
+                        try:
+                            status_item = self._model_table.item(row_idx, 6)
+                            if status_item:
+                                status_item.setText("已下载")
+                                status_item.setForeground(QColor("#66BB6A"))
+                            ops_widget = self._model_table.cellWidget(row_idx, 7)
+                            if ops_widget:
+                                layout = ops_widget.layout()
+                                if layout:
+                                    while layout.count():
+                                        item = layout.takeAt(0)
+                                        w = item.widget()
+                                        if w:
+                                            w.hide()
+                                            w.setParent(None)
+                                            w.deleteLater()
+                                    lp = r.get("local_path", "")
+                                    if lp:
+                                        rm_btn = QPushButton("× 删除")
+                                        rm_btn.setFixedHeight(24)
+                                        rm_btn.setStyleSheet("QPushButton { background-color: #1565C0; color: white; border: none; border-radius: 3px; padding: 3px 8px; font-size: 10px; } QPushButton:hover { background-color: #1976D2; } QPushButton:pressed { background-color: #0D47A1; }")
+                                        rm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                                        rm_btn.clicked.connect(lambda checked, p=lp: self._delete_local_model_file(p))
+                                        layout.addWidget(rm_btn)
+                                    layout.addStretch()
+                        except RuntimeError:
+                            pass
+                    break
+            if hasattr(self, '_download_procs'):
+                self._download_procs.pop(mid, None)
+        if not self._download_procs:
+            self._stop_download_progress_timer()
+        if done_ids:
+            QTimer.singleShot(1500, self._refresh_model_status)
+
+    def _finish_download_ui(self, model_id):
+        pass
+
+    def _toggle_pause_download(self, model_id):
+        if not hasattr(self, '_download_procs') or model_id not in self._download_procs:
+            return
+        dl = self._download_procs[model_id]
+        proc = dl.get("proc")
+        if not proc or proc.poll() is not None:
+            return
+
+        pause_btn_name = f"dl_pause_{model_id}"
+
+        if dl.get("paused"):
+            self._resume_process_threads(proc.pid)
+            dl["paused"] = False
+            if hasattr(self, '_model_table'):
+                for row in range(self._model_table.rowCount()):
+                    ops_widget = self._model_table.cellWidget(row, 7)
+                    if not ops_widget:
+                        continue
+                    btn = ops_widget.findChild(QPushButton, pause_btn_name)
+                    if btn:
+                        btn.setText("⏸ 暂停")
+                        btn.setStyleSheet("""
+                            QPushButton { background-color: #E65100; color: white; border: none; border-radius: 3px;
+                                padding: 3px 8px; font-size: 10px; }
+                            QPushButton:hover { background-color: #F57C00; }
+                            QPushButton:pressed { background-color: #BF360C; }
+                        """)
+                        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                        break
+            if hasattr(self, '_model_rows'):
+                for row_idx, r in enumerate(self._model_rows):
+                    if r.get("model_id") == model_id:
+                        status_item = self._model_table.item(row_idx, 6)
+                        if status_item:
+                            status_item.setText(f"进度 {dl.get('current_pct', 0)}%")
+                            status_item.setForeground(QColor("#FFA726"))
+                        break
+        else:
+            self._suspend_process_threads(proc.pid)
+            dl["paused"] = True
+            if hasattr(self, '_model_table'):
+                for row in range(self._model_table.rowCount()):
+                    ops_widget = self._model_table.cellWidget(row, 7)
+                    if not ops_widget:
+                        continue
+                    btn = ops_widget.findChild(QPushButton, pause_btn_name)
+                    if btn:
+                        btn.setText("▶ 继续")
+                        btn.setStyleSheet("""
+                            QPushButton { background-color: #1565C0; color: white; border: none; border-radius: 3px;
+                                padding: 3px 8px; font-size: 10px; }
+                            QPushButton:hover { background-color: #1976D2; }
+                            QPushButton:pressed { background-color: #0D47A1; }
+                        """)
+                        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                        break
+            if hasattr(self, '_model_rows'):
+                for row_idx, r in enumerate(self._model_rows):
+                    if r.get("model_id") == model_id:
+                        status_item = self._model_table.item(row_idx, 6)
+                        if status_item:
+                            status_item.setText(f"⏸ 进度 {dl.get('current_pct', 0)}%")
+                            status_item.setForeground(QColor("#FFB74D"))
+                        break
+
+    def _cancel_download(self, model_id):
+        if not hasattr(self, '_download_procs') or model_id not in self._download_procs:
+            return
+        dl = self._download_procs[model_id]
+        dl["cancelled"] = True
+        proc = dl.get("proc")
+        if proc and proc.poll() is None:
+            if dl.get("paused"):
+                self._resume_process_threads(proc.pid)
+            proc.kill()
+
+    @staticmethod
+    def _suspend_process_threads(pid):
+        try:
+            import ctypes
+            TH32CS_SNAPTHREAD = 0x00000004
+            kernel32 = ctypes.windll.kernel32
+            snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0)
+            if snap == -1:
+                return
+            class THREADENTRY32(ctypes.Structure):
+                _fields_ = [("dwSize", ctypes.c_ulong), ("cntUsage", ctypes.c_ulong),
+                            ("th32ThreadID", ctypes.c_ulong), ("th32OwnerProcessID", ctypes.c_ulong),
+                            ("tpBasePri", ctypes.c_long), ("tpDeltaPri", ctypes.c_long),
+                            ("dwFlags", ctypes.c_ulong)]
+            entry = THREADENTRY32()
+            entry.dwSize = ctypes.sizeof(THREADENTRY32)
+            if kernel32.Thread32First(snap, ctypes.byref(entry)):
+                while True:
+                    if entry.th32OwnerProcessID == pid:
+                        handle = kernel32.OpenThread(0x0002, False, entry.th32ThreadID)
+                        if handle:
+                            kernel32.SuspendThread(handle)
+                            kernel32.CloseHandle(handle)
+                    if not kernel32.Thread32Next(snap, ctypes.byref(entry)):
+                        break
+            kernel32.CloseHandle(snap)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _resume_process_threads(pid):
+        try:
+            import ctypes
+            TH32CS_SNAPTHREAD = 0x00000004
+            kernel32 = ctypes.windll.kernel32
+            snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0)
+            if snap == -1:
+                return
+            class THREADENTRY32(ctypes.Structure):
+                _fields_ = [("dwSize", ctypes.c_ulong), ("cntUsage", ctypes.c_ulong),
+                            ("th32ThreadID", ctypes.c_ulong), ("th32OwnerProcessID", ctypes.c_ulong),
+                            ("tpBasePri", ctypes.c_long), ("tpDeltaPri", ctypes.c_long),
+                            ("dwFlags", ctypes.c_ulong)]
+            entry = THREADENTRY32()
+            entry.dwSize = ctypes.sizeof(THREADENTRY32)
+            if kernel32.Thread32First(snap, ctypes.byref(entry)):
+                while True:
+                    if entry.th32OwnerProcessID == pid:
+                        handle = kernel32.OpenThread(0x0002, False, entry.th32ThreadID)
+                        if handle:
+                            kernel32.ResumeThread(handle)
+                            kernel32.CloseHandle(handle)
+                    if not kernel32.Thread32Next(snap, ctypes.byref(entry)):
+                        break
+            kernel32.CloseHandle(snap)
+        except Exception:
+            pass
 
     def _on_model_download_done(self, model_id, success, source_name, error=""):
         info = LTX_MODELS.get(model_id)
-        if not info:
-            return
+        fname = info["file"] if info else model_id
+        if not info and hasattr(self, '_model_rows'):
+            for r in self._model_rows:
+                if r.get("model_id") == model_id:
+                    fname = r.get("filename", r.get("name", model_id))
+                    break
         if success:
-            self._log(f"√ 模型 {info['file']} 下载完成 ({source_name})", "ok")
+            self._log(f"√ 模型 {fname} 下载完成 ({source_name})", "ok")
         else:
-            self._log(f"× 模型 {info['file']} 下载失败 ({source_name}): {error}", "err")
+            self._log(f"× 模型 {fname} 下载失败 ({source_name}): {error}", "err")
+        if hasattr(self, '_download_procs'):
+            self._download_procs.pop(model_id, None)
+            if not self._download_procs:
+                self._stop_download_progress_timer()
         self._refresh_model_status()
 
     def _uninstall_model(self, model_id):
@@ -5114,22 +6798,15 @@ class MainWindow(QMainWindow):
         if not info:
             return
         if info.get("required", False):
-            QMessageBox.warning(self, "提示", f"{info['file']} 是必需模型，无法卸载")
+            self._log(f"⚠ {info['file']} 是必需模型，无法卸载", "warn")
             return
         model_path = os.path.join(self._models_dir, info["file"])
         if not os.path.exists(model_path):
             return
-        reply = QMessageBox.question(
-            self, "确认卸载",
-            f"确定要卸载模型 {info['file']} ({info['size_bytes']/1024/1024/1024:.1f}GB) 吗？\n此操作将删除该模型文件。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
+        self._log(f"正在卸载模型 {info['file']} ({info['size_bytes']/1024/1024/1024:.1f}GB)...", "info")
         try:
             os.remove(model_path)
-            self._log(f"× 已卸载模型 {info['file']}", "ok")
+            self._log(f"√ 已卸载模型 {info['file']}", "ok")
         except Exception as e:
             self._log(f"× 卸载模型失败: {e}", "err")
         self._refresh_model_status()
@@ -5180,7 +6857,14 @@ class MainWindow(QMainWindow):
                         results.append(f"△ {info['file']}: 不完整 ({actual_mb:.0f}MB / {expected_mb:.0f}MB)")
 
         self._refresh_model_status()
-        QMessageBox.information(self, "模型完整性检测", "\n".join(results))
+        self._log("📋 模型完整性检测：", "info")
+        for r in results:
+            if r.startswith("√"):
+                self._log(f"  {r}", "ok")
+            elif r.startswith("△"):
+                self._log(f"  {r}", "warn")
+            else:
+                self._log(f"  {r}", "err")
 
     def _refresh_model_status(self):
         if hasattr(self, '_model_table'):
@@ -5196,10 +6880,16 @@ class MainWindow(QMainWindow):
     def _setup_tray(self):
         try:
             if hasattr(sys, '_MEIPASS'):
-                icon_path = os.path.join(sys._MEIPASS, 'icon.ico')
+                base = sys._MEIPASS
             else:
-                icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'icon.ico')
-            if os.path.exists(icon_path):
+                base = os.path.dirname(os.path.abspath(__file__))
+            icon_path = None
+            for name in ('ico.png', 'icon.png', 'icon.ico'):
+                p = os.path.join(base, name)
+                if os.path.exists(p):
+                    icon_path = p
+                    break
+            if icon_path:
                 tray_icon = QIcon(icon_path)
             else:
                 tray_icon = QIcon()
@@ -5275,6 +6965,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(2000, self._delayed_gpu_detect)
             QTimer.singleShot(15000, self._splash_fallback)
             QTimer.singleShot(1000, self._auto_deploy_check)
+            QTimer.singleShot(1500, self._schedule_update_cache_check)
 
             self._probe_timer = QTimer(self)
             self._probe_timer.timeout.connect(lambda: _DBG.run_probes() if _DBG else None)
@@ -5283,6 +6974,11 @@ class MainWindow(QMainWindow):
             import traceback
             traceback.print_exc()
             self._log(f"△ 初始化异常: {e}", "err")
+
+    def _schedule_update_cache_check(self):
+        if not getattr(self, '_ver_cache_check_scheduled', False):
+            self._ver_cache_check_scheduled = True
+            self._load_update_cache_and_check()
 
     def _finish_splash(self):
         if self._splash and self._splash.isVisible():
@@ -5340,6 +7036,13 @@ class MainWindow(QMainWindow):
             self._pythonw_exe = os.path.join(os.path.dirname(sys_python), "pythonw.exe")
             self._data_dir = self._exe_data_dir or os.path.join(os.path.expanduser("~"), r"AppData\Local\LTXDesktop")
 
+        if not self._python_exe:
+            dev_python = sys.executable
+            if dev_python and os.path.isfile(dev_python) and "python" in os.path.basename(dev_python).lower():
+                self._python_exe = dev_python
+                self._pythonw_exe = os.path.join(os.path.dirname(dev_python), "pythonw.exe")
+                self._data_dir = self._exe_data_dir or os.path.join(project_root, "data")
+
         res_backend = os.path.join(app_res, "backend")
         ltx_search = [
             os.path.join(project_root, "LTX Desktop", "LTX Desktop.exe"),
@@ -5389,6 +7092,8 @@ class MainWindow(QMainWindow):
             self._set_env_widget("python", "√ 项目参考", "warn")
         elif os.path.exists(sys_python):
             self._set_env_widget("python", "√ 系统环境", "warn")
+        elif self._python_exe:
+            self._set_env_widget("python", f"√ 开发模式 ({os.path.basename(self._python_exe)})", "warn")
         else:
             self._set_env_widget("python", "× 未找到", "err", True)
 
@@ -5436,19 +7141,7 @@ class MainWindow(QMainWindow):
         cached = self._load_env_check_cache()
         if cached:
             for key, info in cached.items():
-                if key in self._env_check_widgets:
-                    val_lbl, fix_btn = self._env_check_widgets[key]
-                    val_lbl.setText(info.get("text", "未检测"))
-                    status = info.get("status", "unknown")
-                    if status == "ok":
-                        val_lbl.setStyleSheet("font-size: 9px; color: #66BB6A; background: transparent;")
-                    elif status == "err":
-                        val_lbl.setStyleSheet("font-size: 9px; color: #EF5350; background: transparent;")
-                    elif status == "warn":
-                        val_lbl.setStyleSheet("font-size: 9px; color: #FFA726; background: transparent;")
-                    else:
-                        val_lbl.setStyleSheet("font-size: 9px; color: #42A5F5; background: transparent;")
-                    fix_btn.setVisible(info.get("fix_visible", False))
+                self._set_env_widget(key, info.get("text", "未检测"), info.get("status", "unknown"), info.get("fix_visible", False))
 
     def _auto_deploy_check(self):
         if self._python_exe and os.path.exists(self._python_exe):
@@ -5475,7 +7168,7 @@ class MainWindow(QMainWindow):
             result[key] = {
                 "text": val_lbl.text(),
                 "status": st,
-                "fix_visible": fix_btn.isVisible()
+                "fix_visible": fix_btn.width() > 0
             }
         result_path = os.path.join(self._data_dir, "env_check_result.json")
         try:
@@ -5502,36 +7195,50 @@ class MainWindow(QMainWindow):
         if key not in self._env_check_widgets:
             return
         val_lbl, fix_btn = self._env_check_widgets[key]
-        val_lbl.setText(text)
-        if status == "ok":
-            val_lbl.setStyleSheet("font-size: 9px; color: #66BB6A; background: transparent;")
-        elif status == "warn":
-            val_lbl.setStyleSheet("font-size: 9px; color: #FFA726; background: transparent;")
-        elif status == "err":
-            val_lbl.setStyleSheet("font-size: 9px; color: #EF5350; background: transparent;")
-        elif status == "pending":
-            val_lbl.setStyleSheet("font-size: 9px; color: #42A5F5; background: transparent;")
+        val_lbl._full_text = text
+        fm = val_lbl.fontMetrics()
+        max_w = val_lbl.maximumWidth()
+        if max_w > 0 and fm.horizontalAdvance(text) > max_w:
+            elided = fm.elidedText(text, Qt.TextElideMode.ElideRight, max_w)
+            val_lbl.setText(elided)
+            val_lbl.setToolTip(text)
         else:
-            val_lbl.setStyleSheet("font-size: 9px; color: #42A5F5; background: transparent;")
-        fix_btn.setVisible(fix_visible)
+            val_lbl.setText(text)
+            val_lbl.setToolTip("")
+        color = {
+            "ok": "#66BB6A",
+            "warn": "#FFA726",
+            "err": "#EF5350",
+            "pending": "#42A5F5",
+        }.get(status, "#42A5F5")
+        val_lbl.setStyleSheet(f"font-size: 9px; color: {color}; background: transparent;")
+        if fix_visible:
+            fix_btn.setFixedWidth(30)
+            fix_btn.setText("修复")
+        else:
+            fix_btn.setFixedWidth(0)
+            fix_btn.setText("")
+
+    def _copy_env_check_list(self):
+        lines = []
+        for cat_key, cat_title, cat_items in self._env_check_categories:
+            lines.append(cat_title)
+            for key, display_name, tooltip_text in cat_items:
+                if key in self._env_check_widgets:
+                    val_lbl_i, _ = self._env_check_widgets[key]
+                    val_text = getattr(val_lbl_i, '_full_text', val_lbl_i.text())
+                    lines.append(f"  {display_name}: {val_text}")
+            lines.append("")
+        text = "\n".join(lines).strip()
+        if text:
+            QApplication.clipboard().setText(text)
+            self._log("√ 环境检测清单已复制到剪贴板", "ok")
 
     def _detect_environment(self, quick=False):
         cached = self._load_env_check_cache()
         if cached:
             for key, info in cached.items():
-                if key in self._env_check_widgets:
-                    val_lbl, fix_btn = self._env_check_widgets[key]
-                    val_lbl.setText(info.get("text", "未检测"))
-                    status = info.get("status", "unknown")
-                    if status == "ok":
-                        val_lbl.setStyleSheet("font-size: 9px; color: #66BB6A; background: transparent;")
-                    elif status == "err":
-                        val_lbl.setStyleSheet("font-size: 9px; color: #EF5350; background: transparent;")
-                    elif status == "warn":
-                        val_lbl.setStyleSheet("font-size: 9px; color: #FFA726; background: transparent;")
-                    else:
-                        val_lbl.setStyleSheet("font-size: 9px; color: #42A5F5; background: transparent;")
-                    fix_btn.setVisible(info.get("fix_visible", False))
+                self._set_env_widget(key, info.get("text", "未检测"), info.get("status", "unknown"), info.get("fix_visible", False))
 
         project_root = self._project_root
         app_res = self._app_resources
@@ -5575,8 +7282,15 @@ class MainWindow(QMainWindow):
             self._pythonw_exe = os.path.join(os.path.dirname(sys_python), "pythonw.exe")
             self._data_dir = self._exe_data_dir or os.path.join(os.path.expanduser("~"), r"AppData\Local\LTXDesktop")
             self._set_env_widget("python", "√ 系统环境", "warn")
-        else:
-            self._set_env_widget("python", "× 未找到", "err", True)
+        elif not self._python_exe:
+            dev_python = sys.executable
+            if dev_python and os.path.isfile(dev_python) and "python" in os.path.basename(dev_python).lower():
+                self._python_exe = dev_python
+                self._pythonw_exe = os.path.join(os.path.dirname(dev_python), "pythonw.exe")
+                self._data_dir = self._exe_data_dir or os.path.join(project_root, "data")
+                self._set_env_widget("python", f"√ 开发模式 ({os.path.basename(dev_python)})", "warn")
+            else:
+                self._set_env_widget("python", "× 未找到", "err", True)
 
         res_backend = os.path.join(app_res, "backend")
         ltx_search = [
@@ -5683,14 +7397,14 @@ import importlib.metadata
 from packaging.version import Version
 import torch
 
-deps = ["fastapi","uvicorn","safetensors","accelerate","transformers","diffusers",
+deps = ["fastapi","uvicorn","safetensors","accelerate","transformers","tokenizers","diffusers",
         "Pillow","sentencepiece","huggingface_hub","sageattention","pydantic",
         "python-multipart","ftfy","imageio","imageio-ffmpeg","peft","protobuf",
         "opencv-python-headless","tqdm","pynvml","einops","scipy","av","triton-windows"]
-locks = {"transformers":(Version("4.52"),Version("5.6")),"diffusers":(Version("0.25"),Version("1.0")),
+locks = {"transformers":(Version("4.57"),Version("4.58")),"tokenizers":(Version("0.22"),Version("0.23")),"diffusers":(Version("0.25"),Version("1.0")),
          "accelerate":(Version("0.24"),Version("2.0")),"safetensors":(Version("0.4"),Version("1.0")),
          "peft":(Version("0.13"),Version("1.0")),"pydantic":(Version("2.7"),Version("3.0")),
-         "huggingface_hub":(Version("0.23"),Version("1.0")),"sentencepiece":(Version("0.1.99"),Version("1.0")),
+         "huggingface_hub":(Version("0.30"),Version("1.0")),"sentencepiece":(Version("0.1.99"),Version("1.0")),
          "ftfy":(Version("6.0"),Version("7.0")),"imageio":(Version("2.37"),Version("3.0")),
          "imageio-ffmpeg":(Version("0.6"),Version("1.0")),"protobuf":(Version("3.20"),Version("7.0")),
          "opencv-python-headless":(Version("4.8"),Version("5.0")),"tqdm":(Version("4.66"),Version("5.0")),
@@ -5876,21 +7590,13 @@ for d in deps:
         self._env_check_summary.setText("完整性检测中...")
         self._env_check_summary.setStyleSheet("font-size: 9px; color: #888888; background: transparent; padding-top: 4px;")
         for key in ("pytorch", "cuda", "cudnn", "nvidia_driver"):
-            if key in self._env_check_widgets:
-                val_lbl, fix_btn = self._env_check_widgets[key]
-                val_lbl.setText("↻ 检测中...")
-                val_lbl.setStyleSheet("font-size: 9px; color: #888888; background: transparent;")
-                fix_btn.setVisible(False)
+            self._set_env_widget(key, "↻ 检测中...", "pending", False)
         for key in ("transformers", "diffusers", "accelerate", "safetensors", "peft",
                      "huggingface_hub", "ffmpeg", "opencv-python-headless", "Pillow",
                      "imageio", "imageio-ffmpeg", "scipy", "einops", "av", "tqdm",
                      "protobuf", "sentencepiece", "ftfy", "pynvml", "pydantic",
                      "python-multipart", "sageattention", "triton-windows"):
-            if key in self._env_check_widgets:
-                val_lbl, fix_btn = self._env_check_widgets[key]
-                val_lbl.setText("↻ 检测中...")
-                val_lbl.setStyleSheet("font-size: 9px; color: #888888; background: transparent;")
-                fix_btn.setVisible(False)
+            self._set_env_widget(key, "↻ 检测中...", "pending", False)
         self._detect_paths_only()
         if self._python_exe and os.path.exists(self._python_exe):
             self._start_runtime_detect()
@@ -6048,25 +7754,23 @@ for d in deps:
     def _detect_running_services(self):
         any_alive = False
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(1)
-                if s.connect_ex(('127.0.0.1', self._backend_port)) == 0:
-                    self._log(f"√ 检测到后端服务已在运行 (端口{self._backend_port})", "ok")
-                    any_alive = True
-                    for sid, card in self.service_cards.items():
-                        if sid == "backend":
-                            card.set_status("running")
+            conn = socket.create_connection(('127.0.0.1', self._backend_port), timeout=1)
+            conn.close()
+            self._log(f"√ 检测到后端服务已在运行 (端口{self._backend_port})", "ok")
+            any_alive = True
+            for sid, card in self.service_cards.items():
+                if sid == "backend":
+                    card.set_status("running")
         except Exception:
             pass
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(1)
-                if s.connect_ex(('127.0.0.1', self._frontend_port)) == 0:
-                    self._log(f"√ 检测到前端服务已在运行 (端口{self._frontend_port})", "ok")
-                    any_alive = True
-                    for sid, card in self.service_cards.items():
-                        if sid == "frontend":
-                            card.set_status("running")
+            conn = socket.create_connection(('127.0.0.1', self._frontend_port), timeout=1)
+            conn.close()
+            self._log(f"√ 检测到前端服务已在运行 (端口{self._frontend_port})", "ok")
+            any_alive = True
+            for sid, card in self.service_cards.items():
+                if sid == "frontend":
+                    card.set_status("running")
         except Exception:
             pass
         if any_alive:
@@ -6134,41 +7838,58 @@ for d in deps:
             self.deploy_debug_btn.setChecked(self._debug_mode)
             self.deploy_debug_btn.blockSignals(False)
         if self._debug_mode:
-            if not _DBG:
-                self._debug_mode = False
-                self.debug_mode_btn.setChecked(False)
-                if hasattr(self, 'deploy_debug_btn'):
-                    self.deploy_debug_btn.blockSignals(True)
-                    self.deploy_debug_btn.setChecked(False)
-                    self.deploy_debug_btn.blockSignals(False)
-                self._log("× 开启调试模式失败: debug_hub 模块未找到", "err")
-                return
-            try:
-                ok = _DBG.init()
-                if ok:
-                    log_path = _DBG.get_log_path()
-                    self._log(f"🐛 调试模式已开启，日志文件: {log_path}", "ok")
-                    tags = _DBG.get_active_tags()
-                    self._log(f"🐛 活跃标签: {', '.join(tags) if tags else 'ALL'}", "info")
-                    self._register_debug_probes()
-                else:
+            if _DBG:
+                try:
+                    ok = _DBG.init()
+                    if ok:
+                        log_path = _DBG.get_log_path()
+                        self._log(f"🐛 调试模式已开启，日志文件: {log_path}", "ok")
+                        tags = _DBG.get_active_tags()
+                        self._log(f"🐛 活跃标签: {', '.join(tags) if tags else 'ALL'}", "info")
+                        self._register_debug_probes()
+                    else:
+                        self._debug_mode = False
+                        self.debug_mode_btn.setChecked(False)
+                        if hasattr(self, 'deploy_debug_btn'):
+                            self.deploy_debug_btn.blockSignals(True)
+                            self.deploy_debug_btn.setChecked(False)
+                            self.deploy_debug_btn.blockSignals(False)
+                        self._log("× 开启调试模式失败: 无活跃标签", "err")
+                except Exception as e:
                     self._debug_mode = False
                     self.debug_mode_btn.setChecked(False)
                     if hasattr(self, 'deploy_debug_btn'):
                         self.deploy_debug_btn.blockSignals(True)
                         self.deploy_debug_btn.setChecked(False)
                         self.deploy_debug_btn.blockSignals(False)
-                    self._log("× 开启调试模式失败: 无活跃标签", "err")
-            except Exception as e:
-                self._debug_mode = False
-                self.debug_mode_btn.setChecked(False)
-                if hasattr(self, 'deploy_debug_btn'):
-                    self.deploy_debug_btn.blockSignals(True)
-                    self.deploy_debug_btn.setChecked(False)
-                    self.deploy_debug_btn.blockSignals(False)
-                self._log(f"× 开启调试模式失败: {e}", "err")
+                    self._log(f"× 开启调试模式失败: {e}", "err")
+            else:
+                try:
+                    if self._exe_temp_dir:
+                        log_dir = os.path.join(self._exe_temp_dir, "logs")
+                    else:
+                        log_dir = os.path.join(self._project_root, "temp", "logs")
+                    os.makedirs(log_dir, exist_ok=True)
+                    log_path = os.path.join(log_dir, f"debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+                    self._debug_log_file = open(log_path, 'a', encoding='utf-8')
+                    self._log(f"🐛 调试模式已开启（简易模式），日志文件: {log_path}", "ok")
+                except Exception as e:
+                    self._debug_mode = False
+                    self.debug_mode_btn.setChecked(False)
+                    if hasattr(self, 'deploy_debug_btn'):
+                        self.deploy_debug_btn.blockSignals(True)
+                        self.deploy_debug_btn.setChecked(False)
+                        self.deploy_debug_btn.blockSignals(False)
+                    self._log(f"× 开启调试模式失败: {e}", "err")
         else:
-            _DBG.shutdown() if _DBG else None
+            if _DBG:
+                _DBG.shutdown()
+            if self._debug_log_file:
+                try:
+                    self._debug_log_file.close()
+                except Exception:
+                    pass
+                self._debug_log_file = None
             self._log("🐛 调试模式已关闭", "info")
 
     def _register_debug_probes(self):
@@ -6190,16 +7911,12 @@ for d in deps:
             for sid, svc in SERVICES.items():
                 port = svc.get("port", 0)
                 if port:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     try:
-                        sock.settimeout(0.5)
-                        result = sock.connect_ex(('127.0.0.1', port))
-                        status = "LISTENING" if result == 0 else "CLOSED"
-                        _DBG.dbg("NETWORK", f"端口 {port} ({sid}): {status}")
-                    except Exception as e:
-                        _DBG.dbg("NETWORK", f"端口 {port} ({sid}) 检测失败: {e}", "error")
-                    finally:
-                        sock.close()
+                        conn = socket.create_connection(('127.0.0.1', port), timeout=0.5)
+                        conn.close()
+                        _DBG.dbg("NETWORK", f"端口 {port} ({sid}): LISTENING")
+                    except Exception:
+                        _DBG.dbg("NETWORK", f"端口 {port} ({sid}): CLOSED")
 
         def _probe_process():
             try:
@@ -6225,7 +7942,62 @@ for d in deps:
     def _write_debug_log(self, msg, level="info", tag="APP"):
         if not self._debug_mode:
             return
-        _DBG.dbg(tag, msg, level) if _DBG else None
+        if _DBG:
+            _DBG.dbg(tag, msg, level)
+        elif self._debug_log_file:
+            try:
+                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self._debug_log_file.write(f"[{ts}] [{tag}] [{level}] {msg}\n")
+                self._debug_log_file.flush()
+            except Exception:
+                pass
+
+    def _start_fe_debug_polling(self):
+        if not self._fe_debug_log_path:
+            data_dir = self._data_dir
+            self._fe_debug_log_path = os.path.join(data_dir, "_fe_debug.log")
+        self._fe_debug_read_pos = 0
+        if os.path.exists(self._fe_debug_log_path):
+            try:
+                self._fe_debug_read_pos = os.path.getsize(self._fe_debug_log_path)
+            except Exception:
+                pass
+        self._fe_debug_timer.start(2000)
+
+    def _stop_fe_debug_polling(self):
+        self._fe_debug_timer.stop()
+
+    def _poll_fe_debug_log(self):
+        if not self._fe_debug_log_path or not os.path.exists(self._fe_debug_log_path):
+            return
+        try:
+            file_size = os.path.getsize(self._fe_debug_log_path)
+            if file_size < self._fe_debug_read_pos:
+                self._fe_debug_read_pos = 0
+            if file_size <= self._fe_debug_read_pos:
+                return
+            with open(self._fe_debug_log_path, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(self._fe_debug_read_pos)
+                new_lines = f.readlines()
+                self._fe_debug_read_pos = f.tell()
+            for line in new_lines:
+                line = line.strip()
+                if not line:
+                    continue
+                is_error = "[FE-ERROR]" in line
+                color = "#EF5350" if is_error else "#FFA726"
+                ts = datetime.now().strftime("%H:%M:%S")
+                self.log_text.append(
+                    f"<span style='color:#666688'>[{ts}]</span> "
+                    f"<span style='color:{color}'>🌐 {line}</span>"
+                )
+                if self._debug_mode:
+                    self._write_debug_log(line, "error" if is_error else "warn", "FE")
+            if self.auto_scroll:
+                sb = self.log_text.verticalScrollBar()
+                sb.setValue(sb.maximum())
+        except Exception:
+            pass
 
     def _on_status_changed(self, sid, alive):
         if sid in self.service_cards:
@@ -6281,6 +8053,20 @@ for d in deps:
             self._log("× 未找到补丁文件！请确保 patches 目录存在。", "err")
             return
 
+        try:
+            check_result = subprocess.run(
+                [self._python_exe, "-c", "import uvicorn; import fastapi; print('ok')"],
+                capture_output=True, text=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
+            )
+            if check_result.returncode != 0:
+                self._log("× 核心依赖缺失（uvicorn/fastapi），请先在部署维护中安装依赖。", "err")
+                self._log(f"  缺失详情: {check_result.stderr.strip()[:200]}", "err")
+                return
+        except Exception as e:
+            self._log(f"× 依赖检查失败: {e}", "err")
+            return
+
         self.is_starting = True
         self.btn_start_all.setEnabled(False)
         self.btn_stop_all.setEnabled(True)
@@ -6289,63 +8075,59 @@ for d in deps:
         self._start_backend()
 
         self._log(f"等待核心引擎就绪 (端口{self._backend_port})...", "info")
-        threading.Thread(target=self._wait_and_start_frontend, daemon=True).start()
+        self._wait_backend_count = 0
+        self._wait_backend_timer = QTimer(self)
+        self._wait_backend_timer.timeout.connect(self._poll_backend_port)
+        self._wait_backend_timer.start(1000)
 
-    def _wait_and_start_frontend(self):
-        QTimer.singleShot(0, lambda: self._log("[线程] 等待核心引擎端口就绪...", "info"))
-        auto_open = self.auto_open_checkbox.isChecked()
+    def _poll_backend_port(self):
+        self._wait_backend_count += 1
         try:
-            for i in range(90):
-                try:
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                        s.settimeout(1)
-                        if s.connect_ex(('127.0.0.1', self._backend_port)) == 0:
-                            QTimer.singleShot(0, lambda port=self._backend_port, n=i+1: self._log(f"[线程] 核心引擎端口 {port} 已就绪 (第{n}秒)", "ok"))
-                            break
-                except:
-                    pass
-                time.sleep(1)
-            QTimer.singleShot(0, lambda: self._log("[线程] 调度 _start_frontend...", "info"))
-            QTimer.singleShot(0, self._start_frontend)
+            conn = socket.create_connection(('127.0.0.1', self._backend_port), timeout=1)
+            conn.close()
+            self._wait_backend_timer.stop()
+            self._log(f"核心引擎端口 {self._backend_port} 已就绪 (第{self._wait_backend_count}秒)", "ok")
+            self._start_frontend()
             self.is_starting = False
-            QTimer.singleShot(0, self._update_buttons_after_start)
+            self._update_buttons_after_start()
+            if hasattr(self, '_model_table'):
+                QTimer.singleShot(2000, self._refresh_model_status)
+            self._wait_frontend_count = 0
+            auto_open = self.auto_open_checkbox.isChecked()
             if auto_open:
-                for _ in range(30):
-                    try:
-                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                            s.settimeout(1)
-                            if s.connect_ex(('127.0.0.1', self._frontend_port)) == 0:
-                                QTimer.singleShot(0, self._open_ui)
-                                break
-                    except:
-                        pass
-                    time.sleep(1)
-        except Exception as e:
-            import traceback
-            err_msg = traceback.format_exc()
-            try:
-                _crash_dir = self._exe_temp_dir if self._exe_temp_dir else os.path.join(os.path.dirname(self._app_dir), "temp")
-                os.makedirs(os.path.join(_crash_dir, "logs"), exist_ok=True)
-                crash_log = os.path.join(_crash_dir, "logs", "crash_frontend_wait.log")
-                with open(crash_log, "w", encoding="utf-8") as f:
-                    f.write(err_msg)
-            except:
-                pass
+                self._wait_frontend_timer = QTimer(self)
+                self._wait_frontend_timer.timeout.connect(self._poll_frontend_port)
+                self._wait_frontend_timer.start(1000)
+        except Exception:
+            if self._wait_backend_count >= 90:
+                self._wait_backend_timer.stop()
+                self._log(f"核心引擎端口 {self._backend_port} 等待超时", "err")
+                self.is_starting = False
+
+    def _poll_frontend_port(self):
+        self._wait_frontend_count += 1
+        try:
+            conn = socket.create_connection(('127.0.0.1', self._frontend_port), timeout=1)
+            conn.close()
+            self._wait_frontend_timer.stop()
+            self._open_ui()
+        except Exception:
+            if self._wait_frontend_count >= 30:
+                self._wait_frontend_timer.stop()
 
     def _start_backend(self):
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(1)
-                if s.connect_ex(('127.0.0.1', self._backend_port)) == 0:
-                    is_own = "backend" in self.service_processes and self.service_processes["backend"].isRunning()
-                    if is_own:
-                        self._log(f"√ 核心引擎已在运行 (端口{self._backend_port})，跳过启动", "ok")
-                        return
-                    else:
-                        self._log(f"△ 端口{self._backend_port}被未知进程占用，正在清理...", "warn")
-                        self._kill_specific_port(self._backend_port)
-                        time.sleep(0.5)
-        except:
+            conn = socket.create_connection(('127.0.0.1', self._backend_port), timeout=1)
+            conn.close()
+            is_own = "backend" in self.service_processes and self.service_processes["backend"].isRunning()
+            if is_own:
+                self._log(f"√ 核心引擎已在运行 (端口{self._backend_port})，跳过启动", "ok")
+                return
+            else:
+                self._log(f"△ 端口{self._backend_port}被未知进程占用，正在清理...", "warn")
+                self._kill_specific_port(self._backend_port)
+                time.sleep(0.5)
+        except Exception:
             pass
 
         try:
@@ -6431,18 +8213,17 @@ if __name__ == '__main__':
     def _start_frontend(self):
         self._log("正在启动 UI 工作站...", "info")
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(1)
-                if s.connect_ex(('127.0.0.1', self._frontend_port)) == 0:
-                    is_own = "frontend" in self.service_processes and self.service_processes["frontend"].isRunning()
-                    if is_own:
-                        self._log(f"√ UI 工作站已在运行 (端口{self._frontend_port})，跳过启动", "ok")
-                        return
-                    else:
-                        self._log(f"△ 端口{self._frontend_port}被未知进程占用，正在清理...", "warn")
-                        self._kill_specific_port(self._frontend_port)
-                        time.sleep(0.5)
-        except:
+            conn = socket.create_connection(('127.0.0.1', self._frontend_port), timeout=1)
+            conn.close()
+            is_own = "frontend" in self.service_processes and self.service_processes["frontend"].isRunning()
+            if is_own:
+                self._log(f"√ UI 工作站已在运行 (端口{self._frontend_port})，跳过启动", "ok")
+                return
+            else:
+                self._log(f"△ 端口{self._frontend_port}被未知进程占用，正在清理...", "warn")
+                self._kill_specific_port(self._frontend_port)
+                time.sleep(0.5)
+        except Exception:
             pass
 
         try:
@@ -6467,9 +8248,10 @@ if __name__ == '__main__':
             outputs_dir_escaped = repr(outputs_dir_for_proxy)
 
             icon_candidates = []
-            if hasattr(sys, '_MEIPASS'):
-                icon_candidates.append(os.path.join(sys._MEIPASS, 'icon.png'))
-            icon_candidates.append(os.path.join(self._app_dir, 'icon.png'))
+            for name in ('ico.png', 'icon.png', 'icon.ico'):
+                if hasattr(sys, '_MEIPASS'):
+                    icon_candidates.append(os.path.join(sys._MEIPASS, name))
+                icon_candidates.append(os.path.join(self._app_dir, name))
             icon_path = next((p for p in icon_candidates if os.path.exists(p)), icon_candidates[-1])
             icon_path_escaped = repr(icon_path)
 
@@ -6546,7 +8328,8 @@ async def i18n():
 async def app_icon():
     icon_candidates = [__ICON_PATH__]
     if hasattr(sys, '_MEIPASS'):
-        icon_candidates.insert(0, os.path.join(sys._MEIPASS, 'icon.png'))
+        for name in ('ico.png', 'icon.png', 'icon.ico'):
+            icon_candidates.insert(0, os.path.join(sys._MEIPASS, name))
     for p in icon_candidates:
         if os.path.exists(p):
             return _safe_file(p, "image/png", NC)
@@ -6557,13 +8340,21 @@ async def proxy_outputs(request: Request, path: str):
     outputs_dir = __OUTPUTS_DIR__
     file_path = os.path.join(outputs_dir, path)
     if not os.path.exists(file_path) or os.path.isdir(file_path):
+        _ui_log(f"OUTPUTS 404: path={path}")
         return Response(content=b"Not found", status_code=404)
     import mimetypes as _mt
     import re as _re
-    file_size = os.path.getsize(file_path)
+    try:
+        file_size = os.path.getsize(file_path)
+    except OSError as _e:
+        _ui_log(f"OUTPUTS OSError: path={path}, err={_e}")
+        return Response(content=b"Internal error", status_code=500)
     mime_type, _ = _mt.guess_type(file_path)
     if mime_type is None:
         mime_type = "application/octet-stream"
+    base_headers = {"Accept-Ranges": "bytes", "Content-Length": str(file_size), "Content-Type": mime_type}
+    if request.method == "HEAD":
+        return Response(content=b"", status_code=200, media_type=mime_type, headers=base_headers)
     headers = dict(request.headers)
     range_header = headers.get("range", "")
     if range_header.startswith("bytes="):
@@ -6572,6 +8363,8 @@ async def proxy_outputs(request: Request, path: str):
             start = int(match.group(1))
             end = int(match.group(2)) if match.group(2) else file_size - 1
             end = min(end, file_size - 1)
+            if start > end or start >= file_size:
+                return Response(content=b"Invalid range", status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
             content_length = end - start + 1
             def _iter():
                 with open(file_path, "rb") as f:
@@ -6593,10 +8386,16 @@ async def proxy_outputs(request: Request, path: str):
                     "Content-Length": str(content_length),
                 },
             )
-    with open(file_path, "rb") as _f:
-        return Response(content=_f.read(), media_type=mime_type, headers={"Accept-Ranges": "bytes", "Content-Length": str(file_size)})
+    def _full_iter():
+        with open(file_path, "rb") as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+    return StreamingResponse(_full_iter(), status_code=200, media_type=mime_type, headers=base_headers)
 
-@app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
+@app.api_route("/api/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 async def proxy_api(request: Request, path: str):
     query = str(request.query_params)
     url = f"{BACKEND_BASE}/api/{path}"
@@ -6614,47 +8413,63 @@ async def proxy_api(request: Request, path: str):
         import mimetypes
         import re
         file_path = request.query_params.get("path", "")
-        if file_path and os.path.exists(file_path):
+        if not file_path or not os.path.exists(file_path):
+            if request.method == "HEAD":
+                return Response(content=b"", status_code=404, media_type="application/octet-stream")
+            return Response(content=b"Not found", status_code=404)
+        try:
             file_size = os.path.getsize(file_path)
-            mime_type, _ = mimetypes.guess_type(file_path)
-            if mime_type is None:
-                mime_type = "application/octet-stream"
-            
-            range_header = headers.get("range", "")
-            if range_header.startswith("bytes="):
-                match = re.match(r"^bytes=(\\d+)-(\\d*)$", range_header)
-                if match:
-                    start = int(match.group(1))
-                    end = int(match.group(2)) if match.group(2) else file_size - 1
-                    end = min(end, file_size - 1)
-                    content_length = end - start + 1
-                    
-                    def iterfile():
-                        with open(file_path, "rb") as f:
-                            f.seek(start)
-                            remaining = content_length
-                            while remaining > 0:
-                                chunk = f.read(min(65536, remaining))
-                                if not chunk:
-                                    break
-                                remaining -= len(chunk)
-                                yield chunk
-                    
-                    _ui_log(f"MEDIA file direct read: status=206, path={file_path}, range={range_header}")
-                    return StreamingResponse(
-                        iterfile(),
-                        status_code=206,
-                        media_type=mime_type,
-                        headers={
-                            "Content-Range": f"bytes {start}-{end}/{file_size}",
-                            "Accept-Ranges": "bytes",
-                            "Content-Length": str(content_length),
-                        },
-                    )
-            else:
-                _ui_log(f"MEDIA file direct read: status=200, path={file_path}, size={file_size}")
-                with open(file_path, "rb") as _f:
-                    return Response(content=_f.read(), media_type=mime_type, headers={"Accept-Ranges": "bytes", "Content-Length": str(file_size)})
+        except OSError as _e:
+            _ui_log(f"MEDIA OSError: path={file_path}, err={_e}")
+            return Response(content=b"Internal error", status_code=500)
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if mime_type is None:
+            mime_type = "application/octet-stream"
+        base_headers = {"Accept-Ranges": "bytes", "Content-Length": str(file_size), "Content-Type": mime_type}
+        if request.method == "HEAD":
+            return Response(content=b"", status_code=200, media_type=mime_type, headers=base_headers)
+        range_header = headers.get("range", "")
+        if range_header.startswith("bytes="):
+            match = re.match(r"^bytes=(\\d+)-(\\d*)$", range_header)
+            if match:
+                start = int(match.group(1))
+                end = int(match.group(2)) if match.group(2) else file_size - 1
+                end = min(end, file_size - 1)
+                if start > end or start >= file_size:
+                    return Response(content=b"Invalid range", status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+                content_length = end - start + 1
+                
+                def iterfile():
+                    with open(file_path, "rb") as f:
+                        f.seek(start)
+                        remaining = content_length
+                        while remaining > 0:
+                            chunk = f.read(min(65536, remaining))
+                            if not chunk:
+                                break
+                            remaining -= len(chunk)
+                            yield chunk
+                
+                _ui_log(f"MEDIA file direct read: status=206, path={file_path}, range={range_header}")
+                return StreamingResponse(
+                    iterfile(),
+                    status_code=206,
+                    media_type=mime_type,
+                    headers={
+                        "Content-Range": f"bytes {start}-{end}/{file_size}",
+                        "Accept-Ranges": "bytes",
+                        "Content-Length": str(content_length),
+                    },
+                )
+        _ui_log(f"MEDIA file direct read: status=200, path={file_path}, size={file_size}")
+        def _full_iter():
+            with open(file_path, "rb") as f:
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    yield chunk
+        return StreamingResponse(_full_iter(), status_code=200, media_type=mime_type, headers=base_headers)
     
     timeout = httpx.Timeout(300.0) if is_media_request else httpx.Timeout(60.0)
     
@@ -6739,6 +8554,7 @@ if __name__ == '__main__':
             self.service_processes["frontend"] = proc
             proc.start()
             self._log("√ UI 工作站启动命令已发送", "ok")
+            self._start_fe_debug_polling()
         except Exception as e:
             import traceback
             self._log(f"× 启动 UI 工作站异常: {e}", "error")
@@ -6746,6 +8562,7 @@ if __name__ == '__main__':
 
     def _stop_all(self):
         self._log("正在停止全部服务...", "warn")
+        self._stop_fe_debug_polling()
         for sid, proc in list(self.service_processes.items()):
             if proc and proc.isRunning():
                 proc.terminate()
@@ -6755,8 +8572,8 @@ if __name__ == '__main__':
         self._enable_buttons()
 
     def _kill_port_processes(self):
-        for sid, info in SERVICES.items():
-            port = info["port"]
+        port_map = {"backend": self._backend_port, "frontend": self._frontend_port}
+        for sid, port in port_map.items():
             try:
                 result = hidden_run(
                     ['netstat', '-aon', '-p', 'TCP'],
@@ -6989,11 +8806,10 @@ if __name__ == '__main__':
             self._log(f"△ 不能与 {SERVICES[other_sid]['name']} 使用相同端口 ({new_port})", "warn")
             return
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(0.5)
-                if s.connect_ex(('127.0.0.1', new_port)) == 0:
-                    self._log(f"△ 经检测端口 {new_port} 已被占用，请更改", "warn")
-                    return
+            conn = socket.create_connection(('127.0.0.1', new_port), timeout=0.5)
+            conn.close()
+            self._log(f"△ 经检测端口 {new_port} 已被占用，请更改", "warn")
+            return
         except Exception:
             pass
         old_port = self._backend_port if sid == "backend" else self._frontend_port
@@ -7003,7 +8819,8 @@ if __name__ == '__main__':
             self.service_processes[sid].terminate()
             del self.service_processes[sid]
             self._kill_specific_port(old_port)
-            time.sleep(1)
+            if not self._wait_for_port_free(old_port, timeout=8):
+                self._log(f"△ 端口 {old_port} 释放超时，强制继续...", "warn")
         if sid == "backend":
             self._backend_port = new_port
             self.config.set("ports.backend", new_port)
@@ -7017,14 +8834,23 @@ if __name__ == '__main__':
                 self._start_backend()
                 frontend_running = "frontend" in self.service_processes and self.service_processes["frontend"].isRunning()
                 if frontend_running:
-                    self._log("正在重启 UI 工作站以更新后端端口配置...", "warn")
-                    self.service_processes["frontend"].terminate()
-                    del self.service_processes["frontend"]
-                    self._kill_specific_port(self._frontend_port)
-                    time.sleep(0.5)
-                    self._start_frontend()
+                    self._log("等待核心引擎就绪后重启 UI 工作站...", "info")
+                    if hasattr(self, '_port_change_timer') and self._port_change_timer is not None:
+                        self._port_change_timer.stop()
+                    self._port_change_wait_count = 0
+                    self._port_change_timer = QTimer(self)
+                    self._port_change_timer.timeout.connect(self._on_port_change_backend_poll)
+                    self._port_change_timer.start(1000)
             else:
                 self._start_frontend()
+                self._log("等待 UI 工作站就绪后打开浏览器...", "info")
+                if hasattr(self, '_port_change_fe_timer') and self._port_change_fe_timer is not None:
+                    self._port_change_fe_timer.stop()
+                self._port_change_fe_wait_count = 0
+                self._port_change_open_browser = True
+                self._port_change_fe_timer = QTimer(self)
+                self._port_change_fe_timer.timeout.connect(self._on_port_change_frontend_poll)
+                self._port_change_fe_timer.start(1000)
         else:
             self._log(f"{SERVICES[sid]['name']} 端口已设为 {new_port}（启动服务后生效）", "info")
 
@@ -7048,6 +8874,51 @@ if __name__ == '__main__':
                             self._log(f"⏹ 已强制终止端口 {port} 的进程 (PID:{pid})", "warn")
         except Exception:
             pass
+
+    def _wait_for_port_free(self, port, timeout=8):
+        start = time.time()
+        while time.time() - start < timeout:
+            try:
+                conn = socket.create_connection(('127.0.0.1', port), timeout=0.5)
+                conn.close()
+                time.sleep(0.3)
+            except Exception:
+                return True
+        return False
+
+    def _on_port_change_backend_poll(self):
+        self._port_change_wait_count += 1
+        try:
+            conn = socket.create_connection(('127.0.0.1', self._backend_port), timeout=1)
+            conn.close()
+            self._port_change_timer.stop()
+            self._log(f"核心引擎已就绪 (端口{self._backend_port})，正在重启 UI 工作站...", "ok")
+            frontend_running = "frontend" in self.service_processes and self.service_processes["frontend"].isRunning()
+            if frontend_running:
+                self.service_processes["frontend"].terminate()
+                del self.service_processes["frontend"]
+                self._kill_specific_port(self._frontend_port)
+                self._wait_for_port_free(self._frontend_port, timeout=5)
+            self._start_frontend()
+        except Exception:
+            if self._port_change_wait_count >= 90:
+                self._port_change_timer.stop()
+                self._log("× 等待核心引擎就绪超时，UI 工作站未重启", "err")
+
+    def _on_port_change_frontend_poll(self):
+        self._port_change_fe_wait_count += 1
+        try:
+            conn = socket.create_connection(('127.0.0.1', self._frontend_port), timeout=1)
+            conn.close()
+            self._port_change_fe_timer.stop()
+            self._log(f"UI 工作站已就绪 (端口{self._frontend_port})", "ok")
+            if getattr(self, '_port_change_open_browser', False):
+                self._port_change_open_browser = False
+                self._open_ui()
+        except Exception:
+            if self._port_change_fe_wait_count >= 30:
+                self._port_change_fe_timer.stop()
+                self._log("× 等待 UI 工作站就绪超时", "err")
 
     def _select_custom_browser(self):
         file_dialog = QFileDialog()
@@ -7088,28 +8959,35 @@ if __name__ == '__main__':
                 self._enable_buttons()
 
     def _show_deploy_info(self):
-        QMessageBox.information(self, "整合包说明",
-            "三目录纯净整合包结构：\n\n"
-            "  app/                ← 应用程序（只读，纯净可发布）\n"
-            "  app/resources/      ← 后端、补丁、前端等资源\n\n"
-            "  data/               ← 用户数据（可写，需要备份）\n"
-            "  data/.venv/         ← Python 虚拟环境（UV 自动创建）\n"
-            "  data/outputs/       ← 生成的视频/图像/音频\n"
-            "  data/uploads/       ← 上传的参考图片\n"
-            "  data/models/        ← AI 模型文件\n"
-            "  data/settings.json  ← 用户设置\n\n"
-            "  temp/               ← 临时文件（可删除，无需备份）\n"
-            "  temp/logs/          ← 日志文件\n"
-            "  temp/cache/         ← 缓存文件\n\n"
-            "部署维护会自动完成：\n"
-            "  1. 下载 UV 包管理器（国内镜像）\n"
-            "  2. 安装 Python 3.12 + 创建虚拟环境到 data/.venv/（UV 自动管理）\n"
-            "  3. 安装 PyTorch + CUDA 12.8 + 项目依赖 + TTS语音依赖（UV 极速安装）\n"
-            "  4. 部署补丁文件和前端界面\n"
-            "  5. 自动下载 LTX Desktop 并提取后端代码\n"
-            "  6. 下载 AI 模型（HF-Mirror 国内镜像）\n"
-            "  7. 自动配置所有路径"
-        )
+        info_lines = [
+            "📋 整合包说明：",
+            "",
+            "  三目录纯净整合包结构：",
+            "  app/                ← 应用程序（只读，纯净可发布）",
+            "  app/resources/      ← 后端、补丁、前端等资源",
+            "",
+            "  data/               ← 用户数据（可写，需要备份）",
+            "  data/.venv/         ← Python 虚拟环境（UV 自动创建）",
+            "  data/outputs/       ← 生成的视频/图像/音频",
+            "  data/uploads/       ← 上传的参考图片",
+            "  data/models/        ← AI 模型文件",
+            "  data/settings.json  ← 用户设置",
+            "",
+            "  temp/               ← 临时文件（可删除，无需备份）",
+            "  temp/logs/          ← 日志文件",
+            "  temp/cache/         ← 缓存文件",
+            "",
+            "  部署维护会自动完成：",
+            "  1. 下载 UV 包管理器（国内镜像）",
+            "  2. 安装 Python 3.12 + 创建虚拟环境到 data/.venv/（UV 自动管理）",
+            "  3. 安装 PyTorch + CUDA 12.8 + 项目依赖 + TTS语音依赖（UV 极速安装）",
+            "  4. 部署补丁文件和前端界面",
+            "  5. 自动下载 LTX Desktop 并提取后端代码",
+            "  6. 下载 AI 模型（HF-Mirror 国内镜像）",
+            "  7. 自动配置所有路径",
+        ]
+        for line in info_lines:
+            self._log(line, "info")
 
     def _speed_test_mirrors(self):
         self._speed_results = {}
@@ -7139,10 +9017,18 @@ if __name__ == '__main__':
         self._ping_proc.start("ping", ["-n", "1", "-w", "2000", host])
 
     def _on_ping_finished(self, exit_code, exit_status):
-        output = bytes(self._ping_proc.readAllStandardOutput()).decode("gbk", errors="ignore")
+        proc = getattr(self, '_ping_proc', None)
+        if proc is None:
+            return
+        output = bytes(proc.readAllStandardOutput()).decode("gbk", errors="ignore")
         match = re.search(r"(?:时间|time)[=<](\d+)ms", output, re.IGNORECASE)
         self._speed_results[self._ping_key] = float(match.group(1)) if match else 99999
-        self._ping_proc.deleteLater()
+        try:
+            proc.finished.disconnect()
+        except Exception:
+            pass
+        proc.deleteLater()
+        self._ping_proc = None
         self._ping_next()
 
     def _check_gh_next(self):
@@ -7166,9 +9052,17 @@ if __name__ == '__main__':
         self._gh_proc.start("curl.exe", ["-s", "-o", "NUL", "-w", "%{http_code}", "--head", "--connect-timeout", "5", "-m", "8", url])
 
     def _on_gh_check_finished(self, exit_code, exit_status):
-        output = bytes(self._gh_proc.readAllStandardOutput()).decode("utf-8", errors="ignore").strip()
+        proc = getattr(self, '_gh_proc', None)
+        if proc is None:
+            return
+        output = bytes(proc.readAllStandardOutput()).decode("utf-8", errors="ignore").strip()
         self._speed_gh_ok[self._gh_key] = output.startswith("2") or output.startswith("3")
-        self._gh_proc.deleteLater()
+        try:
+            proc.finished.disconnect()
+        except Exception:
+            pass
+        proc.deleteLater()
+        self._gh_proc = None
         self._check_gh_next()
 
     def _build_uv_urls(self, source_key):
@@ -7447,7 +9341,7 @@ if __name__ == '__main__':
         try:
             os.startfile(output_dir)
         except Exception:
-            QMessageBox.warning(self, "提示", f"无法打开目录：\n{output_dir}")
+            self._log(f"× 无法打开目录: {output_dir}", "err")
 
     def _notify_backend_output_dir(self, dir_path):
         try:
@@ -7478,16 +9372,36 @@ if __name__ == '__main__':
             pass
 
     def closeEvent(self, event):
+        self._cancel_race_procs()
+        self._cancel_commits_race_procs()
+        for proc_attr in ('_ping_proc', '_gh_proc'):
+            proc = getattr(self, proc_attr, None)
+            if proc:
+                try:
+                    proc.finished.disconnect()
+                except Exception:
+                    pass
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                proc.deleteLater()
+                setattr(self, proc_attr, None)
         self._stop_all()
         try:
-            self.monitor.running = False
-            self.monitor.wait(3000)
+            self.monitor.stop()
         except Exception:
             pass
         if hasattr(self, '_probe_timer') and self._probe_timer.isActive():
             self._probe_timer.stop()
         if _DBG:
             _DBG.shutdown()
+        if self._debug_log_file:
+            try:
+                self._debug_log_file.close()
+            except Exception:
+                pass
+            self._debug_log_file = None
         _cleanup_single_instance()
         event.accept()
         self._quit_app()
@@ -7500,6 +9414,151 @@ if __name__ == '__main__':
 
 
 def main():
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            ctypes.windll.ole32.CoInitializeEx(None, 0x2)
+        except Exception:
+            pass
+
+    import faulthandler
+    log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "temp", "crash.log")
+    try:
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        crash_f = open(log_file, "w")
+        faulthandler.enable(crash_f)
+        faulthandler._crash_file = crash_f
+    except Exception:
+        faulthandler.enable()
+        crash_f = None
+
+    def _crash_hook(exc_type, exc_value, exc_tb):
+        import traceback
+        tb_text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        try:
+            if crash_f and not crash_f.closed:
+                crash_f.write(f"Uncaught exception at {time.strftime('%Y-%m-%d %H:%M:%S')}:\n{tb_text}\n")
+                crash_f.flush()
+        except Exception:
+            pass
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _crash_hook
+    if _IS_FROZEN:
+        _validate_exe_filename()
+
+        install_root = _find_install_root()
+        exe_dir = os.path.abspath(os.path.dirname(sys.executable))
+        if install_root is None:
+            install_root = exe_dir
+
+        if install_root != exe_dir:
+            exe_name = os.path.basename(sys.executable)
+            target_exe = os.path.join(install_root, exe_name)
+            if not os.path.exists(target_exe):
+                for f in os.listdir(install_root):
+                    if f.endswith(".exe") and "云集智能视频创意站" in f:
+                        target_exe = os.path.join(install_root, f)
+                        break
+            if os.path.exists(target_exe) and os.path.abspath(target_exe) != os.path.abspath(sys.executable):
+                subprocess.Popen(
+                    f'ping -n 2 127.0.0.1 >nul & start "" "{target_exe}"',
+                    shell=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                sys.exit(0)
+            elif not os.path.exists(target_exe):
+                try:
+                    shutil.copy2(sys.executable, target_exe)
+                    subprocess.Popen(
+                        f'ping -n 2 127.0.0.1 >nul & start "" "{target_exe}"',
+                        shell=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                    sys.exit(0)
+                except Exception:
+                    pass
+
+        app_resources = os.path.join(install_root, "app", "resources")
+        if not os.path.isdir(app_resources) or not os.path.isdir(os.path.join(app_resources, "backend")):
+            QApplication.setHighDpiScaleFactorRoundingPolicy(
+                Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+            )
+            _app = QApplication(sys.argv)
+            _app.setStyle('Fusion')
+            _dlg = QDialog()
+            _dlg.setWindowTitle("云集智能视频创意站 - 首次启动")
+            _dlg.setFixedSize(480, 280)
+            _dlg.setStyleSheet("QDialog { background-color: #1A1A1A; }")
+            _dlg.setWindowFlags(_dlg.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+            _layout = QVBoxLayout(_dlg)
+            _layout.setContentsMargins(30, 25, 30, 20)
+            _layout.setSpacing(12)
+            _title = QLabel("🚀 首次启动，正在准备核心文件...")
+            _title.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
+            _title.setStyleSheet("color: #FFFFFF; border: none;")
+            _title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            _layout.addWidget(_title)
+            _progress = QProgressBar()
+            _progress.setRange(0, 0)
+            _progress.setFixedHeight(20)
+            _progress.setStyleSheet(
+                "QProgressBar { background-color: #2A2A2A; border: 1px solid #444; border-radius: 10px; text-align: center; color: #AAA; }"
+                "QProgressBar::chunk { background-color: #4CAF50; border-radius: 9px; }"
+            )
+            _layout.addWidget(_progress)
+            _status = QLabel("正在从远程仓库下载核心文件...")
+            _status.setStyleSheet("color: #AAAAAA; font-size: 10pt; border: none;")
+            _status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            _layout.addWidget(_status)
+            _detail = QLabel("将同时尝试 GitHub 和 Gitee，使用最快的源")
+            _detail.setStyleSheet("color: #666666; font-size: 9pt; border: none;")
+            _detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            _layout.addWidget(_detail)
+            _layout.addStretch()
+            _dlg.show()
+            _app.processEvents()
+
+            bootstrap_result = [None]
+
+            def do_bootstrap():
+                ok, msg = _bootstrap_download_resources(install_root)
+                bootstrap_result[0] = (ok, msg)
+
+            bt = threading.Thread(target=do_bootstrap, daemon=True)
+            bt.start()
+
+            while bt.is_alive():
+                _app.processEvents()
+                bt.join(timeout=0.05)
+
+            _dlg.close()
+
+            ok, msg = bootstrap_result[0]
+            if not ok:
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(
+                    0,
+                    f"核心文件下载失败：\n{msg}\n\n"
+                    "请检查网络连接后重试。\n"
+                    "也可以手动从以下地址下载：\n"
+                    "https://github.com/yunjii-cn/vi/releases",
+                    "云集智能视频创意站 - 启动失败",
+                    0x10
+                )
+                sys.exit(1)
+
+            app_resources = os.path.join(install_root, "app", "resources")
+            if not os.path.isdir(os.path.join(app_resources, "backend")):
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(
+                    0,
+                    "核心文件下载后验证失败，请重新启动程序重试。",
+                    "云集智能视频创意站 - 启动失败",
+                    0x10
+                )
+                sys.exit(1)
+
     try:
         import ctypes
         app_id = "YunJi.VideoCreativeStation"
@@ -7511,14 +9570,36 @@ def main():
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
 
-    app = QApplication(sys.argv)
+    class SafeQApplication(QApplication):
+        def notify(self, receiver, event):
+            try:
+                return super().notify(receiver, event)
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                print(f"[SafeQApplication] Unhandled exception in Qt event loop:\n{tb}")
+                try:
+                    crash_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "temp", "logs")
+                    os.makedirs(crash_dir, exist_ok=True)
+                    with open(os.path.join(crash_dir, "qt_exception.log"), "a", encoding="utf-8") as f:
+                        f.write(f"\n--- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n{tb}\n")
+                except Exception:
+                    pass
+                return False
+
+    app = SafeQApplication(sys.argv)
     app.setStyle('Fusion')
 
     try:
         if hasattr(sys, '_MEIPASS'):
-            icon_path = os.path.join(sys._MEIPASS, 'icon.ico')
+            icon_path = os.path.join(sys._MEIPASS, 'ico.png')
         else:
-            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'icon.ico')
+            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ico.png')
+        if not os.path.exists(icon_path):
+            if hasattr(sys, '_MEIPASS'):
+                icon_path = os.path.join(sys._MEIPASS, 'icon.ico')
+            else:
+                icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'icon.ico')
         if os.path.exists(icon_path):
             app.setWindowIcon(QIcon(icon_path))
     except Exception:
@@ -7557,39 +9638,57 @@ def main():
     splash.set_progress(0.1, "正在创建主窗口...")
     app.processEvents()
 
+    print("[DEBUG] Creating MainWindow...")
     window = MainWindow(splash)
+    print("[DEBUG] MainWindow created, resizing...")
     window.resize(1100, 800)
+    print("[DEBUG] Window resized, starting event loop...")
 
-    # 设置全局窗口引用，供单实例激活窗口使用
     global _MAIN_WINDOW_REF
     _MAIN_WINDOW_REF = window
 
-    sys.exit(app.exec())
+    app.processEvents()
+    time.sleep(0.1)
+
+    try:
+        exit_code = app.exec()
+    except Exception:
+        exit_code = 1
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        import traceback
-        err = traceback.format_exc()
+    _seh_crash_code = -1073741819
+    _max_retries = 2
+    for _attempt in range(_max_retries + 1):
         try:
-            if _IS_FROZEN:
-                crash_dir = os.path.join(_EXE_DIR, "temp", "logs")
-            else:
-                crash_dir = os.path.join(os.path.dirname(_EXE_DIR), "temp", "logs")
-            os.makedirs(crash_dir, exist_ok=True)
-            crash_path = os.path.join(crash_dir, "crash.log")
-            with open(crash_path, "w", encoding="utf-8") as f:
-                f.write(f"Crash at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(err)
-        except Exception:
-            pass
-        if _DEBUG_MODE:
+            main()
+        except SystemExit as e:
+            if e.code == _seh_crash_code and _attempt < _max_retries:
+                print(f"[MAIN] 0xC0000005 崩溃，第{_attempt + 1}次重试...")
+                time.sleep(1)
+                continue
+            raise
+        except Exception as e:
+            import traceback
+            err = traceback.format_exc()
             try:
-                print(f"[MAIN] 未捕获异常:\n{err}")
+                if _IS_FROZEN:
+                    crash_dir = os.path.join(_EXE_DIR, "temp", "logs")
+                else:
+                    crash_dir = os.path.join(os.path.dirname(_EXE_DIR), "temp", "logs")
+                os.makedirs(crash_dir, exist_ok=True)
+                crash_path = os.path.join(crash_dir, "crash.log")
+                with open(crash_path, "w", encoding="utf-8") as f:
+                    f.write(f"Crash at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(err)
             except Exception:
                 pass
-        raise
+            if _DEBUG_MODE:
+                try:
+                    print(f"[MAIN] 未捕获异常:\n{err}")
+                except Exception:
+                    pass
+            raise
 
 

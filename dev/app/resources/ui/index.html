@@ -4,19 +4,25 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LTX-2 | Multi-GPU Cinematic Studio</title>
-    <link rel="stylesheet" href="index.css?v=en-tabs-1">
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/plyr/3.7.8/plyr.css" />
+    <link rel="stylesheet" href="index.css?v=fix-replay-progress">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/plyr/3.7.8/plyr.css" media="print" onload="this.media='all'" />
 </head>
 <body>
 
 <aside class="sidebar">
     <div class="sidebar-header">
-        <div id="app-brand" style="display: flex; flex-direction: column; align-items: center; gap: 6px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.08);">
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <img id="app-icon" src="/app-icon.png" style="width: 24px; height: 24px; border-radius: 6px;" onerror="this.style.display='none'">
-                <div id="app-name" style="font-weight: 800; font-size: 16px; color: var(--text-main); line-height: 1.2;">云集智能视频创意站</div>
-            </div>
-            <div id="app-version" style="font-size: 11px; color: var(--text-dim); line-height: 1.2;">v-</div>
+        <div id="app-brand" style="display: flex; align-items: center; gap: 10px; height: 42px; margin-bottom: 0; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.08);">
+            <img id="app-icon" src="/app-icon.png" style="width: 24px; height: 24px; border-radius: 5px;" onerror="this.style.display='none'">
+            <div id="app-name" style="font-weight: 800; font-size: 15px; color: var(--text-main); line-height: 1.2;">云集智能视频创意站</div>
+            <div style="flex:1;"></div>
+            <button type="button" onclick="togglePanel('env-settings')" class="btn-icon sidebar-top-btn" data-i18n-title="envCheckTitle" title="环境检测" style="gap:4px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="M12 6v6l4 2"></path></svg>
+                <span style="font-size:11px;" data-i18n="envCheckTitle">环境检测</span>
+            </button>
+            <button type="button" onclick="togglePanel('sys-settings')" class="btn-icon sidebar-top-btn" data-i18n-title="settingsTitle" title="系统高级设置" style="gap:4px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                <span style="font-size:11px;" data-i18n="settingsBtnText">系统设置</span>
+            </button>
         </div>
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
             <div style="display: flex; align-items: center; gap: 10px;">
@@ -24,29 +30,39 @@
                 <span style="font-weight: 800; font-size: 18px;">LTX-2 STUDIO</span>
             </div>
             <div style="display: flex; gap: 8px; align-items: center;">
+                <button id="feDebugBtn" onclick="toggleFeDebug()" class="btn-outline" style="font-size:11px;padding:4px 10px;opacity:0.7;" data-i18n="feDebugOff">调试:关</button>
                 <button id="clearGpuBtn" onclick="clearGpu()" class="btn-outline" data-i18n="clearVram">释放显存</button>
                 <button type="button" id="lang-toggle-btn" class="lang-toggle">EN</button>
             </div>
         </div>
         
-        <div class="top-status" style="margin-bottom: 5px;">
+        <div class="top-status" style="margin-bottom: 20px;">
             <div style="display: flex; align-items: center; gap: 8px;">
                 <span id="sys-status" style="font-weight:bold; color: var(--text-dim); font-size: 12px;" data-i18n="sysScanning">正在扫描 GPU...</span>
+                <div class="vram-bar" style="width: 120px; min-width: 120px; margin-top: 0;"><div class="vram-used" id="vram-fill"></div></div>
+                <span id="vram-text" style="font-variant-numeric: tabular-nums; flex-shrink: 0; font-size: 11px; color: var(--text-dim);">0/32 GB</span>
+                <span id="gpu-name" style="display: none;"></span>
             </div>
-            
-            <button type="button" onclick="const el = document.getElementById('sys-settings'); el.style.display = el.style.display === 'none' ? 'block' : 'none';" class="btn-icon" data-i18n-title="settingsTitle" title="系统高级设置" style="gap:4px;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-                <span style="font-size:11px;" data-i18n="settingsBtnText">系统设置</span>
-            </button>
+        </div>
 
+        <div id="env-settings" style="display: none; padding: 14px; background: rgba(0,0,0,0.4) !important; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); backdrop-filter: blur(10px);">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                <div style="font-size: 13px; font-weight: bold; color: #fff;" data-i18n="envCheckTitle">环境检测</div>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                    <span id="env-check-badge" style="font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 600;"></span>
+                    <button id="env-detect-btn" onclick="loadEnvCheck()" style="font-size: 10px; padding: 3px 8px; background: var(--accent); border: 1px solid var(--accent); color: #fff; border-radius: 5px; cursor: pointer; font-weight: 600;" data-i18n="envDetect">检测</button>
+                </div>
+            </div>
+            <div id="env-check-list" style="display: flex; flex-direction: column; gap: 6px;"></div>
+            <div id="env-preset-section" style="display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <span style="font-size: 11px; font-weight: 700; color: var(--accent);" data-i18n="envPresetTitle">推荐预设</span>
+                    <span id="env-preset-tier" style="font-size: 9px; padding: 1px 5px; border-radius: 3px; background: rgba(255,255,255,0.06); color: var(--text-dim); font-weight: 600;"></span>
+                </div>
+                <div id="env-preset-details" style="font-size: 10px; color: var(--text-dim); line-height: 1.5;"></div>
+            </div>
         </div>
-        
-        <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 20px; display: flex; align-items: center; width: 100%;">
-            <div class="vram-bar" style="width: 120px; min-width: 120px; margin-top: 0; margin-right: 12px;"><div class="vram-used" id="vram-fill"></div></div> 
-            <span id="vram-text" style="font-variant-numeric: tabular-nums; flex-shrink: 0; text-align: right;">0/32 GB</span>
-            <span id="gpu-name" style="display: none;"></span>
-        </div>
-        
+
         <div id="sys-settings" style="display: none; padding: 14px; background: rgba(0,0,0,0.4) !important; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); backdrop-filter: blur(10px);">
             <div style="font-size: 13px; font-weight: bold; margin-bottom: 12px; color: #fff;" data-i18n="advancedSettings">高级设置</div>
             
@@ -62,32 +78,43 @@
             </div>
             <div id="vram-limit-status" style="font-size: 10px; color: var(--text-dim);"></div>
 
-            <div id="hw-profile-panel" style="margin-top: 14px; padding: 10px; background: rgba(255,255,255,0.04); border-radius: 8px; border: 1px solid rgba(255,255,255,0.08); display: none;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <div style="font-size: 12px; font-weight: 700; color: var(--accent);" data-i18n="hwProfileTitle">硬件智能推荐</div>
-                    <button onclick="applyHardwareProfile()" style="font-size: 10px; padding: 3px 8px; background: var(--accent); color: #fff; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;" data-i18n="hwApplyBtn">一键应用</button>
-                </div>
-                <div id="hw-profile-gpu" style="font-size: 11px; color: var(--text-dim); margin-bottom: 6px;"></div>
-                <div id="hw-profile-tier" style="font-size: 11px; font-weight: 600; margin-bottom: 8px;"></div>
-                <div id="hw-profile-recs" style="margin-bottom: 8px;"></div>
-                <div id="hw-profile-tips" style="font-size: 10px; color: var(--text-dim); line-height: 1.5;"></div>
-            </div>
-
             <label style="font-size: 11px; margin-bottom: 6px; margin-top: 12px;" data-i18n="modelCheckpointLabel">视频模型</label>
             <div style="display: flex; gap: 6px; margin-bottom: 6px; align-items: stretch;">
                 <select id="model-checkpoint-select" onchange="saveSelectedModelCheckpoint()" style="flex: 1; height: 28px; box-sizing: border-box; font-size: 12px; padding: 0 8px;">
                     <option value="" data-i18n="modelCheckpointDefault">默认官方蒸馏模型</option>
                 </select>
-                <button onclick="loadModelCheckpoints()" style="font-size: 12px; padding: 0 10px; height: 28px; box-sizing: border-box; white-space: nowrap; background: var(--accent); border: 1px solid var(--accent); color: #fff; border-radius: 7px; cursor: pointer; font-weight: 600;" data-i18n="refresh">刷新</button>
             </div>
             <div id="model-checkpoint-status" style="font-size: 10px; color: var(--text-dim); margin-bottom: 6px;" data-i18n="modelCheckpointHint">推荐使用 distilled-fp8；仅显示 LTX 2.3 22B 蒸馏模型，避开 dev 模型。</div>
+            <div id="core-models-panel" style="margin-bottom: 8px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <span style="font-size: 11px; font-weight: 700; color: var(--text-main);" data-i18n="coreModelsTitle">核心模型</span>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <label style="font-size:9px;color:var(--text-dim);cursor:pointer;user-select:none;display:flex;align-items:center;gap:3px;">
+                            <input type="checkbox" id="use-mirror-cb" style="accent-color:#1565C0;width:12px;height:12px;cursor:pointer;">
+                            <span data-i18n="useMirrorLabel">国内镜像</span>
+                        </label>
+                    </div>
+                </div>
+                <div id="core-models-list" style="display: flex; flex-direction: column; gap: 3px;"></div>
+            </div>
             <div id="model-registry-panel" style="margin-bottom: 8px;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <span style="font-size: 11px; font-weight: 700; color: var(--text-main);" data-i18n="modelRegTitle">模型仓库</span>
-                    <button onclick="loadModelRegistry()" style="font-size: 10px; padding: 2px 8px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: var(--text-dim); border-radius: 4px; cursor: pointer;" data-i18n="refresh">刷新</button>
+                    <button onclick="refreshAndSync()" style="font-size: 10px; padding: 2px 8px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: var(--text-dim); border-radius: 4px; cursor: pointer;" data-i18n="refresh">刷新</button>
                 </div>
                 <div id="model-registry-dirs" style="margin-bottom: 6px;"></div>
                 <div id="model-registry-list" style="display: flex; flex-direction: column; gap: 4px;"></div>
+            </div>
+
+            <div id="hw-profile-panel" style="margin-top: 14px; padding: 10px; background: rgba(255,255,255,0.04); border-radius: 8px; border: 1px solid rgba(255,255,255,0.08); display: none;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <div style="font-size: 12px; font-weight: 700; color: var(--accent);" data-i18n="hwProfileTitle">硬件配置推荐</div>
+                    <button onclick="applyHardwareProfile()" style="font-size: 10px; padding: 3px 8px; background: var(--accent); color: #fff; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;" data-i18n="hwApplyBtn">应用推荐</button>
+                </div>
+                <div id="hw-profile-gpu" style="font-size: 11px; color: var(--text-dim); margin-bottom: 6px;"></div>
+                <div id="hw-profile-tier" style="font-size: 11px; font-weight: 600; margin-bottom: 8px;"></div>
+                <div id="hw-profile-recs" style="margin-bottom: 8px;"></div>
+                <div id="hw-profile-tips" style="font-size: 10px; color: var(--text-dim); line-height: 1.5;"></div>
             </div>
             
             <label style="font-size: 11px; margin-bottom: 6px; margin-top: 12px;" data-i18n="loraFolderPath">LoRA 文件夹路径（可选）</label>
@@ -97,24 +124,6 @@
             </div>
             <div id="lora-placement-hint" style="font-size: 10px; color: var(--text-dim); line-height: 1.45; margin-bottom: 6px;" data-i18n="loraPlacementHint">将 LoRA 文件放到当前模型目录下的 loras 文件夹。</div>
             <div id="lora-dir-status" style="font-size: 10px; color: var(--text-dim);"></div>
-        </div>
-
-        <div id="env-check-panel" style="display: none; padding: 10px 12px; background: rgba(0,0,0,0.3); border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); margin-bottom: 12px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                <div style="font-size: 12px; font-weight: 700; color: var(--text-main);" data-i18n="envCheckTitle">环境检测</div>
-                <div style="display: flex; gap: 6px; align-items: center;">
-                    <span id="env-check-badge" style="font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 600;"></span>
-                    <button id="env-detect-btn" onclick="loadEnvCheck()" style="font-size: 10px; padding: 3px 8px; background: var(--accent); border: 1px solid var(--accent); color: #fff; border-radius: 5px; cursor: pointer; font-weight: 600;" data-i18n="envDetect">检测</button>
-                </div>
-            </div>
-            <div id="env-check-list" style="display: flex; flex-direction: column; gap: 6px;"></div>
-            <div id="env-preset-section" style="display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-                    <span style="font-size: 11px; font-weight: 700; color: var(--accent);" data-i18n="envPresetTitle">推荐预设</span>
-                    <span id="env-preset-tier" style="font-size: 9px; padding: 1px 5px; border-radius: 3px; background: rgba(255,255,255,0.06); color: var(--text-dim); font-weight: 600;"></span>
-                </div>
-                <div id="env-preset-details" style="font-size: 10px; color: var(--text-dim); line-height: 1.5;"></div>
-            </div>
         </div>
 
         <div style="padding: 0 0 8px 0;">
@@ -186,11 +195,13 @@
             <div class="group-title" data-i18n="basicEngine">基础画面 / Basic EngineSpecs</div>
             <div class="flex-row">
                 <div class="flex-1">
-                    <label data-i18n="qualityLevel">清晰度级别</label><span id="vid-quality-rec" style="display:none;font-size:10px;color:var(--accent);font-weight:600;margin-left:6px;"></span>
+                    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;"><label data-i18n="qualityLevel" style="margin-bottom:0;">分辨率</label><span id="vid-quality-rec" style="display:none;font-size:10px;color:var(--accent);font-weight:600;"></span></div>
                     <select id="vid-quality" onchange="updateResPreview()">
                         <option value="1080">1080P Full HD</option>
                         <option value="720" selected>720P Standard</option>
                         <option value="540">540P Preview</option>
+                        <option value="480">480P Lite</option>
+                        <option value="360">360P Minimal</option>
                     </select>
                 </div>
                 <div class="flex-1">
@@ -212,11 +223,9 @@
                 <div class="flex-1"><label data-i18n="width">宽度</label><input type="number" id="vid-custom-w" value="1280" min="64" step="64" onchange="updateResPreview()"></div>
                 <div class="flex-1"><label data-i18n="height">高度</label><input type="number" id="vid-custom-h" value="704" min="64" step="64" onchange="updateResPreview()"></div>
             </div>
-            <div id="res-preview" class="res-preview-tag" style="margin-top: -5px; margin-bottom: 12px;">最终发送: 1280x704</div>
-
             <div class="flex-row">
                 <div class="flex-1">
-                    <label data-i18n="fpsLabel">帧率 (FPS)</label><span id="vid-fps-rec" style="display:none;font-size:10px;color:var(--accent);font-weight:600;margin-left:6px;"></span>
+                    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;"><label data-i18n="fpsLabel" style="margin-bottom:0;">帧率 (FPS)</label><span id="vid-fps-rec" style="display:none;font-size:10px;color:var(--accent);font-weight:600;"></span></div>
                     <select id="vid-fps">
                         <option value="24" selected>24 FPS</option>
                         <option value="25">25 FPS</option>
@@ -226,7 +235,7 @@
                     </select>
                 </div>
                 <div class="flex-1">
-                    <label data-i18n="durationLabel">时长 (秒)</label><span id="vid-duration-rec" style="display:none;font-size:10px;color:var(--accent);font-weight:600;margin-left:6px;"></span>
+                    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;"><label data-i18n="durationLabel" style="margin-bottom:0;">时长 (秒)</label><span id="vid-duration-rec" style="display:none;font-size:10px;color:var(--accent);font-weight:600;"></span></div>
                     <input type="number" id="vid-duration" value="5" min="1" max="30" step="1">
                     <div id="vid-duration-warn" style="font-size:10px; margin-top:2px; line-height:1.3; color:var(--text-dim);"></div>
                 </div>
@@ -374,7 +383,7 @@
     </div>
 
     <div id="image-opts" class="sidebar-section" style="display:none">
-        <label data-i18n="imgPreset">预设分辨率 (Presets)</label>
+        <label data-i18n="imgPreset">预设分辨率 (Presets)</label><span id="img-res-preview" style="font-size:10px;color:var(--text-dim);font-family:ui-monospace,monospace;margin-left:6px;"></span>
         <select id="img-res-preset" onchange="applyImgPreset(this.value)">
             <option value="1024x1024" data-i18n="imgOptSquare">1:1 Square (1024x1024)</option>
             <option value="1280x720" data-i18n="imgOptLand">16:9 Landscape (1280x720)</option>
@@ -386,7 +395,6 @@
             <div class="flex-1"><label data-i18n="width">宽度</label><input type="number" id="img-w" value="1024" onchange="updateImgResPreview()"></div>
             <div class="flex-1"><label data-i18n="height">高度</label><input type="number" id="img-h" value="1024" onchange="updateImgResPreview()"></div>
         </div>
-        <div id="img-res-preview" class="res-preview-tag">最终发送: 1024x1024</div>
         
         <div class="label-group" style="margin-top: 15px;">
             <label data-i18n="samplingSteps">采样步数 (Steps)</label>
@@ -454,11 +462,13 @@
             <div class="group-title" data-i18n="basicEngine">基础画面 / Basic EngineSpecs</div>
             <div class="flex-row">
                 <div class="flex-1">
-                    <label data-i18n="qualityLevel">清晰度级别</label><span id="batch-quality-rec" style="display:none;font-size:10px;color:var(--accent);font-weight:600;margin-left:6px;"></span>
+                    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;"><label data-i18n="qualityLevel" style="margin-bottom:0;">分辨率</label><span id="batch-quality-rec" style="display:none;font-size:10px;color:var(--accent);font-weight:600;"></span></div>
                     <select id="batch-quality" onchange="updateBatchResPreview()">
                         <option value="1080">1080P Full HD</option>
                         <option value="720" selected>720P Standard</option>
                         <option value="540">540P Preview</option>
+                        <option value="480">480P Lite</option>
+                        <option value="360">360P Minimal</option>
                     </select>
                 </div>
                 <div class="flex-1">
@@ -480,7 +490,6 @@
                 <div class="flex-1"><label data-i18n="width">宽度</label><input type="number" id="batch-custom-w" value="1280" min="64" step="64" onchange="updateBatchResPreview()"></div>
                 <div class="flex-1"><label data-i18n="height">高度</label><input type="number" id="batch-custom-h" value="704" min="64" step="64" onchange="updateBatchResPreview()"></div>
             </div>
-            <div id="batch-res-preview" class="res-preview-tag" style="margin-top: -5px; margin-bottom: 12px;">最终发送: 1280x704</div>
 
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <label data-i18n="selectLora" style="margin: 0;">选择 LoRA</label>
@@ -570,16 +579,6 @@
     <div style="padding: 0 30px 30px 30px;"></div>
 
     <div class="sidebar-footer">
-        <div class="footer-nav">
-            <button class="footer-nav-btn" onclick="showSoftwareUpdate()">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/><polyline points="21 3 21 9 15 9"/></svg>
-                软件更新
-            </button>
-            <button class="footer-nav-btn" onclick="showModelManagement()">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M7 7h4v4H7z"/><path d="M13 7h4v4h-4z"/><path d="M7 13h4v4H7z"/><path d="M13 13h4v4h-4z"/></svg>
-                模型管理
-            </button>
-        </div>
         <div class="copyright-text">© 2025-2026 武汉市云集智能科技有限公司</div>
         <button type="button" class="copyright-btn" onclick="showCopyright()">版权声明</button>
     </div>
@@ -619,95 +618,6 @@
     </div>
 </div>
 
-<div id="software-update-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeSoftwareUpdate()">
-    <div class="modal-content update-modal">
-        <div class="modal-header">
-            <span>软件更新</span>
-            <button type="button" class="modal-close" onclick="closeSoftwareUpdate()">✕</button>
-        </div>
-        <div class="update-modal-body" id="update-modal-body">
-            <div class="update-current-bar">
-                <div id="current-version-info"></div>
-                <button class="btn-primary update-check-btn" onclick="checkForUpdates()">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M21 12a9 9 0 11-6.219-8.56"/><polyline points="21 3 21 9 15 9"/></svg>
-                    获取更新
-                </button>
-            </div>
-            <div class="update-list" id="update-list"></div>
-        </div>
-    </div>
-</div>
-
-<div id="model-mgmt-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeModelManagement()">
-    <div class="modal-content model-mgmt-modal">
-        <div class="modal-header">
-            <span>模型管理</span>
-            <button type="button" class="modal-close" onclick="closeModelManagement()">✕</button>
-        </div>
-        <div class="model-mgmt-body">
-            <div class="model-mgmt-toolbar">
-                <button id="model-dirs-btn" class="btn-outline" onclick="toggleModelDirs()">模型目录</button>
-                <button id="refresh-models-btn" class="btn-outline" onclick="loadModelRegistry()">刷新</button>
-                <button id="download-selected-btn" class="btn-primary model-mgmt-download-btn" onclick="downloadSelectedModels()">下载选中</button>
-            </div>
-            
-            <div id="model-dirs-expand" class="model-dirs-expand">
-                <div class="model-dirs-list" id="model-dirs-list"></div>
-                <div class="model-dirs-add-row">
-                    <input type="text" id="model-dir-input" placeholder="输入模型目录路径...">
-                    <button class="btn-primary model-add-dir-btn" onclick="addModelDir()">添加</button>
-                </div>
-            </div>
-
-            <div class="model-reg-section">
-                <div class="model-reg-filter">
-                    <button class="btn btn-sm active" data-filter="all">全部</button>
-                    <button class="btn btn-sm" data-filter="required">必需模型</button>
-                    <button class="btn btn-sm" data-filter="optional">可选模型</button>
-                    <button class="btn btn-sm" data-filter="installed">已安装</button>
-                    <button class="btn btn-sm" data-filter="not-installed">未安装</button>
-                </div>
-                <table class="model-reg-table" id="model-reg-table">
-                    <thead>
-                        <tr>
-                            <th class="model-reg-th-select"><input type="checkbox" id="model-select-all" onchange="toggleModelSelectAll(this.checked)"></th>
-                            <th class="model-reg-th-name" data-sort="name" onclick="toggleSort('name')">模型名称 <span class="sort-icon" id="sort-name"></span></th>
-                            <th class="model-reg-th-type" data-sort="type" onclick="toggleSort('type')">类型 <span class="sort-icon" id="sort-type"></span></th>
-                            <th class="model-reg-th-size" data-sort="size" onclick="toggleSort('size')">大小 <span class="sort-icon" id="sort-size"></span></th>
-                            <th class="model-reg-th-tags" data-sort="tags" onclick="toggleSort('tags')">标签 <span class="sort-icon" id="sort-tags"></span></th>
-                            <th class="model-reg-th-status" data-sort="status" onclick="toggleSort('status')">状态 <span class="sort-icon" id="sort-status"></span></th>
-                            <th class="model-reg-th-action">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="model-reg-tbody"></tbody>
-                </table>
-            </div>
-
-            <div id="community-models-section">
-                <h3 class="community-section-title">社区模型 & 第三方模型</h3>
-                <div class="model-reg-filter" id="community-filter">
-                    <button class="btn btn-sm active" data-community-filter="all">全部</button>
-                    <button class="btn btn-sm" data-community-filter="lora">LoRA</button>
-                    <button class="btn btn-sm" data-community-filter="text_encoder">Text Encoder</button>
-                    <button class="btn btn-sm" data-community-filter="other">其他</button>
-                </div>
-                <table class="model-reg-table" id="community-models-table">
-                    <thead>
-                        <tr>
-                            <th class="model-reg-th-name">模型名称</th>
-                            <th class="model-reg-th-type">类型</th>
-                            <th class="model-reg-th-size">大小</th>
-                            <th class="model-reg-th-status">状态</th>
-                            <th class="model-reg-th-action">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="community-models-tbody"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
-
 <main class="workspace">
     <section class="viewer" id="viewer-section">
         <div class="monitor" id="viewer">
@@ -728,7 +638,7 @@
             <div id="loading-txt" data-i18n="waitingTask">等待分配渲染任务...</div>
             <img id="res-img" src="">
             <div id="video-wrapper" style="width:100%; height:100%; display:none; max-height:100%; align-items:center; justify-content:center;">
-                <video id="res-video" autoplay loop playsinline></video>
+                <video id="res-video" controls autoplay loop playsinline></video>
             </div>
             <div id="audio-wrapper">
                 <div class="audio-preview-art" id="audio-preview-art" role="button" tabindex="0">
@@ -778,9 +688,48 @@
         <div id="pagination-bar" style="display:none;"></div>
     </section>
 </main>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/plyr/3.7.8/plyr.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plyr/3.7.8/plyr.min.js" async></script>
     <script src="i18n.js?v=en-tabs-1"></script>
-    <script src="index.js?v=event-delegate-v2"></script>
+    <script>
+    window.__jsDiag = { errors: [], milestones: [] };
+    window.addEventListener('error', function(e) {
+        window.__jsDiag.errors.push({ msg: e.message, file: e.filename, line: e.lineno, col: e.colno });
+        console.error('[DIAG] JS Error:', e.message, e.filename, e.lineno);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+        window.__jsDiag.errors.push({ msg: 'UnhandledPromise: ' + (e.reason && e.reason.message || e.reason), file: '', line: 0 });
+        console.error('[DIAG] Unhandled Rejection:', e.reason);
+    });
+    </script>
+    <script src="index.js?v=progress-ui-v5"></script>
+    <script>
+    (function() {
+        var d = window.__jsDiag;
+        d.milestones.push('post-indexjs');
+        var fns = ['switchMode','loadModelCheckpoints','loadModelRegistry','run','clearGpu','scanLoras','loadLoraDir','listGpus','switchLibTab','checkStatus'];
+        var missing = fns.filter(function(n) { return typeof window[n] !== 'function'; });
+        d.milestones.push('missing-fns:' + missing.join(','));
+        if (missing.length > 0) {
+            console.error('[DIAG] Missing global functions:', missing);
+            var banner = document.createElement('div');
+            banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#d32f2f;color:#fff;padding:10px 16px;font-size:13px;font-family:monospace;';
+            banner.textContent = '[DEBUG] JS加载异常 - 缺失函数: ' + missing.join(', ') + ' | 错误: ' + d.errors.map(function(e){return e.msg+'(L'+e.line+')'}).join('; ');
+            document.body.appendChild(banner);
+        } else {
+            var videoOpts = document.getElementById('video-opts');
+            if (videoOpts && videoOpts.style.display === 'none') {
+                console.warn('[DIAG] video-opts still hidden, forcing switchMode(video)');
+                try { window.switchMode('video'); } catch(e) { console.error('[DIAG] switchMode fallback failed:', e); }
+            }
+            var modelSelect = document.getElementById('model-checkpoint-select');
+            if (modelSelect && modelSelect.options.length <= 1) {
+                console.warn('[DIAG] model list empty, forcing loadModelCheckpoints + loadModelRegistry');
+                try { window.loadModelCheckpoints(); } catch(e) { console.error('[DIAG] loadModelCheckpoints fallback failed:', e); }
+                try { window.loadModelRegistry(); } catch(e) { console.error('[DIAG] loadModelRegistry fallback failed:', e); }
+            }
+        }
+    })();
+    </script>
 
 </body>
 </html>

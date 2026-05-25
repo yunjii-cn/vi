@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from threading import Lock
@@ -11,6 +12,8 @@ from unittest.mock import patch
 
 from huggingface_hub import file_download, hf_hub_download, snapshot_download  # type: ignore[reportUnknownVariableType]
 from tqdm.auto import tqdm as tqdm_auto  # type: ignore[reportUnknownVariableType]
+
+HF_MIRROR_ENDPOINT = "https://hf-mirror.com"
 
 
 def _make_progress_tqdm_class(callback: Callable[[int], None]) -> type:
@@ -86,10 +89,15 @@ class HuggingFaceDownloader:
         filename: str,
         local_dir: str,
         on_progress: Callable[[int], None] | None = None,
+        use_mirror: bool = False,
     ) -> Path:
         ctx = _patch_download_progress(on_progress) if on_progress is not None else contextlib.nullcontext()
         with ctx:
-            path: str = hf_hub_download(repo_id=repo_id, filename=filename, local_dir=local_dir)
+            env = {**os.environ, "HF_ENDPOINT": HF_MIRROR_ENDPOINT} if use_mirror else None
+            path: str = hf_hub_download(
+                repo_id=repo_id, filename=filename, local_dir=local_dir,
+                **({"endpoint": HF_MIRROR_ENDPOINT} if use_mirror else {}),
+            )
         return Path(path)
 
     def download_snapshot(
@@ -97,8 +105,12 @@ class HuggingFaceDownloader:
         repo_id: str,
         local_dir: str,
         on_progress: Callable[[int], None] | None = None,
+        use_mirror: bool = False,
     ) -> Path:
         ctx = _patch_download_progress(on_progress) if on_progress is not None else contextlib.nullcontext()
         with ctx:
-            path: str = snapshot_download(repo_id=repo_id, local_dir=local_dir)
+            path: str = snapshot_download(
+                repo_id=repo_id, local_dir=local_dir,
+                **({"endpoint": HF_MIRROR_ENDPOINT} if use_mirror else {}),
+            )
         return Path(path)

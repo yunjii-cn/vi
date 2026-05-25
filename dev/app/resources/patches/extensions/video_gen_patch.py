@@ -19,9 +19,15 @@ This is the most upstream-sensitive extension.
 
 from __future__ import annotations
 
+import math
 import os
+import re
+import sys
 import tempfile
+import threading
+import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from api_types import GenerateVideoRequest
@@ -121,6 +127,8 @@ def install(app, ctx: ExtensionContext) -> None:
         fps = int(float(req.fps))
 
         RESOLUTION_MAP = {
+            "360p": (640, 352),
+            "480p": (768, 416),
             "540p": (1024, 576),
             "720p": (1280, 704),
             "1080p": (1920, 1088),
@@ -643,16 +651,108 @@ def install(app, ctx: ExtensionContext) -> None:
         _lora_hook_tok = pending_loras_token(extra_loras_for_hook)
         try:
             self._generation.start_generation(generation_id)
+            self._generation.update_progress("preparing", 1, 0, 8, log_message="初始化...")
             neg_prompt = negative_prompt if negative_prompt else self.config.default_negative_prompt
             enhanced_prompt = prompt + self.config.camera_motion_prompts.get(camera_motion, "")
 
             dyn_dir = ctx.get_output_path()
-            output_path = dyn_dir / f"generation_{uuid.uuid4().hex[:8]}.mp4"
+            _dur = (num_frames - 1) // fps if fps else 0
+            output_path = dyn_dir / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{width}x{height}_{fps}fps_{_dur}s_LTX2.3.mp4"
 
             try:
+                self._generation.update_progress("encoding_text", 3, 0, 8, log_message="编码文本...")
                 self._text.prepare_text_encoding(enhanced_prompt, enhance_prompt=False)
                 height = max(64, round(height / 64) * 64)
                 width = max(64, round(width / 64) * 64)
+
+                self._generation.update_progress("loading_model", 5, 0, 8, log_message="加载模型...")
+
+                _tqdm_pattern = re.compile(r'(\d+)%\|.*?\|\s*(\d+)/(\d+)')
+                _tqdm_time_pattern = re.compile(r'\[([0-9:.]+)<')
+                _ansi_pattern = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
+                _orig_stderr = sys.stderr
+                _gen_ref = self._generation
+                _phase_weights = [0.65, 0.20, 0.10]
+                _phase_labels = ["推理", "解码", "保存"]
+                _phase_idx = [0]
+                _last_tot = [0]
+                _inference_base = 10
+                _inference_span = 85
+                _tqdm_started = threading.Event()
+                _gen_t0 = time.perf_counter()
+
+                _estimator_stop = threading.Event()
+                def _estimator_loop():
+                    while not _estimator_stop.is_set():
+                        _estimator_stop.wait(0.8)
+                        if _estimator_stop.is_set():
+                            break
+                        if _tqdm_started.is_set():
+                            break
+                        elapsed = time.perf_counter() - _gen_t0
+                        ratio = 1 - math.exp(-elapsed / 30.0)
+                        pct = int(5 + 5 * ratio)
+                        pct = min(pct, 9)
+                        phase_label = "loading_model"
+                        log_msg = "加载模型"
+                        if elapsed > 20:
+                            phase_label = "warming_up"
+                            log_msg = "预热引擎"
+                        try:
+                            _gen_ref.update_progress(phase_label, pct, 0, 8, log_message=log_msg)
+                        except Exception:
+                            pass
+                _estimator_thread = threading.Thread(target=_estimator_loop, name="progress-estimator", daemon=True)
+                _estimator_thread.start()
+
+                class _TqdmCapture:
+                    def __init__(self, original):
+                        self._original = original
+                    def write(self, s):
+                        if s:
+                            self._original.write(s)
+                            self._original.flush()
+                        if not s or not s.strip():
+                            return
+                        clean = _ansi_pattern.sub('', s).replace('\r', '\n')
+                        for line in clean.split('\n'):
+                            line = line.strip()
+                            if not line:
+                                continue
+                            m = _tqdm_pattern.search(line)
+                            if not m:
+                                continue
+                            if not _tqdm_started.is_set():
+                                _tqdm_started.set()
+                                _estimator_stop.set()
+                            pct = int(m.group(1))
+                            cur = int(m.group(2))
+                            tot = int(m.group(3))
+                            if tot != _last_tot[0]:
+                                if _last_tot[0] > 0:
+                                    _phase_idx[0] = min(_phase_idx[0] + 1, len(_phase_weights) - 1)
+                                _last_tot[0] = tot
+                            pi = _phase_idx[0]
+                            base = sum(_phase_weights[:pi])
+                            weight = _phase_weights[pi] if pi < len(_phase_weights) else 0.1
+                            overall_pct = int(_inference_base + _inference_span * (base + weight * pct / 100.0))
+                            overall_pct = min(max(overall_pct, _inference_base), 98)
+                            tm = _tqdm_time_pattern.search(line)
+                            time_str = tm.group(1) if tm else ''
+                            label = _phase_labels[pi] if pi < len(_phase_labels) else "处理"
+                            log_msg = f"{label} {cur}/{tot}"
+                            if time_str:
+                                log_msg += f" {time_str}"
+                            try:
+                                _gen_ref.update_progress("inference", overall_pct, cur, tot, log_message=log_msg)
+                            except Exception:
+                                pass
+                    def flush(self):
+                        self._original.flush()
+                    def __getattr__(self, name):
+                        return getattr(self._original, name)
+
+                sys.stderr = _TqdmCapture(_orig_stderr)
 
                 if audio_path:
                     gen_kwargs = {
@@ -692,6 +792,10 @@ def install(app, ctx: ExtensionContext) -> None:
                             f"原始错误: {e}"
                         ) from e
                     raise
+                finally:
+                    _estimator_stop.set()
+                    sys.stderr = _orig_stderr
+                self._generation.update_progress("complete", 100, 8, 8)
                 self._generation.complete_generation(str(output_path))
                 return str(output_path)
             finally:

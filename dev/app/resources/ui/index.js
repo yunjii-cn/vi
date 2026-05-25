@@ -4,6 +4,7 @@
     const viewer = document.getElementById('viewer-section');
     const library = document.getElementById('library-section');
     const workspace = document.querySelector('.workspace');
+    if (!handle || !viewer || !library || !workspace) return;
     let dragging = false, startY = 0, startVH = 0;
 
     handle.addEventListener('mousedown', (e) => {
@@ -78,9 +79,11 @@
         'vid-custom-w', 'vid-custom-h', 'vid-duration',
         'img-w', 'img-h', 'img-steps',
         'batch-custom-w', 'batch-custom-h',
-        'tts-cfg', 'tts-steps', 'global-out-dir'
+        'tts-cfg', 'tts-steps', 'global-out-dir',
+        'start-frame-path', 'end-frame-path', 'uploaded-audio-path',
+        'motion-video-path', 'motion-image-path', 'batch-background-audio-path'
     ];
-    const PERSIST_TEXTAREAS = ['prompt'];
+    const PERSIST_TEXTAREAS = ['prompt', 'tts-text'];
     const PERSIST_CHECKBOXES = ['vid-audio'];
     const PERSIST_RADIOS = [
         { name: 'seed-mode', values: ['random', 'fixed'] },
@@ -115,6 +118,22 @@
             if (el) s[id] = el.value;
         });
         s._currentMode = currentMode;
+        s._uploadNames = {
+            startFrame: pathFileName(s['start-frame-path'] || ''),
+            endFrame: pathFileName(s['end-frame-path'] || ''),
+            audio: pathFileName(s['uploaded-audio-path'] || ''),
+            motionVideo: pathFileName(s['motion-video-path'] || ''),
+            motionImage: pathFileName(s['motion-image-path'] || ''),
+            batchAudio: pathFileName(s['batch-background-audio-path'] || '')
+        };
+        if (batchImages && batchImages.length > 0) {
+            s._batchImages = batchImages.map(img => ({
+                name: img.name || '',
+                path: img.path || '',
+                width: img.width || null,
+                height: img.height || null
+            }));
+        }
         try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch(_) {}
     }
 
@@ -167,6 +186,89 @@
         });
         if (s._currentMode && typeof switchMode === 'function') {
             switchMode(s._currentMode);
+        }
+        restoreUploadPreviews(s);
+    }
+
+    function restoreUploadPreviews(s) {
+        if (!s) return;
+        const names = s._uploadNames || {};
+
+        const framePath = s['start-frame-path'];
+        if (framePath) {
+            const preview = document.getElementById('start-frame-preview');
+            const placeholder = document.getElementById('start-frame-placeholder');
+            const clearOverlay = document.getElementById('clear-start-frame-overlay');
+            if (preview) { preview.src = mediaUrlForPath(framePath); preview.style.display = 'block'; }
+            if (placeholder) placeholder.style.display = 'none';
+            if (clearOverlay) clearOverlay.style.display = 'flex';
+        }
+
+        const endPath = s['end-frame-path'];
+        if (endPath) {
+            const preview = document.getElementById('end-frame-preview');
+            const placeholder = document.getElementById('end-frame-placeholder');
+            const clearOverlay = document.getElementById('clear-end-frame-overlay');
+            if (preview) { preview.src = mediaUrlForPath(endPath); preview.style.display = 'block'; }
+            if (placeholder) placeholder.style.display = 'none';
+            if (clearOverlay) clearOverlay.style.display = 'flex';
+        }
+
+        const audioPath = s['uploaded-audio-path'];
+        if (audioPath) {
+            const placeholder = document.getElementById('audio-upload-placeholder');
+            const statusDiv = document.getElementById('audio-upload-status');
+            const filenameStatus = document.getElementById('audio-filename-status');
+            const clearOverlay = document.getElementById('clear-audio-overlay');
+            if (placeholder) placeholder.style.display = 'none';
+            if (statusDiv) statusDiv.style.display = 'block';
+            if (filenameStatus) filenameStatus.innerText = names.audio || pathFileName(audioPath);
+            if (clearOverlay) clearOverlay.style.display = 'flex';
+        }
+
+        const motionVideoPath = s['motion-video-path'];
+        if (motionVideoPath) {
+            const placeholder = document.getElementById('motion-video-placeholder');
+            const statusDiv = document.getElementById('motion-video-status');
+            const nameEl = document.getElementById('motion-video-name');
+            const clearOverlay = document.getElementById('clear-motion-video-overlay');
+            if (placeholder) placeholder.style.display = 'none';
+            if (statusDiv) statusDiv.style.display = 'block';
+            if (nameEl) nameEl.textContent = names.motionVideo || pathFileName(motionVideoPath);
+            if (clearOverlay) clearOverlay.style.display = 'flex';
+        }
+
+        const motionImagePath = s['motion-image-path'];
+        if (motionImagePath) {
+            const preview = document.getElementById('motion-image-preview');
+            const placeholder = document.getElementById('motion-image-placeholder');
+            const clearOverlay = document.getElementById('clear-motion-image-overlay');
+            if (preview) { preview.src = mediaUrlForPath(motionImagePath); preview.style.display = 'block'; }
+            if (placeholder) placeholder.style.display = 'none';
+            if (clearOverlay) clearOverlay.style.display = 'flex';
+        }
+
+        const batchAudioPath = s['batch-background-audio-path'];
+        if (batchAudioPath) {
+            const placeholder = document.getElementById('batch-audio-placeholder');
+            const statusDiv = document.getElementById('batch-audio-status');
+            const clearOverlay = document.getElementById('clear-batch-audio-overlay');
+            if (placeholder) placeholder.style.display = 'none';
+            if (statusDiv) { statusDiv.style.display = 'block'; statusDiv.textContent = '✓ ' + (names.batchAudio || pathFileName(batchAudioPath)); }
+            if (clearOverlay) clearOverlay.style.display = 'flex';
+        }
+
+        if (s._batchImages && s._batchImages.length > 0) {
+            batchImages = s._batchImages.map(img => ({
+                name: img.name || '',
+                path: img.path || '',
+                preview: img.path ? mediaUrlForPath(img.path) : '',
+                width: img.width || null,
+                height: img.height || null
+            }));
+            renderBatchImages();
+            updateBatchSegments();
+            updateBatchResPreview();
         }
     }
 
@@ -228,25 +330,65 @@
 
     // LoRA 扫描功能：页面启动时先完成 LoRA UI，再刷新历史缩略图。
     async function scanLoras() {
+        let lorasFromRegistry = [];
         try {
-            const url = `${BASE}/api/loras`;
-            console.log("Scanning LoRA from:", url);
-            const res = await fetch(url);
+            const res = await fetch(`${BASE}/api/models/registry`);
             const data = await res.json().catch(() => ({}));
-            console.log("LoRA response:", res.status, data);
-            if (!res.ok) {
-                const msg = data.message || data.error || res.statusText;
-                addLog(`❌ LoRA 扫描失败 (${res.status}): ${msg}`);
-                applyLoraScanData({ loras: [] });
-                return null;
+            const models = data.models || [];
+            const loraModels = models.filter(m => m.tags && m.tags.includes('lora') && m.downloaded && m.local_path);
+            lorasFromRegistry = loraModels.map(m => ({ name: m.filename || m.name, path: m.local_path }));
+            const localDirs = data.local_dirs || [];
+            for (const dir of localDirs) {
+                for (const m of (dir.models || [])) {
+                    if (m.model_type === 'lora') {
+                        lorasFromRegistry.push({ name: m.name, path: m.path });
+                    }
+                }
             }
-            applyLoraScanData(data);
-            return data;
         } catch (e) {
-            console.log("LoRA scan error:", e);
-            addLog(`❌ LoRA 扫描异常: ${e.message || e}`);
-            return null;
+            console.log("LoRA registry scan error:", e);
         }
+
+        let lorasWithMeta = [];
+        try {
+            const metaRes = await fetch(`${BASE}/api/loras?meta=1`);
+            const metaData = await metaRes.json().catch(() => ({}));
+            lorasWithMeta = metaData.loras || [];
+        } catch (e) {
+            console.log("LoRA meta scan error:", e);
+        }
+
+        const metaByPath = new Map();
+        for (const l of lorasWithMeta) {
+            if (l.path) metaByPath.set(l.path, l);
+        }
+
+        const seenPaths = new Set();
+        const merged = [];
+
+        for (const l of lorasFromRegistry) {
+            if (!seenPaths.has(l.path)) {
+                seenPaths.add(l.path);
+                const meta = metaByPath.get(l.path);
+                if (meta) {
+                    merged.push({ ...l, description: meta.description || '', trigger_words: meta.trigger_words || [], base_model: meta.base_model || '' });
+                } else {
+                    merged.push(l);
+                }
+            }
+        }
+
+        for (const l of lorasWithMeta) {
+            if (!seenPaths.has(l.path)) {
+                seenPaths.add(l.path);
+                merged.push(l);
+            }
+        }
+
+        merged.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+
+        applyLoraScanData({ loras: merged, loras_dir: '', models_dir: '' });
+        return merged;
     }
 
     window.addLoraSelection = function(containerId) {
@@ -275,7 +417,13 @@
         availableLoras.forEach(lora => {
             const opt = document.createElement('option');
             opt.value = lora.path;
-            opt.textContent = lora.name;
+            const desc = lora.description ? lora.description.slice(0, 60) : '';
+            opt.textContent = desc ? `${lora.name} — ${desc}` : lora.name;
+            if (lora.description) opt.title = lora.description;
+            if (lora.trigger_words && lora.trigger_words.length > 0) {
+                const existing = opt.title ? opt.title + '\n' : '';
+                opt.title = existing + '触发词: ' + lora.trigger_words.join(', ');
+            }
             select.appendChild(opt);
         });
 
@@ -293,6 +441,16 @@
 
         row1.appendChild(select);
         row1.appendChild(removeBtn);
+
+        const loraInfoBox = document.createElement('div');
+        loraInfoBox.className = 'lora-info-box';
+        loraInfoBox.style.display = 'none';
+        loraInfoBox.style.fontSize = '11px';
+        loraInfoBox.style.color = 'var(--text-dim)';
+        loraInfoBox.style.padding = '2px 4px';
+        loraInfoBox.style.lineHeight = '1.4';
+        loraInfoBox.style.maxHeight = '60px';
+        loraInfoBox.style.overflow = 'hidden';
 
         const strengthContainer = document.createElement('div');
         strengthContainer.className = 'lora-strength-container';
@@ -332,27 +490,74 @@
         strengthContainer.appendChild(strVal);
 
         wrapper.appendChild(row1);
+        wrapper.appendChild(loraInfoBox);
         wrapper.appendChild(strengthContainer);
+
+        function updateLoraInfo() {
+            if (!select.value) {
+                loraInfoBox.style.display = 'none';
+                loraInfoBox.innerHTML = '';
+                return;
+            }
+            const lora = availableLoras.find(l => l.path === select.value);
+            if (!lora || (!lora.description && (!lora.trigger_words || lora.trigger_words.length === 0) && !lora.base_model)) {
+                loraInfoBox.style.display = 'none';
+                loraInfoBox.innerHTML = '';
+                return;
+            }
+            let html = '';
+            if (lora.description) html += `<div style="margin-bottom:2px">${escapeHtmlAttr(lora.description)}</div>`;
+            if (lora.trigger_words && lora.trigger_words.length > 0) html += `<div>触发词: <span style="color:var(--accent)">${escapeHtmlAttr(lora.trigger_words.join(', '))}</span></div>`;
+            if (lora.base_model) html += `<div>基模: ${escapeHtmlAttr(lora.base_model)}</div>`;
+            loraInfoBox.innerHTML = html;
+            loraInfoBox.style.display = html ? 'block' : 'none';
+        }
 
         select.onchange = () => {
             strengthContainer.style.display = select.value ? 'flex' : 'none';
+            updateLoraInfo();
         };
 
         container.appendChild(wrapper);
     };
 
+    function _fillLoraSelect(select) {
+        const currentVal = select.value;
+        select.innerHTML = '<option value="">' + _t('noLora') + '</option>';
+        availableLoras.forEach(lora => {
+            const opt = document.createElement('option');
+            opt.value = lora.path;
+            const desc = lora.description ? lora.description.slice(0, 60) : '';
+            opt.textContent = desc ? `${lora.name} — ${desc}` : lora.name;
+            if (lora.description) opt.title = lora.description;
+            if (lora.trigger_words && lora.trigger_words.length > 0) {
+                const existing = opt.title ? opt.title + '\n' : '';
+                opt.title = existing + '触发词: ' + lora.trigger_words.join(', ');
+            }
+            select.appendChild(opt);
+        });
+        select.value = currentVal;
+    }
+
     function updateLoraDropdown() {
         const selects = document.querySelectorAll('#loras-container .lora-select');
         selects.forEach(select => {
-            const currentVal = select.value;
-            select.innerHTML = '<option value="">' + _t('noLora') + '</option>';
-            availableLoras.forEach(lora => {
-                const opt = document.createElement('option');
-                opt.value = lora.path;
-                opt.textContent = lora.name;
-                select.appendChild(opt);
-            });
-            select.value = currentVal;
+            _fillLoraSelect(select);
+            const infoBox = select.closest('.lora-entry')?.querySelector('.lora-info-box');
+            if (infoBox && select.value) {
+                const lora = availableLoras.find(l => l.path === select.value);
+                if (lora && (lora.description || (lora.trigger_words && lora.trigger_words.length > 0) || lora.base_model)) {
+                    let html = '';
+                    if (lora.description) html += `<div style="margin-bottom:2px">${escapeHtmlAttr(lora.description)}</div>`;
+                    if (lora.trigger_words && lora.trigger_words.length > 0) html += `<div>触发词: <span style="color:var(--accent)">${escapeHtmlAttr(lora.trigger_words.join(', '))}</span></div>`;
+                    if (lora.base_model) html += `<div>基模: ${escapeHtmlAttr(lora.base_model)}</div>`;
+                    infoBox.innerHTML = html;
+                    infoBox.style.display = html ? 'block' : 'none';
+                } else {
+                    infoBox.style.display = 'none';
+                    infoBox.innerHTML = '';
+                }
+            }
         });
         if (document.getElementById('loras-container') && document.getElementById('loras-container').children.length === 0) {
             window.addLoraSelection('loras-container');
@@ -364,15 +569,22 @@
     function updateBatchLoraDropdown() {
         const selects = document.querySelectorAll('#batch-loras-container .lora-select');
         selects.forEach(select => {
-            const currentVal = select.value;
-            select.innerHTML = '<option value="">' + _t('noLora') + '</option>';
-            availableLoras.forEach(lora => {
-                const opt = document.createElement('option');
-                opt.value = lora.path;
-                opt.textContent = lora.name;
-                select.appendChild(opt);
-            });
-            select.value = currentVal;
+            _fillLoraSelect(select);
+            const infoBox = select.closest('.lora-entry')?.querySelector('.lora-info-box');
+            if (infoBox && select.value) {
+                const lora = availableLoras.find(l => l.path === select.value);
+                if (lora && (lora.description || (lora.trigger_words && lora.trigger_words.length > 0) || lora.base_model)) {
+                    let html = '';
+                    if (lora.description) html += `<div style="margin-bottom:2px">${escapeHtmlAttr(lora.description)}</div>`;
+                    if (lora.trigger_words && lora.trigger_words.length > 0) html += `<div>触发词: <span style="color:var(--accent)">${escapeHtmlAttr(lora.trigger_words.join(', '))}</span></div>`;
+                    if (lora.base_model) html += `<div>基模: ${escapeHtmlAttr(lora.base_model)}</div>`;
+                    infoBox.innerHTML = html;
+                    infoBox.style.display = html ? 'block' : 'none';
+                } else {
+                    infoBox.style.display = 'none';
+                    infoBox.innerHTML = '';
+                }
+            }
         });
         if (document.getElementById('batch-loras-container') && document.getElementById('batch-loras-container').children.length === 0) {
             window.addLoraSelection('batch-loras-container');
@@ -412,7 +624,8 @@
     }
 
     function sizeForRatio(quality, ratioValue) {
-        const shortSide = quality === '1080' ? 1088 : quality === '720' ? 704 : 576;
+        const shortSideMap = { '1080': 1088, '720': 704, '540': 576, '480': 416, '360': 352 };
+        const shortSide = shortSideMap[quality] || 576;
         const ratio = parseRatioValue(ratioValue);
         if (ratio >= 1) return { width: roundTo64(shortSide * ratio), height: roundTo64(shortSide) };
         return { width: roundTo64(shortSide), height: roundTo64(shortSide / ratio) };
@@ -429,7 +642,8 @@
 
     function getGenerationSize(kind) {
         const isBatch = kind === 'batch';
-        const q = document.getElementById(isBatch ? 'batch-quality' : 'vid-quality').value;
+        const qEl = document.getElementById(isBatch ? 'batch-quality' : 'vid-quality');
+        const q = qEl ? qEl.value : '720';
         const ratioEl = document.getElementById(isBatch ? 'batch-ratio' : 'vid-ratio');
         const ratio = ratioEl?.value || '16:9';
         const customBox = document.getElementById(isBatch ? 'batch-custom-size' : 'vid-custom-size');
@@ -449,30 +663,43 @@
     }
 
     function resLabelFromQuality(q) {
-        return q === "1080" ? "1080p" : q === "720" ? "720p" : "540p";
+        const map = { '1080': '1080p', '720': '720p', '540': '540p', '480': '480p', '360': '360p' };
+        return map[q] || '540p';
     }
 
     function updateResPreview() {
-        const q = document.getElementById('vid-quality').value; // "1080", "720", "540"
+        const vidQuality = document.getElementById('vid-quality');
+        if (!vidQuality) return;
+        const q = vidQuality.value;
         const size = getGenerationSize('video');
         const note = size.source === 'ref-missing' ? ` · ${_t('ratioRefMissing')}` : '';
-        document.getElementById('res-preview').innerText = `${_t('resPreviewPrefix')}: ${resLabelFromQuality(q)} (${size.width}x${size.height})${note}`;
+        const recEl = document.getElementById('vid-quality-rec');
+        if (recEl && recEl.style.display !== 'none' && recEl.textContent) {
+            const base = recEl.textContent.replace(/（\d+×\d+）.*$/, '');
+            recEl.textContent = `${base}（${size.width}×${size.height}）${note}`;
+        }
         return resLabelFromQuality(q);
     }
 
-    // 图片分辨率预览
     function updateImgResPreview() {
-        const w = document.getElementById('img-w').value;
-        const h = document.getElementById('img-h').value;
-        document.getElementById('img-res-preview').innerText = `${_t('resPreviewPrefix')}: ${w}x${h}`;
+        const imgW = document.getElementById('img-w');
+        const imgH = document.getElementById('img-h');
+        const imgResPreview = document.getElementById('img-res-preview');
+        if (!imgW || !imgH || !imgResPreview) return;
+        imgResPreview.innerText = `${imgW.value}×${imgH.value}`;
     }
 
-    // 批量模式分辨率预览
     function updateBatchResPreview() {
-        const q = document.getElementById('batch-quality').value;
+        const batchQuality = document.getElementById('batch-quality');
+        if (!batchQuality) return;
+        const q = batchQuality.value;
         const size = getGenerationSize('batch');
         const note = size.source === 'ref-missing' ? ` · ${_t('ratioRefMissing')}` : '';
-        document.getElementById('batch-res-preview').innerText = `${_t('resPreviewPrefix')}: ${resLabelFromQuality(q)} (${size.width}x${size.height})${note}`;
+        const recEl = document.getElementById('batch-quality-rec');
+        if (recEl && recEl.style.display !== 'none' && recEl.textContent) {
+            const base = recEl.textContent.replace(/（\d+×\d+）.*$/, '');
+            recEl.textContent = `${base}（${size.width}×${size.height}）${note}`;
+        }
         return resLabelFromQuality(q);
     }
 
@@ -543,6 +770,7 @@
                 if (res.ok && data.path) {
                     document.getElementById(`${frameType}-frame-path`).value = data.path;
                     addLog(`✅ ${frameType === 'start' ? '起始帧' : '结束帧'}上传成功`);
+                    scheduleSave();
                 } else {
                     throw new Error(data.error || data.detail || "上传失败");
                 }
@@ -563,6 +791,7 @@
         document.getElementById(`clear-${frameType}-frame-overlay`).style.display = 'none';
         addLog(`🧹 已清除${frameType === 'start' ? '起始帧' : '结束帧'}`);
         updateResPreview();
+        scheduleSave();
     }
 
     // 处理图片上传
@@ -601,6 +830,7 @@
                 if (res.ok && data.path) {
                     document.getElementById('uploaded-img-path').value = data.path;
                     addLog(`✅ 参考图上传成功: ${file.name}`);
+                    scheduleSave();
                 } else {
                     const errMsg = data.error || data.detail || "上传失败";
                     throw new Error(typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg));
@@ -621,6 +851,7 @@
         document.getElementById('upload-placeholder').style.display = 'block';
         document.getElementById('clear-img-overlay').style.display = 'none';
         addLog("🧹 已清除参考图");
+        scheduleSave();
     }
 
     // 处理音频上传
@@ -655,6 +886,7 @@
                 if (res.ok && data.path) {
                     document.getElementById('uploaded-audio-path').value = data.path;
                     addLog(`✅ 音频上传成功: ${file.name}`);
+                    scheduleSave();
                 } else {
                     const errMsg = data.error || data.detail || "上传失败";
                     throw new Error(typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg));
@@ -674,6 +906,7 @@
         document.getElementById('audio-upload-status').style.display = 'none';
         document.getElementById('clear-audio-overlay').style.display = 'none';
         addLog("🧹 已清除音频文件");
+        scheduleSave();
     }
 
     async function uploadBase64File(file, logLabel) {
@@ -708,6 +941,7 @@
             document.getElementById('motion-video-name').textContent = file.name;
             document.getElementById('clear-motion-video-overlay').style.display = 'flex';
             addLog(_fmt('motionUploadOk', { label, name: file.name }));
+            scheduleSave();
         } catch (e) {
             addLog(_fmt('motionUploadFail', { label, message: e.message }));
         }
@@ -721,6 +955,7 @@
         document.getElementById('motion-video-name').textContent = "";
         document.getElementById('clear-motion-video-overlay').style.display = 'none';
         addLog(_t('motionClearRefVideo'));
+        scheduleSave();
     };
 
     window.handleMotionImageUpload = async function(file) {
@@ -741,6 +976,7 @@
             const path = await uploadBase64File(file, label);
             document.getElementById('motion-image-path').value = path;
             addLog(_fmt('motionUploadOk', { label, name: file.name }));
+            scheduleSave();
         } catch (e) {
             addLog(_fmt('motionUploadFail', { label, message: e.message }));
         }
@@ -754,6 +990,7 @@
         document.getElementById('motion-image-placeholder').style.display = 'block';
         document.getElementById('clear-motion-image-overlay').style.display = 'none';
         addLog(_t('motionClearTargetImage'));
+        scheduleSave();
     };
 
     // 初始化拖拽上传逻辑
@@ -792,17 +1029,17 @@
             });
         });
 
-        audioDropZone.addEventListener('drop', (e) => {
+        if (audioDropZone) audioDropZone.addEventListener('drop', (e) => {
             const file = e.dataTransfer.files[0];
             if (file && file.type.startsWith('audio/')) handleAudioUpload(file);
         }, false);
 
-        startFrameDropZone.addEventListener('drop', (e) => {
+        if (startFrameDropZone) startFrameDropZone.addEventListener('drop', (e) => {
             const file = e.dataTransfer.files[0];
             if (file && file.type.startsWith('image/')) handleFrameUpload(file, 'start');
         }, false);
 
-        endFrameDropZone.addEventListener('drop', (e) => {
+        if (endFrameDropZone) endFrameDropZone.addEventListener('drop', (e) => {
             const file = e.dataTransfer.files[0];
             if (file && file.type.startsWith('image/')) handleFrameUpload(file, 'end');
         }, false);
@@ -955,6 +1192,7 @@
         renderBatchImages();
         updateBatchSegments();
         updateBatchResPreview();
+        scheduleSave();
     }
 
     async function handleBatchBackgroundAudioUpload(file) {
@@ -983,6 +1221,7 @@
                     }
                     if (overlay) overlay.style.display = 'flex';
                     addLog('✅ 成片配乐已上传（将覆盖各片段自带音轨）');
+                    scheduleSave();
                 } else {
                     addLog(`❌ 配乐上传失败: ${data.error || '未知错误'}`);
                 }
@@ -1009,6 +1248,7 @@
         }
         if (overlay) overlay.style.display = 'none';
         addLog('🧹 已清除成片配乐');
+        scheduleSave();
     }
 
     function syncBatchDropZoneChrome() {
@@ -1185,6 +1425,7 @@
             const [item] = batchImages.splice(fromIndex, 1);
             batchImages.splice(to, 0, item);
             updateBatchSegments();
+            scheduleSave();
         }
         renderBatchImages();
     }
@@ -1264,6 +1505,7 @@
         batchImages.splice(index, 1);
         renderBatchImages();
         updateBatchSegments();
+        scheduleSave();
     }
 
     // 横向缩略图：Pointer 拖动排序（避免 HTML5 DnD 在 WebView/部分浏览器失效）
@@ -1465,6 +1707,8 @@
         return mapping[mode] || mode;
     }
 
+    let _lastQueueRenderKey = '';
+
     function renderQueueStatus(data) {
         const summary = document.getElementById('queue-summary');
         const list = document.getElementById('queue-list');
@@ -1482,27 +1726,51 @@
 
         if (!items.length) {
             list.innerHTML = `<div style="font-size:11px;color:var(--text-dim);padding:6px 0;">${_t('queueNoTasks')}</div>`;
+            _lastQueueRenderKey = '';
             return;
         }
+
+        const renderKey = items.map(t => `${t.id}:${t.status}:${t._current ? 1 : 0}`).join('|');
+        const progressOnly = (renderKey === _lastQueueRenderKey) && current;
+
+        if (progressOnly) {
+            const bar = list.querySelector('[data-qbar]');
+            const ptText = list.querySelector('[data-qptext]');
+            if (bar) bar.style.width = Math.min(100, current.progress || 0) + '%';
+            if (ptText) {
+                const pct = current.progress || 0;
+                const modeLbl = queueModeLabel({...current, _current: true});
+                const statusLbl = queueStatusLabel(current);
+                ptText.textContent = `${_t('queueProgressLabel')}${pct}% ${modeLbl} · ${statusLbl}`;
+            }
+            return;
+        }
+        _lastQueueRenderKey = renderKey;
 
         list.innerHTML = items.map(task => {
             const title = escapeHtmlAttr(task.label || queueModeLabel(task));
             const status = queueStatusLabel(task);
             const meta = task._current
-                ? `${status} · ${task.progress || 0}%`
+                ? ''
                 : (task.position ? _fmt('queuePosition', { n: task.position }) : status);
+            const metaLine = task._current
+                ? ''
+                : `<div data-qmeta style="font-size:10px;color:var(--text-dim);margin-top:2px;">${queueModeLabel(task)} · ${meta}</div>`;
             const error = task.error ? `<div style="font-size:10px;color:#f87171;line-height:1.35;">${escapeHtmlAttr(task.error)}</div>` : '';
             const resultPath = task.result?.video_path || task.result?.image_paths?.[0] || '';
             const openBtn = resultPath
                 ? `<button onclick='displayOutput(${JSON.stringify(resultPath)})' style="margin-top:4px;font-size:10px;padding:3px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);color:var(--text-main);cursor:pointer;">${_t('queueViewResult')}</button>`
                 : '';
             const isRunning = task._current && (task.status === 'running' || task.status === 'queued');
+            const progressDesc = task._current
+                ? `${_t('queueProgressLabel')}${task.progress || 0}% ${queueModeLabel(task)} · ${status}`
+                : '';
             const progressBar = task._current
-                ? `<div style="margin-top:6px;display:flex;align-items:center;gap:6px;">
-                    <div style="flex:1;height:6px;border-radius:3px;background:rgba(255,255,255,0.08);overflow:hidden;">
-                        <div style="height:100%;width:${Math.min(100, task.progress || 0)}%;background:var(--accent);border-radius:3px;transition:width 0.3s;"></div>
+                ? `<div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+                    <div style="width:50%;height:6px;border-radius:3px;background:rgba(255,255,255,0.08);overflow:hidden;flex-shrink:0;">
+                        <div data-qbar style="height:100%;width:${Math.min(100, task.progress || 0)}%;background:var(--accent);border-radius:3px;transition:width 0.8s ease;"></div>
                     </div>
-                    <span style="font-size:10px;color:var(--text-dim);min-width:32px;text-align:right;">${task.progress || 0}%</span>
+                    <span data-qptext style="flex:1;font-size:10px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${progressDesc}</span>
                     ${isRunning ? `
                     <button onclick="cancelQueueTask('${task.id}')" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid rgba(248,113,113,0.3);background:rgba(248,113,113,0.1);color:#f87171;cursor:pointer;white-space:nowrap;" title="${_t('queueCancelBtn')}">✕</button>
                     ` : ''}
@@ -1516,7 +1784,7 @@
                     <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
                         <div style="min-width:0;">
                             <div style="font-size:11px;font-weight:700;color:var(--text-main);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
-                            <div style="font-size:10px;color:var(--text-dim);margin-top:2px;">${queueModeLabel(task)} · ${meta}</div>
+                            ${metaLine}
                         </div>
                         <div style="font-size:10px;color:${task.status === 'error' ? '#f87171' : (task._current ? 'var(--accent)' : 'var(--text-dim)')};flex-shrink:0;">${status}</div>
                     </div>
@@ -1551,6 +1819,16 @@
             const data = await res.json();
             renderQueueStatus(data);
 
+            if (data?.current && data.current.status === 'running') {
+                if (!pollInterval) startProgressPolling();
+                _isGeneratingFlag = true;
+            } else if (!data?.current) {
+                if (pollInterval) stopProgressPolling();
+                _isGeneratingFlag = false;
+                const mainBtn = document.getElementById('mainBtn');
+                if (mainBtn) mainBtn.disabled = false;
+            }
+
             const tasks = [];
             if (data?.current) tasks.push(data.current);
             if (Array.isArray(data?.history)) tasks.push(...data.history);
@@ -1570,6 +1848,7 @@
                         if (typeof fetchHistory === 'function') fetchHistory(1);
                     }, 300);
                 } else if (task.status === 'error') {
+                    console.error('[QUEUE] Task error:', task.id, task.error);
                     addLog(_fmt('queueFailLog', { label: task.label || task.id, error: task.error || 'unknown' }));
                 } else if (task.status === 'cancelled') {
                     addLog(_fmt('queueCancelLog', { label: task.label || task.id }));
@@ -1585,7 +1864,7 @@
                 }
             }
             queueInitialPollDone = true;
-        } catch (_) {}
+        } catch (e) { console.error('[QUEUE] pollQueueStatus error:', e); }
         finally {
             queuePollInFlight = false;
         }
@@ -1593,7 +1872,7 @@
 
     function startQueuePolling() {
         if (queuePollInterval) return;
-        queuePollInterval = setInterval(pollQueueStatus, 3000);
+        queuePollInterval = setInterval(pollQueueStatus, 1500);
         pollQueueStatus();
     }
 
@@ -1630,11 +1909,14 @@
             const vUsedGB = vUsedMB / 1024;
             const vTotalGB = vTotalMB / 1024;
             
-            document.getElementById('vram-fill').style.width = (vUsedMB / vTotalMB * 100) + "%";
-            document.getElementById('vram-text').innerText = `${vUsedGB.toFixed(1)} / ${vTotalGB.toFixed(0)} GB`;
-        } catch(e) { document.getElementById('sys-status').innerText = _t('sysOffline'); }
+            const vramFill = document.getElementById('vram-fill');
+            const vramText = document.getElementById('vram-text');
+            if (vramFill) vramFill.style.width = (vUsedMB / vTotalMB * 100) + "%";
+            if (vramText) vramText.innerText = `${vUsedGB.toFixed(1)} / ${vTotalGB.toFixed(0)} GB`;
+        } catch(e) { const ss = document.getElementById('sys-status'); if (ss) ss.innerText = _t('sysOffline'); }
         finally { statusPollInFlight = false; }
     }
+    try {
     setInterval(checkStatus, 3000);
     checkStatus();
     startQueuePolling();
@@ -1672,6 +1954,8 @@
     updateBatchResPreview();
     updateImgResPreview();
     refreshPromptPlaceholder();
+    _restoreFeDebugState();
+    } catch(e) { console.error('[INIT] Top-level init error:', e); }
 
     window.onUiLanguageChanged = function () {
         updateResPreview();
@@ -1857,6 +2141,114 @@
             }
         }
     };
+
+    let _coreModelsData = null;
+
+    window.loadCoreModels = async function() {
+        const list = document.getElementById('core-models-list');
+        if (!list) return;
+        list.innerHTML = '<div style="font-size:10px;color:var(--text-dim);">...</div>';
+        try {
+            const res = await fetch(`${BASE}/api/models/status`);
+            const data = await res.json();
+            _coreModelsData = data;
+            list.innerHTML = '';
+            for (const m of data.models) {
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:5px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);';
+                const nameSpan = document.createElement('span');
+                nameSpan.style.cssText = 'font-size:10px;font-weight:600;color:var(--text-main);min-width:60px;';
+                nameSpan.textContent = m.name;
+                const descSpan = document.createElement('span');
+                descSpan.style.cssText = 'font-size:9px;color:var(--text-dim);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+                descSpan.textContent = m.description || '';
+                descSpan.title = m.description || '';
+                const sizeSpan = document.createElement('span');
+                sizeSpan.style.cssText = 'font-size:9px;color:var(--text-dim);flex-shrink:0;';
+                sizeSpan.textContent = (m.expected_size / (1024**3)).toFixed(1) + 'GB';
+                const statusSpan = document.createElement('span');
+                statusSpan.style.cssText = 'font-size:9px;flex-shrink:0;font-weight:600;';
+                if (m.downloaded) {
+                    statusSpan.textContent = '✓';
+                    statusSpan.style.color = '#4CAF50';
+                } else {
+                    const dlBtn = document.createElement('button');
+                    dlBtn.style.cssText = 'font-size:9px;padding:2px 8px;border-radius:3px;cursor:pointer;font-weight:600;border:1px solid;background:rgba(21,101,192,0.2);border-color:rgba(25,118,210,0.5);color:#42A5F5;';
+                    dlBtn.textContent = _t('coreModelDownload') || '下载';
+                    dlBtn.dataset.modelType = m.id;
+                    dlBtn.onclick = function() { startCoreModelDownload(m.id, dlBtn); };
+                    row.appendChild(nameSpan);
+                    row.appendChild(descSpan);
+                    row.appendChild(sizeSpan);
+                    row.appendChild(dlBtn);
+                    list.appendChild(row);
+                    continue;
+                }
+                row.appendChild(nameSpan);
+                row.appendChild(descSpan);
+                row.appendChild(sizeSpan);
+                row.appendChild(statusSpan);
+                list.appendChild(row);
+            }
+        } catch (e) {
+            list.innerHTML = '<div style="font-size:10px;color:#f44336;">' + e.message + '</div>';
+        }
+    };
+
+    async function startCoreModelDownload(modelType, btn) {
+        const useMirror = document.getElementById('use-mirror-cb')?.checked || false;
+        btn.textContent = '...';
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
+        try {
+            const res = await fetch(`${BASE}/api/models/download`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({modelTypes: [modelType], useMirror: useMirror}),
+            });
+            const data = await res.json();
+            if (data.sessionId) {
+                pollCoreModelDownload(data.sessionId, modelType, btn);
+            } else {
+                btn.textContent = _t('coreModelFailed') || '失败';
+                btn.style.color = '#f44336';
+            }
+        } catch (e) {
+            btn.textContent = _t('coreModelFailed') || '失败';
+            btn.style.color = '#f44336';
+        }
+    }
+
+    function pollCoreModelDownload(sessionId, modelType, btn) {
+        const interval = setInterval(async () => {
+            try {
+                const res = await fetch(`${BASE}/api/models/download/progress?sessionId=${sessionId}`);
+                const data = await res.json();
+                if (data.status === 'complete') {
+                    clearInterval(interval);
+                    btn.textContent = '✓';
+                    btn.style.background = 'rgba(76,175,80,0.15)';
+                    btn.style.borderColor = 'rgba(76,175,80,0.3)';
+                    btn.style.color = '#4CAF50';
+                    btn.disabled = true;
+                    loadModelCheckpoints();
+                } else if (data.status === 'error') {
+                    clearInterval(interval);
+                    btn.textContent = _t('coreModelFailed') || '失败';
+                    btn.style.color = '#f44336';
+                    btn.disabled = false;
+                } else if (data.status === 'downloading') {
+                    const pct = data.total_progress ? data.total_progress.toFixed(0) + '%' : '...';
+                    btn.textContent = pct;
+                }
+            } catch (e) {
+                clearInterval(interval);
+                btn.textContent = _t('coreModelFailed') || '失败';
+                btn.style.color = '#f44336';
+                btn.disabled = false;
+            }
+        }, 2000);
+    }
 
     let _modelRegistryData = null;
 
@@ -2149,17 +2541,23 @@
     function switchMode(m) {
         currentMode = m;
         scheduleSave();
-        document.getElementById('tab-image').classList.toggle('active', m === 'image');
-        document.getElementById('tab-video').classList.toggle('active', m === 'video');
-        document.getElementById('tab-batch').classList.toggle('active', m === 'batch');
+        const tabImage = document.getElementById('tab-image');
+        const tabVideo = document.getElementById('tab-video');
+        const tabBatch = document.getElementById('tab-batch');
+        if (tabImage) tabImage.classList.toggle('active', m === 'image');
+        if (tabVideo) tabVideo.classList.toggle('active', m === 'video');
+        if (tabBatch) tabBatch.classList.toggle('active', m === 'batch');
         const tabMotion = document.getElementById('tab-motion');
         if (tabMotion) tabMotion.classList.toggle('active', m === 'motion');
         const tabTts = document.getElementById('tab-tts');
         if (tabTts) tabTts.classList.toggle('active', m === 'tts');
 
-        document.getElementById('image-opts').style.display = m === 'image' ? 'block' : 'none';
-        document.getElementById('video-opts').style.display = m === 'video' ? 'block' : 'none';
-        document.getElementById('batch-opts').style.display = m === 'batch' ? 'block' : 'none';
+        const imageOpts = document.getElementById('image-opts');
+        const videoOpts = document.getElementById('video-opts');
+        const batchOpts = document.getElementById('batch-opts');
+        if (imageOpts) imageOpts.style.display = m === 'image' ? 'block' : 'none';
+        if (videoOpts) videoOpts.style.display = m === 'video' ? 'block' : 'none';
+        if (batchOpts) batchOpts.style.display = m === 'batch' ? 'block' : 'none';
         const motionOpts = document.getElementById('motion-opts');
         if (motionOpts) motionOpts.style.display = m === 'motion' ? 'block' : 'none';
         const ttsOpts = document.getElementById('tts-opts');
@@ -2388,7 +2786,8 @@
         if (videoWrapper) videoWrapper.style.display = "none";
         if (audioWrapper) audioWrapper.style.display = "none";
         if (player) {
-            try { player.stop(); } catch(_) {}
+            try { player.pause(); } catch(_) {}
+            try { player.source = { type: 'video', sources: [] }; } catch(_) {}
         } else {
             const vid = document.getElementById('res-video');
             if (vid) { vid.pause(); vid.removeAttribute('src'); vid.load(); }
@@ -2407,12 +2806,14 @@
 
     async function submitQueuedTask(mode, endpoint, payload, label) {
         payload = ensureReplaySeed(payload);
+        console.log('[QUEUE] Submitting:', { mode, endpoint, label: label?.slice(0, 60) });
         const res = await fetch(`${BASE}/api/queue/submit`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ mode, endpoint, payload, label })
         });
         const data = await res.json().catch(() => ({}));
+        console.log('[QUEUE] Response:', { status: res.status, ok: res.ok, data });
         if (!res.ok) {
             const errMsg = data.error || data.detail || '队列提交失败';
             throw new Error(typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg));
@@ -2621,6 +3022,18 @@
             if (strength) strength.value = String(safeStrength);
             if (strengthVal) strengthVal.textContent = String(safeStrength);
             if (strengthBox) strengthBox.style.display = 'flex';
+            const infoBox = entry.querySelector('.lora-info-box');
+            if (infoBox && path) {
+                const lora = availableLoras.find(l => l.path === path);
+                if (lora && (lora.description || (lora.trigger_words && lora.trigger_words.length > 0) || lora.base_model)) {
+                    let html = '';
+                    if (lora.description) html += `<div style="margin-bottom:2px">${escapeHtmlAttr(lora.description)}</div>`;
+                    if (lora.trigger_words && lora.trigger_words.length > 0) html += `<div>触发词: <span style="color:var(--accent)">${escapeHtmlAttr(lora.trigger_words.join(', '))}</span></div>`;
+                    if (lora.base_model) html += `<div>基模: ${escapeHtmlAttr(lora.base_model)}</div>`;
+                    infoBox.innerHTML = html;
+                    infoBox.style.display = html ? 'block' : 'none';
+                }
+            }
         });
     }
 
@@ -2830,7 +3243,7 @@
                 if (videoWrapper) videoWrapper.style.display = "none";
                 const audioWrapper = document.getElementById('audio-wrapper');
                 if (audioWrapper) audioWrapper.style.display = "none";
-                if (player) { try { player.stop(); } catch(_) {} }
+                if (player) { try { player.pause(); } catch(_) {} try { player.source = { type: 'video', sources: [] }; } catch(_) {} }
                 else if (resVideo) { resVideo.pause?.(); resVideo.removeAttribute?.('src'); }
                 if (audioPlayer) { try { audioPlayer.stop(); } catch(_) {} }
 
@@ -2870,14 +3283,20 @@
             } else if (currentMode === 'video') {
                 const res = updateResPreview();
                 const genSize = getGenerationSize('video');
-                const dur = parseFloat(document.getElementById('vid-duration').value);
-                const fps = document.getElementById('vid-fps').value;
+                const durEl = document.getElementById('vid-duration');
+                const dur = durEl ? parseFloat(durEl.value) : 5;
+                const fpsEl = document.getElementById('vid-fps');
+                const fps = fpsEl ? fpsEl.value : '24';
                 if (dur > 20) addLog(_t('warnVideoLong').replace('{n}', String(dur)));
 
-                const audio = document.getElementById('vid-audio').checked ? "true" : "false";
-                const audioPath = document.getElementById('uploaded-audio-path').value;
-                const startFramePathValue = document.getElementById('start-frame-path').value;
-                const endFramePathValue = document.getElementById('end-frame-path').value;
+                const audioEl = document.getElementById('vid-audio');
+                const audio = audioEl ? (audioEl.checked ? "true" : "false") : "false";
+                const audioPathEl = document.getElementById('uploaded-audio-path');
+                const audioPath = audioPathEl ? audioPathEl.value : '';
+                const startFrameEl = document.getElementById('start-frame-path');
+                const startFramePathValue = startFrameEl ? startFrameEl.value : '';
+                const endFrameEl = document.getElementById('end-frame-path');
+                const endFramePathValue = endFrameEl ? endFrameEl.value : '';
                 const modelPath = getSelectedModelCheckpointPath();
 
                 let finalImagePath = null, finalStartFramePath = null, finalEndFramePath = null;
@@ -2907,14 +3326,14 @@
 
                 payload = {
                     prompt, resolution: res, model: "ltx-2",
-                    cameraMotion: document.getElementById('vid-motion').value,
+                    cameraMotion: document.getElementById('vid-motion')?.value || 'none',
                     negativePrompt: "low quality, blurry, noisy, static noise, distorted",
                     duration: String(dur), fps, audio,
                     imagePath: finalImagePath,
                     audioPath: audioPath || null,
                     startFramePath: finalStartFramePath,
                     endFramePath: finalEndFramePath,
-                    aspectRatio: document.getElementById('vid-ratio').value,
+                    aspectRatio: document.getElementById('vid-ratio')?.value || '16:9',
                     customWidth: genSize.width,
                     customHeight: genSize.height,
                     loraPath: loraPath,
@@ -3028,7 +3447,7 @@
                         prompt: combinedPrompt,
                         resolution: res,
                         model: "ltx-2",
-                        cameraMotion: document.getElementById('vid-motion').value,
+                        cameraMotion: document.getElementById('vid-motion')?.value || 'none',
                         negativePrompt: "low quality, blurry, noisy, static noise, distorted",
                         duration: String(dur),
                         fps,
@@ -3040,7 +3459,7 @@
                         keyframePaths: batchImages.map((b) => b.path),
                         keyframeStrengths: strengths,
                         keyframeTimes: times,
-                        aspectRatio: document.getElementById('batch-ratio').value,
+                        aspectRatio: document.getElementById('batch-ratio')?.value || '16:9',
                         customWidth: batchGenSize.width,
                         customHeight: batchGenSize.height,
                         loraPath: loraPath,
@@ -3074,7 +3493,7 @@
                         segments: segments,
                         resolution: res,
                         model: "ltx-2",
-                        aspectRatio: document.getElementById('batch-ratio').value,
+                        aspectRatio: document.getElementById('batch-ratio')?.value || '16:9',
                         customWidth: batchGenSize.width,
                         customHeight: batchGenSize.height,
                         loraPath: loraPath,
@@ -3094,12 +3513,14 @@
                     payload.seed = Number(pendingReplaySeedByMode[currentMode]);
                     delete pendingReplaySeedByMode[currentMode];
                 }
+                console.log('[RUN] Submitting to queue:', { mode: currentMode, endpoint, payloadKeys: Object.keys(payload || {}) });
                 const queueInfo = await submitQueuedTask(
                     currentMode,
                     endpoint,
                     payload,
                     `${currentMode}: ${(payload.prompt || prompt || '').slice(0, 48) || 'untitled'}`
                 );
+                console.log('[RUN] Queue submit result:', queueInfo);
                 addLog(_fmt('queueSubmitLog', { id: queueInfo.task_id, n: Math.max(0, (queueInfo.position || 1) - 1) }));
                 if (getSeedMode() === 'random') refreshRandomSeedValue();
             } else {
@@ -3135,6 +3556,7 @@
             }
 
         } catch (e) {
+            console.error('[RUN] Generation failed:', e);
             removeCurrentLoadingCard();
             const errText = e && e.message ? e.message : String(e);
             addLog(`❌ 渲染中断: ${errText}`);
@@ -3149,23 +3571,134 @@
             }
 
         } finally {
-            // ✅ 无论发生什么，这里一定执行，确保按钮永远可以再次点击
             _isGeneratingFlag = false;
-            btn.disabled = false;
+            if (btn) btn.disabled = false;
             if (!useQueue) {
                 removeCurrentLoadingCard();
                 stopProgressPolling();
             }
             checkStatus();
-            // 生成完毕后自动释放显存（不 await 避免阻塞 UI 解锁）
             if (!useQueue) {
                 setTimeout(() => { clearGpu(); }, 500);
             }
         }
     }
 
+    let _feDebugEnabled = false;
+    let _feDebugBuffer = [];
+    let _feDebugSendTimer = null;
+    const _FE_DEBUG_SEND_INTERVAL = 2000;
+    const _FE_DEBUG_MAX_BUFFER = 50;
+
+    function toggleFeDebug() {
+        _feDebugEnabled = !_feDebugEnabled;
+        localStorage.setItem('yunji_fe_debug', _feDebugEnabled ? '1' : '0');
+        _updateFeDebugBtn();
+        if (_feDebugEnabled) {
+            addLog('🐛 前端调试已开启，JS错误将实时上报到运行日志');
+            _feDebugBuffer = [];
+            _startFeDebugSendLoop();
+        } else {
+            addLog('🐛 前端调试已关闭');
+            if (_feDebugSendTimer) { clearInterval(_feDebugSendTimer); _feDebugSendTimer = null; }
+            if (_feDebugBuffer.length > 0) { _flushFeDebugBuffer(); }
+        }
+    }
+
+    function _updateFeDebugBtn() {
+        const btn = document.getElementById('feDebugBtn');
+        if (btn) {
+            btn.textContent = _feDebugEnabled ? _t('feDebugOn') : _t('feDebugOff');
+            btn.style.opacity = _feDebugEnabled ? '1' : '0.7';
+            btn.style.borderColor = _feDebugEnabled ? 'var(--accent)' : '';
+            btn.style.color = _feDebugEnabled ? 'var(--accent)' : '';
+        }
+    }
+
+    function _restoreFeDebugState() {
+        const saved = localStorage.getItem('yunji_fe_debug');
+        if (saved === '1') {
+            _feDebugEnabled = true;
+            _updateFeDebugBtn();
+            _feDebugBuffer = [];
+            _startFeDebugSendLoop();
+        }
+    }
+
+    function _feDebugCapture(level, msg, source, line, col) {
+        if (!_feDebugEnabled) return;
+        const entry = {
+            ts: new Date().toISOString(),
+            level: level || 'error',
+            msg: String(msg || '').slice(0, 500),
+            src: source ? String(source).split('/').pop().split('\\').pop() : '',
+            line: line || 0,
+            col: col || 0,
+        };
+        _feDebugBuffer.push(entry);
+        if (_feDebugBuffer.length > _FE_DEBUG_MAX_BUFFER) {
+            _feDebugBuffer.shift();
+        }
+    }
+
+    function _startFeDebugSendLoop() {
+        if (_feDebugSendTimer) return;
+        _feDebugSendTimer = setInterval(() => {
+            if (_feDebugBuffer.length > 0) _flushFeDebugBuffer();
+        }, _FE_DEBUG_SEND_INTERVAL);
+    }
+
+    async function _flushFeDebugBuffer() {
+        if (!_feDebugBuffer.length) return;
+        const batch = _feDebugBuffer.splice(0, _feDebugBuffer.length);
+        try {
+            await fetch(`${BASE}/api/system/frontend-log`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entries: batch }),
+            });
+        } catch (_) {}
+    }
+
+    window.addEventListener('error', function(e) {
+        _feDebugCapture('error', e.message, e.filename, e.lineno, e.colno);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+        const reason = e.reason;
+        const msg = reason instanceof Error ? `${reason.message}\n${reason.stack || ''}` : String(reason);
+        _feDebugCapture('error', msg, '', 0, 0);
+    });
+
+    const _origConsoleError = console.error;
+    console.error = function(...args) {
+        _feDebugCapture('error', args.map(a => {
+            try { return typeof a === 'object' ? JSON.stringify(a) : String(a); } catch(_) { return String(a); }
+        }).join(' '), '', 0, 0);
+        _origConsoleError.apply(console, args);
+    };
+
+    function togglePanel(panelId) {
+        const panels = ['env-settings', 'sys-settings'];
+        const btnMap = { 'env-settings': 'button[onclick*="env-settings"]', 'sys-settings': 'button[onclick*="sys-settings"]' };
+        const target = document.getElementById(panelId);
+        if (!target) return;
+        const isCurrentlyOpen = target.style.display !== 'none';
+        panels.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+            const btn = document.querySelector(btnMap[id]);
+            if (btn) btn.classList.remove('active');
+        });
+        if (!isCurrentlyOpen) {
+            target.style.display = 'block';
+            const btn = document.querySelector(btnMap[panelId]);
+            if (btn) btn.classList.add('active');
+        }
+    }
+
     async function clearGpu() {
         const btn = document.getElementById('clearGpuBtn');
+        if (!btn) return;
         btn.disabled = true;
         btn.innerText = _t('clearingVram');
         try {
@@ -3176,7 +3709,6 @@
             const data = await res.json();
             if (res.ok) {
                 addLog(`🧹 显存清理成功: ${data.message}`);
-                // 立即触发状态刷新
                 checkStatus();
                 setTimeout(checkStatus, 1000); 
             } else {
@@ -3186,8 +3718,10 @@
         } catch(e) {
             addLog(`❌ 清理显存失败: ${e.message}`);
         } finally {
-            btn.disabled = false;
-            btn.innerText = _t('clearVram');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerText = _t('clearVram');
+            }
         }
     }
 
@@ -3197,13 +3731,13 @@
             const data = await res.json();
             if (res.ok && data.gpus) {
                 const selector = document.getElementById('gpu-selector');
-                selector.innerHTML = data.gpus.map(g => 
+                if (selector) selector.innerHTML = data.gpus.map(g => 
                     `<option value="${g.id}" ${g.active ? 'selected' : ''}>GPU ${g.id}: ${g.name} (${g.vram})</option>`
                 ).join('');
                 
-                // 更新当前显示的 GPU 名称
                 const activeGpu = data.gpus.find(g => g.active);
-                if (activeGpu) document.getElementById('gpu-name').innerText = activeGpu.name;
+                const gpuNameEl = document.getElementById('gpu-name');
+                if (activeGpu && gpuNameEl) gpuNameEl.innerText = activeGpu.name;
             }
         } catch (e) {
             console.error("Failed to list GPUs", e);
@@ -3248,31 +3782,33 @@
                 }
                 offlineCount = 0;
                 const d = await res.json();
+                console.log('[PROGRESS]', JSON.stringify(d));
                 if (d.progress > 0) {
-                    const ph = String(d.phase || 'inference');
-                    const phaseKey = 'phase_' + ph;
-                    let phaseStr = _t(phaseKey);
-                    if (phaseStr === phaseKey) phaseStr = ph;
+                    const logMsg = d.log_message ?? d.logMessage ?? '';
 
-                    let stepLabel;
-                    if (d.current_step !== undefined && d.current_step !== null && d.total_steps) {
-                        stepLabel = `${d.current_step}/${d.total_steps} ${_t('progressStepUnit')}`;
-                    } else {
-                        stepLabel = `${d.progress}%`;
-                    }
+                    const pf = document.getElementById('progress-fill');
+                    if (pf) pf.style.width = d.progress + "%";
 
-                    document.getElementById('progress-fill').style.width = d.progress + "%";
+                    const progressText = `${d.progress}%`;
+                    const statusText = logMsg || '';
+
                     const loaderStep = document.getElementById('loader-step-text');
-                    const busyLine = `${_t('gpuBusyPrefix')}: ${stepLabel} [${phaseStr}]`;
-                    if (loaderStep) loaderStep.innerText = busyLine;
-                    else {
+                    if (loaderStep) {
+                        loaderStep.innerHTML = `<span style="font-size:18px;font-weight:800;color:var(--text-main);">${progressText}</span>${statusText ? `<span style="font-size:12px;font-weight:600;color:var(--text-dim);margin-left:8px;">${statusText}</span>` : ''}`;
+                    } else {
                         const loadingTxt = document.getElementById('loading-txt');
-                        if (loadingTxt) loadingTxt.innerText = busyLine;
+                        if (loadingTxt) loadingTxt.textContent = `${progressText} ${statusText}`;
                     }
 
-                    // 同步更新历史缩略图卡片上的进度文字
                     const cardStep = document.getElementById('loading-card-step');
-                    if (cardStep) cardStep.innerText = stepLabel;
+                    if (cardStep) cardStep.textContent = `${progressText} ${statusText}`;
+
+                    const qMeta = document.querySelector('[data-qmeta]');
+                    if (qMeta) qMeta.textContent = `${progressText} ${statusText}`;
+                    const qPct = document.querySelector('[data-qpct]');
+                    if (qPct) qPct.textContent = progressText;
+                    const qBar = document.querySelector('[data-qbar]');
+                    if (qBar) qBar.style.width = Math.min(100, d.progress) + '%';
                 }
             } catch(e) {}
         }, 1000);
@@ -3281,8 +3817,8 @@
     function stopProgressPolling() {
         clearInterval(pollInterval);
         pollInterval = null;
-        document.getElementById('progress-fill').style.width = "0%";
-        // 移除渲染中的卡片（生成已结束）
+        const pf = document.getElementById('progress-fill');
+        if (pf) pf.style.width = "0%";
         const lc = document.getElementById('current-loading-card');
         if (lc) lc.remove();
     }
@@ -3359,13 +3895,16 @@
         if (videoWrapper) videoWrapper.style.display = "none";
         if (audioWrapper) audioWrapper.style.display = "none";
         
-        // 关键BUG修复：切换前强制清除并停止现有视频和声音，避免后台继续播放
-        if(player) {
-            player.stop();
-        } else {
+        if (vid) {
             vid.pause();
             vid.removeAttribute('src');
             vid.load();
+        }
+        if (player) {
+            try { player.pause(); } catch(_) {}
+            try {
+                player.source = { type: 'video', sources: [] };
+            } catch(_) {}
         }
         if (audio) {
             audio.pause();
@@ -3397,7 +3936,7 @@
         console.log("[DEBUG][displayOutput] BASE:", BASE);
         console.log("[DEBUG][displayOutput] Has player:", !!player);
 
-        loader.style.display = "none";
+        if (loader) loader.style.display = "none";
         if (effectiveType === 'audio') {
             currentPreviewAssetUrl = url;
             currentPreviewAssetName = fileName || 'preview.wav';
@@ -3439,29 +3978,85 @@
             if (previewReplayActions) previewReplayActions.style.display = 'inline-flex';
             refreshPreviewReplayFromFile(fileOrPath, fileName);
             
-            console.log("[DEBUG][displayOutput-video] Setting video src:", url);
-            console.log("[DEBUG][displayOutput-video] Has player:", !!player);
-            
-            if(player) {
-                console.log("[DEBUG][displayOutput-video] Using Plyr player");
-                player.source = {
-                    type: 'video',
-                    sources: [{ src: url, type: 'video/mp4' }]
-                };
-                const playPromise = player.play();
-                if (playPromise && typeof playPromise.catch === 'function') {
-                    playPromise.catch((e) => console.error("[DEBUG][displayOutput-video] Plyr play error:", e));
-                }
-            } else {
-                console.log("[DEBUG][displayOutput-video] Using native video element");
-                vid.src = url;
-                vid.load();
-                const playPromise = vid.play();
-                if (playPromise && typeof playPromise.catch === 'function') {
-                    playPromise.catch((e) => console.error("[DEBUG][displayOutput-video] Native video play error:", e));
+            let _videoRetryCount = 0;
+            const _videoMaxRetries = 2;
+            const _altUrls = [];
+            if (url.includes('/api/system/file')) {
+                _altUrls.push(url.replace('/api/system/file?path=', '/outputs/').split('&t=')[0].replace(/%2F/g, '/').replace(/%5C/g, '/'));
+            } else if (url.includes('/outputs/')) {
+                const outInput2 = document.getElementById('global-out-dir');
+                const globalDir2 = outInput2 ? outInput2.value.replace(/\\/g, '/').replace(/\/$/, '') : "";
+                if (globalDir2) {
+                    const fname2 = url.split('/outputs/')[1].split('?')[0];
+                    _altUrls.push(`${BASE}/api/system/file?path=${encodeURIComponent(globalDir2 + '/' + fname2)}&t=${Date.now()}`);
                 }
             }
-            if (!silentLog) addLog(`✅ 视频渲染成功: ${fileName}`);
+
+            function _onVideoError(err) {
+                console.error("[VIDEO-PROTECT] Video error:", err);
+                if (vid && vid.error) {
+                    console.error("[VIDEO-PROTECT] Error code:", vid.error.code, "message:", vid.error.message);
+                }
+                if (_videoRetryCount < _videoMaxRetries && _altUrls.length > 0) {
+                    _videoRetryCount++;
+                    const retryUrl = _altUrls[0] + (_altUrls[0].includes('?') ? '&' : '?') + 'retry=' + _videoRetryCount + '&t=' + Date.now();
+                    console.log("[VIDEO-PROTECT] Retrying with alt URL, attempt:", _videoRetryCount);
+                    if (!silentLog) addLog(`⚠️ 视频加载失败，尝试备用路径 (${_videoRetryCount}/${_videoMaxRetries})...`);
+                    _tryPlayVideo(retryUrl);
+                } else if (player) {
+                    console.log("[VIDEO-PROTECT] Plyr failed, falling back to native video");
+                    if (!silentLog) addLog(`⚠️ Plyr播放器失败，尝试原生播放器...`);
+                    try { player.destroy(); } catch(_) {}
+                    player = null;
+                    _tryPlayVideoNative(url);
+                } else {
+                    if (!silentLog) addLog(`❌ 视频无法播放，请尝试下载后本地查看`);
+                    if (vid) {
+                        vid.removeEventListener('error', _onVideoError);
+                    }
+                }
+            }
+
+            function _tryPlayVideoNative(videoUrl) {
+                if (!vid) return;
+                vid.removeEventListener('error', _onVideoError);
+                vid.addEventListener('error', _onVideoError);
+                vid.src = videoUrl;
+                vid.load();
+                try {
+                    const p = vid.play();
+                    if (p && typeof p.catch === 'function') p.catch(() => {});
+                } catch(_) {}
+            }
+
+            function _tryPlayVideo(videoUrl) {
+                if (!vid) return;
+                vid.removeEventListener('error', _onVideoError);
+                vid.addEventListener('error', _onVideoError);
+                if (player) {
+                    try {
+                        vid.src = videoUrl;
+                        vid.load();
+                    } catch(_) {}
+                    try {
+                        player.source = {
+                            type: 'video',
+                            sources: [{ src: videoUrl, type: 'video/mp4' }]
+                        };
+                    } catch(_) {}
+                    setTimeout(() => {
+                        try {
+                            const p = player.play();
+                            if (p && typeof p.catch === 'function') p.catch(() => {});
+                        } catch(_) {}
+                    }, 150);
+                } else {
+                    _tryPlayVideoNative(videoUrl);
+                }
+            }
+
+            _tryPlayVideo(url);
+            if (!silentLog) addLog(`✅ 视频加载中: ${fileName}`);
         }
     }
 
@@ -3492,23 +4087,26 @@
     }
 
 
-// Force switch to video mode on load
-window.addEventListener('DOMContentLoaded', () => switchMode('video'));
-window.addEventListener('DOMContentLoaded', () => {
-    refreshRandomSeedValue();
-    updateSeedModeUI();
-});
-window.addEventListener('DOMContentLoaded', () => {
-    fetch(`${BASE}/api/app-info`)
-        .then(r => r.json())
-        .then(data => {
-            const nameEl = document.getElementById('app-name');
-            const verEl = document.getElementById('app-version');
-            if (nameEl && data.app_name) nameEl.textContent = data.app_name;
-            if (verEl && data.version) verEl.textContent = 'v' + data.version;
-        })
-        .catch(() => {});
-});
+    function _onDomReady() {
+        try {
+        switchMode('video');
+        refreshRandomSeedValue();
+        updateSeedModeUI();
+        } catch(e) { console.error('[INIT] _onDomReady error:', e); }
+        fetch(`${BASE}/api/app-info`)
+            .then(r => r.json())
+            .then(data => {
+                const nameEl = document.getElementById('app-name');
+                if (nameEl && data.app_name) nameEl.textContent = data.app_name;
+                if (data.version) window.__appVersion = data.version;
+            })
+            .catch(() => {});
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _onDomReady);
+    } else {
+        _onDomReady();
+    }
 
 
     
@@ -3561,18 +4159,47 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     function extractReplayInfo(item) {
+        const gi = item.gen_info;
+        if (gi && Object.keys(gi).length > 0) {
+            return {
+                prompt: gi.prompt || '',
+                seed: gi.seed || '',
+                width: gi.width || '',
+                height: gi.height || '',
+                fps: gi.fps || '',
+                duration: gi.duration ? gi.duration + 's' : '',
+                steps: gi.steps || '',
+                cfg: gi.cfg || '',
+                aspect_ratio: gi.aspect_ratio || '',
+                camera_motion: gi.camera_motion || '',
+                gen_method: gi.gen_method || '',
+                loras: gi.loras || [],
+                lora_details: gi.lora_details || [],
+                elapsed: gi.elapsed || '',
+            };
+        }
         const replay = item.replay;
         if (!replay) return {};
         const payload = replay.payload || {};
+        const loraPaths = payload.loraPaths || (payload.loraPath ? [payload.loraPath] : []);
+        const loraStrengths = payload.loraStrengths || (payload.loraStrength ? [payload.loraStrength] : []);
+        const loraDetails = loraPaths.map((p, i) => {
+            const name = p ? p.split(/[/\\]/).pop().replace(/\.[^.]+$/, '') : '';
+            return { name, strength: loraStrengths[i] || 1.0, path: p || '' };
+        });
+        const segments = Array.isArray(payload.segments) ? payload.segments : [];
+        const segTotalDur = segments.reduce((s, seg) => s + (seg.duration || 0), 0);
         return {
-            prompt: payload.prompt || '',
+            prompt: payload.prompt || (segments.length ? segments.map(s => s.prompt).filter(Boolean).join('; ') : ''),
             seed: payload.seed || '',
-            width: payload.width || payload.image_width || '',
-            height: payload.height || payload.image_height || '',
+            width: payload.width || payload.image_width || payload.customWidth || '',
+            height: payload.height || payload.image_height || payload.customHeight || '',
             fps: payload.fps || '',
-            duration: payload.duration ? payload.duration + 's' : (payload.num_frames ? (payload.num_frames / (payload.fps || 24)).toFixed(1) + 's' : ''),
+            duration: payload.duration ? payload.duration + 's' : (segTotalDur ? segTotalDur + 's' : (payload.num_frames ? (payload.num_frames / (payload.fps || 24)).toFixed(1) + 's' : '')),
             steps: payload.num_inference_steps || payload.steps || '',
             cfg: payload.guidance_scale || payload.cfg || '',
+            loras: loraDetails.map(l => l.strength !== 1.0 ? `${l.name}(${l.strength})` : l.name),
+            lora_details: loraDetails,
         };
     }
 
@@ -3581,7 +4208,7 @@ window.addEventListener('DOMContentLoaded', () => {
         const verEl = document.getElementById('copyright-version');
         if (verEl) {
             const appVer = document.getElementById('app-version');
-            verEl.textContent = appVer ? appVer.textContent : '-';
+        verEl.textContent = appVer ? appVer.textContent : (window.__appVersion ? 'v' + window.__appVersion : '-');
         }
         if (modal) modal.style.display = 'flex';
     }
@@ -3592,15 +4219,22 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     function switchLibTab(tab) {
-        document.getElementById('log-container').style.display = tab === 'log' ? 'flex' : 'none';
+        const logContainer = document.getElementById('log-container');
+        if (logContainer) logContainer.style.display = tab === 'log' ? 'flex' : 'none';
         const hw = document.getElementById('history-wrapper');
         if (hw) hw.style.display = tab === 'history' ? 'block' : 'none';
         
-        document.getElementById('tab-log').style.color = tab === 'log' ? 'var(--accent)' : 'var(--text-dim)';
-        document.getElementById('tab-log').style.borderColor = tab === 'log' ? 'var(--accent)' : 'transparent';
+        const tabLog = document.getElementById('tab-log');
+        if (tabLog) {
+            tabLog.style.color = tab === 'log' ? 'var(--accent)' : 'var(--text-dim)';
+            tabLog.style.borderColor = tab === 'log' ? 'var(--accent)' : 'transparent';
+        }
         
-        document.getElementById('tab-history').style.color = tab === 'history' ? 'var(--accent)' : 'var(--text-dim)';
-        document.getElementById('tab-history').style.borderColor = tab === 'history' ? 'var(--accent)' : 'transparent';
+        const tabHistory = document.getElementById('tab-history');
+        if (tabHistory) {
+            tabHistory.style.color = tab === 'history' ? 'var(--accent)' : 'var(--text-dim)';
+            tabHistory.style.borderColor = tab === 'history' ? 'var(--accent)' : 'transparent';
+        }
         
         if (tab === 'history') {
             return fetchHistory(true);
@@ -3632,44 +4266,117 @@ window.addEventListener('DOMContentLoaded', () => {
         const safeGlobalDir = (globalDir || '').replace(/'/g, "\\'").replace(/"/g, '\\"');
         const replayId = item.replay_available && item.replay ? storeReplayRecord(item.replay) : '';
         const typeBadge = item.type === 'video' ? '🎬 VID' : item.type === 'audio' ? '♪ AUD' : '🎨 IMG';
+        const info = extractReplayInfo(item);
 
         if (_historyLayout === 'list') {
-            const info = extractReplayInfo(item);
             const media = item.type === 'audio'
                 ? `<div class="history-audio-thumb"><div class="history-audio-icon">♪</div></div>`
-                : `<img data-src="${item.type === 'video' ? thumbUrl : url}" class="lazy-load history-thumb-media" alt="" style="object-fit: cover; width: 100%; height: 100%;">`;
+                : `<img data-src="${item.type === 'video' ? thumbUrl : url}" class="lazy-load history-thumb-media" alt="" style="object-fit: contain; max-width: 100%; max-height: 100%;">`;
+
+            const pv = (v) => v || '—';
+            let loraCell = pv('');
+            if (info.loras && info.loras.length > 0) {
+                const loraStr = info.loras.map(l => escapeHtmlAttr(l)).join(', ');
+                let loraTitle = loraStr;
+                let loraDescHtml = '';
+                if (info.lora_details && info.lora_details.length > 0) {
+                    const descParts = [];
+                    info.lora_details.forEach(d => {
+                        const meta = d.path ? availableLoras.find(l => l.path === d.path) : null;
+                        const titleParts = [d.name + (d.strength !== 1.0 ? `(${d.strength})` : '')];
+                        if (meta && meta.description) titleParts.push(meta.description);
+                        if (meta && meta.trigger_words && meta.trigger_words.length > 0) titleParts.push('触发词: ' + meta.trigger_words.join(', '));
+                        descParts.push(titleParts.join('\n'));
+                        if (meta && meta.description) {
+                            loraDescHtml += `<div class="lora-desc-line" style="color:var(--text-dim);font-size:10px;margin-top:1px">${escapeHtmlAttr(meta.description.slice(0, 80))}</div>`;
+                        }
+                        if (meta && meta.trigger_words && meta.trigger_words.length > 0) {
+                            loraDescHtml += `<div class="lora-trigger-line" style="color:var(--accent);font-size:10px">触发词: ${escapeHtmlAttr(meta.trigger_words.join(', '))}</div>`;
+                        }
+                    });
+                    loraTitle = descParts.join('\n');
+                }
+                loraCell = `<span title="${escapeHtmlAttr(loraTitle)}">${loraStr}</span>${loraDescHtml}`;
+            }
+
+            const hasReplay = !!(info.prompt || info.gen_method || info.width || info.seed);
+
             const promptText = info.prompt ? escapeHtmlAttr(info.prompt.slice(0, 120)) : '';
-            const metaTags = [];
-            if (info.seed) metaTags.push(`<span class="meta-tag">Seed: ${info.seed}</span>`);
-            if (info.width && info.height) metaTags.push(`<span class="meta-tag">${info.width}×${info.height}</span>`);
-            if (info.fps) metaTags.push(`<span class="meta-tag">${info.fps}fps</span>`);
-            if (info.duration) metaTags.push(`<span class="meta-tag">${info.duration}</span>`);
-            if (info.steps) metaTags.push(`<span class="meta-tag">${info.steps}步</span>`);
-            if (info.cfg) metaTags.push(`<span class="meta-tag">CFG ${info.cfg}</span>`);
-            metaTags.push(`<span class="meta-tag">${formatFileSize(item.size)}</span>`);
-            metaTags.push(`<span class="meta-tag">${formatDateTime(item.mtime)}</span>`);
+            const resolution = (info.width && info.height) ? `${info.width}×${info.height}` : '';
+            const duration = info.duration || '';
+            const fps = info.fps ? `${info.fps}fps` : '';
+            const method = info.gen_method || '';
+            const seed = info.seed ? `Seed:${info.seed}` : '';
+            const steps = info.steps ? `${info.steps}步` : '';
+            const cfg = info.cfg ? `CFG${info.cfg}` : '';
+            const lora = (info.loras && info.loras.length > 0) ? loraCell : '';
+            const motion = info.camera_motion || '';
+            const elapsed = info.elapsed || '';
+            const aspect = info.aspect_ratio || '';
+            const codec = info.codec || '';
+            const bitrate = info.bitrate || '';
+
+            const paramHtml = `
+                ${promptText ? `<div class="list-param-line lpl-prompt-line" onclick="this.classList.toggle('lpl-expanded')"><span class="lpl-key">提示词</span><span class="lpl-val lpl-prompt">${promptText}</span></div>` : ''}
+                <div class="list-param-line">
+                    <span class="lpl-key">方式</span><span class="lpl-val lpl-method">${method || '—'}</span>
+                    <span class="lpl-key">分辨率</span><span class="lpl-val">${resolution || '—'}</span>
+                    <span class="lpl-key">帧率</span><span class="lpl-val">${fps || '—'}</span>
+                    <span class="lpl-key">时长</span><span class="lpl-val">${duration || '—'}</span>
+                    <span class="lpl-key">种子</span><span class="lpl-val">${seed || '—'}</span>
+                </div>
+                <div class="list-param-line">
+                    <span class="lpl-key">步数</span><span class="lpl-val">${steps || '—'}</span>
+                    <span class="lpl-key">CFG</span><span class="lpl-val">${cfg || '—'}</span>
+                    <span class="lpl-key">运镜</span><span class="lpl-val">${motion || '—'}</span>
+                    <span class="lpl-key">LoRA</span><span class="lpl-val lpl-lora">${lora || '—'}</span>
+                    <span class="lpl-key">耗时</span><span class="lpl-val">${elapsed || '—'}</span>
+                    <span class="lpl-key">大小</span><span class="lpl-val">${formatFileSize(item.size)}</span>
+                    <span class="lpl-key">文件名</span><span class="lpl-val lpl-filename">${escapeHtmlAttr(item.filename)}</span>
+                </div>`;
 
             return `<div class="history-card-list" data-history-key="${key}" data-filename="${safeFilename}" data-type="${item.type}" data-replayid="${replayId}" data-globaldir="${safeGlobalDir}">
                         <div class="list-thumb">
                             <div class="history-type-badge">${typeBadge}</div>
                             <button class="history-delete-btn" onclick="event.stopPropagation(); deleteHistoryItem('${safeFilename}', '${item.type}', this)">✕</button>
+                            <button class="history-save-btn" onclick="event.stopPropagation(); downloadHistoryItem('${safeFilename}', '${safeGlobalDir}')">⬇</button>
                             ${media}
                         </div>
                         <div class="list-info">
-                            ${promptText ? `<div class="info-prompt">${promptText}</div>` : ''}
-                            <div class="info-meta">${metaTags.join('')}</div>
-                            <div class="info-filename">${escapeHtmlAttr(item.filename)}</div>
+                            ${paramHtml}
                         </div>
                     </div>`;
         }
 
         const media = item.type === 'audio'
             ? `<div class="history-audio-thumb"><div class="history-audio-icon">♪</div><div>${escapeHtmlAttr(item.filename)}</div></div>`
-            : `<img data-src="${item.type === 'video' ? thumbUrl : url}" class="lazy-load history-thumb-media" alt="" style="object-fit: cover; width: 100%; height: 100%;">`;
+            : `<img data-src="${item.type === 'video' ? thumbUrl : url}" class="lazy-load history-thumb-media" alt="" style="object-fit: contain; max-width: 100%; max-height: 100%;">`;
+
+        const gridTags = [];
+        if (info.gen_method) gridTags.push(`<span class="ptag ptag-method">${info.gen_method}</span>`);
+        if (info.width && info.height) gridTags.push(`<span class="ptag">${info.width}×${info.height}</span>`);
+        if (info.fps) gridTags.push(`<span class="ptag">${info.fps}fps</span>`);
+        if (info.duration) gridTags.push(`<span class="ptag">${info.duration}</span>`);
+        if (info.seed) gridTags.push(`<span class="ptag">Seed:${info.seed}</span>`);
+        if (info.loras && info.loras.length > 0) {
+            const loraStr = info.loras.map(l => escapeHtmlAttr(l)).join(', ');
+            gridTags.push(`<span class="ptag ptag-lora">${loraStr}</span>`);
+        }
+        if (info.elapsed) gridTags.push(`<span class="ptag ptag-elapsed">⏱${info.elapsed}</span>`);
+
+        const gridInfoHtml = `<div class="grid-info-bar">
+                ${info.prompt ? `<div class="grid-info-prompt">${escapeHtmlAttr(info.prompt.slice(0, 120))}</div>` : ''}
+                <div class="param-row">${gridTags.join('')}</div>
+           </div>`;
+
         return `<div class="history-card" data-history-key="${key}" data-filename="${safeFilename}" data-type="${item.type}" data-replayid="${replayId}" data-globaldir="${safeGlobalDir}">
-                    <div class="history-type-badge">${typeBadge}</div>
-                    <button class="history-delete-btn" onclick="event.stopPropagation(); deleteHistoryItem('${safeFilename}', '${item.type}', this)">✕</button>
-                    ${media}
+                    <div class="grid-thumb-wrap">
+                        <div class="history-type-badge">${typeBadge}</div>
+                        <button class="history-delete-btn" onclick="event.stopPropagation(); deleteHistoryItem('${safeFilename}', '${item.type}', this)">✕</button>
+                        <button class="history-save-btn" onclick="event.stopPropagation(); downloadHistoryItem('${safeFilename}', '${safeGlobalDir}')">⬇</button>
+                        ${media}
+                    </div>
+                    ${gridInfoHtml}
                 </div>`;
     }
 
@@ -3812,6 +4519,22 @@ window.addEventListener('DOMContentLoaded', () => {
             console.error('Delete failed', e);
             alert('删除失败');
         }
+    }
+
+    function downloadHistoryItem(filename, globalDir) {
+        if (!filename) return;
+        let url;
+        if (globalDir) {
+            url = `${BASE}/api/system/file?path=${encodeURIComponent(globalDir + '/' + filename)}`;
+        } else {
+            url = `${BASE}/outputs/${filename}`;
+        }
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
     }
 
     function waitForMediaEvent(media, eventName, timeoutMs) {
@@ -4056,14 +4779,18 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     // 页面加载时初始化滚动监听
-    window.addEventListener('DOMContentLoaded', () => {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => setTimeout(initHistoryScrollListener, 500));
+    } else {
         setTimeout(initHistoryScrollListener, 500);
-    });
+    }
 
     window.displayHistoryOutput = function displayHistoryOutput(file, type, replayId = '') {
         console.log("[DEBUG][displayHistoryOutput] file:", file, "type:", type, "replayId:", replayId);
-        document.getElementById('res-img').style.display = 'none';
-        document.getElementById('video-wrapper').style.display = 'none';
+        const resImg = document.getElementById('res-img');
+        const videoWrapper = document.getElementById('video-wrapper');
+        if (resImg) resImg.style.display = 'none';
+        if (videoWrapper) videoWrapper.style.display = 'none';
         const audioWrapper = document.getElementById('audio-wrapper');
         if (audioWrapper) audioWrapper.style.display = 'none';
         displayOutput(file, type, { replayId });
@@ -4074,6 +4801,9 @@ window.addEventListener('DOMContentLoaded', () => {
         const card = e.target.closest('.history-card, .history-card-list');
         if (!card) return;
         if (e.target.closest('.history-delete-btn')) return;
+        if (e.target.closest('.history-save-btn')) return;
+        document.querySelectorAll('.history-card.is-active, .history-card-list.is-active').forEach(c => c.classList.remove('is-active'));
+        card.classList.add('is-active');
         const filename = card.dataset.filename;
         const type = card.dataset.type;
         const replayId = card.dataset.replayid || '';
@@ -4081,13 +4811,16 @@ window.addEventListener('DOMContentLoaded', () => {
         displayHistoryOutput(filename, type, replayId);
     });
     
-    window.addEventListener('DOMContentLoaded', () => {
+    function _onDomReady2() {
+        try {
         document.querySelectorAll('.layout-btn').forEach(b => b.classList.toggle('active', b.dataset.layout === _historyLayout));
         const hc = document.getElementById('history-container');
         if (hc) hc.classList.toggle('layout-list', _historyLayout === 'list');
         initAudioPreviewToggle();
         // Initialize Plyr Custom Video Component
+        try {
         if(window.Plyr) {
+            try {
             player = new Plyr('#res-video', {
                 controls: [
                     'play-large', 'play', 'progress', 'current-time', 
@@ -4097,35 +4830,24 @@ window.addEventListener('DOMContentLoaded', () => {
                 loop: { active: true },
                 autoplay: true
             });
+            } catch(plyrInitErr) {
+                console.error("[VIDEO-PROTECT] Plyr init failed:", plyrInitErr);
+                player = null;
+            }
             
-            // Debug: Plyr events
             const videoEl = document.getElementById('res-video');
             if (videoEl) {
                 videoEl.addEventListener('error', (e) => {
-                    console.error("[DEBUG][video] HTML5 video error event:", e);
-                    console.error("[DEBUG][video] Video error code:", videoEl.error ? videoEl.error.code : 'none');
-                    console.error("[DEBUG][video] Video error message:", videoEl.error ? videoEl.error.message : 'none');
-                    console.error("[DEBUG][video] Video src:", videoEl.src);
-                    console.error("[DEBUG][video] Video networkState:", videoEl.networkState);
-                    console.error("[DEBUG][video] Video readyState:", videoEl.readyState);
-                });
-                videoEl.addEventListener('loadeddata', () => {
-                    console.log("[DEBUG][video] loadeddata event fired");
-                });
-                videoEl.addEventListener('canplay', () => {
-                    console.log("[DEBUG][video] canplay event fired");
-                });
-                videoEl.addEventListener('play', () => {
-                    console.log("[DEBUG][video] play event fired");
+                    console.error("[VIDEO-PROTECT] HTML5 video error:", videoEl.error ? `code=${videoEl.error.code} msg=${videoEl.error.message}` : 'unknown', "src:", videoEl.src);
                 });
             }
-            player.on('error', (e) => {
-                console.error("[DEBUG][Plyr] Plyr error:", e);
-            });
-            player.on('ready', () => {
-                console.log("[DEBUG][Plyr] Player ready");
-            });
+            if (player) {
+                player.on('error', (e) => {
+                    console.error("[VIDEO-PROTECT] Plyr error:", e);
+                });
+            }
             
+            try {
             audioPlayer = new Plyr('#res-audio', {
                 controls: [
                     'play', 'progress', 'current-time',
@@ -4133,6 +4855,15 @@ window.addEventListener('DOMContentLoaded', () => {
                 ],
                 settings: []
             });
+            } catch(plyrAudioErr) {
+                console.error("[VIDEO-PROTECT] Plyr audio init failed:", plyrAudioErr);
+                audioPlayer = null;
+            }
+        }
+        } catch(plyrErr) {
+            console.error("[VIDEO-PROTECT] Plyr setup exception:", plyrErr);
+            player = null;
+            audioPlayer = null;
         }
 
         const startupVideo = document.getElementById('res-video');
@@ -4177,6 +4908,7 @@ window.addEventListener('DOMContentLoaded', () => {
         loadLoraDir();
         loadModelCheckpoints();
         loadModelRegistry();
+        loadCoreModels();
 
         let historyRefreshInterval = null;
         function startHistoryAutoRefresh() {
@@ -4189,7 +4921,13 @@ window.addEventListener('DOMContentLoaded', () => {
             }, 5000);
         }
         startHistoryAutoRefresh();
-    });
+        } catch(e) { console.error('[INIT] _onDomReady2 error:', e); }
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _onDomReady2);
+    } else {
+        _onDomReady2();
+    }
 
 
 async function saveVramLimit() {
@@ -4242,21 +4980,25 @@ async function loadHardwareProfile() {
 /** 根据当前清晰度 + FPS，找到对应的推荐方案 */
 function _findRecForQuality(quality) {
     if (!_hwProfile || !_hwProfile.recommendations) return null;
-    for (const r of _hwProfile.recommendations) {
-        if (quality === '1080' && r.width >= 1800) return r;
-        if (quality === '720' && 800 <= r.width && r.width < 1800) return r;
-        if (quality === '540' && 700 <= r.width && r.width < 800) return r;
-        if (quality === '480' && 600 <= r.width && r.width < 700) return r;
-        if (quality === '360' && r.width < 600) return r;
+    const widthMap = { '1080': 1920, '720': 1280, '540': 960, '480': 768, '360': 640 };
+    const targetWidth = widthMap[quality];
+    if (targetWidth) {
+        const exact = _hwProfile.recommendations.find(r => r.width === targetWidth);
+        if (exact) return exact;
     }
-    return _hwProfile.recommendations[0] || null;
+    const sorted = [..._hwProfile.recommendations].sort((a, b) => a.width - b.width);
+    if (targetWidth) {
+        const lower = sorted.filter(r => r.width < targetWidth);
+        if (lower.length > 0) return lower[lower.length - 1];
+    }
+    return sorted[0] || null;
 }
 
 /** 清晰度值 → 推荐方案中的 label 匹配用 key */
 function _qualityKey(width) {
-    if (width >= 1800) return '1080';
-    if (width >= 800) return '720';
-    if (width >= 700) return '540';
+    if (width >= 1500) return '1080';
+    if (width >= 1000) return '720';
+    if (width >= 800) return '540';
     if (width >= 600) return '480';
     return '360';
 }
@@ -4283,10 +5025,14 @@ function updateDynamicRecommendation() {
         if (el) { el.textContent = text; el.style.display = 'inline'; }
     };
 
-    setBadge('vid-duration-rec', `⭐ 帧预算${rec.recommended_total_frames}帧 → 建议≤${recDuration}s@${fps}fps`);
-    setBadge('vid-fps-rec', `⭐ 推荐: ${(rec.recommended_fps || [24])[0]}fps`);
-    setBadge('vid-quality-rec', `⭐ 推荐: ${_qualityKey(rec.width)}P`);
-    setBadge('batch-quality-rec', `⭐ 推荐: ${_qualityKey(rec.width)}P`);
+    setBadge('vid-duration-rec', `建议≤${recDuration}s@${fps}fps`);
+    setBadge('vid-fps-rec', `推荐${(rec.recommended_fps || [24])[0]}fps`);
+    const vidSize = getGenerationSize('video');
+    const vidNote = vidSize.source === 'ref-missing' ? ` · ${_t('ratioRefMissing')}` : '';
+    setBadge('vid-quality-rec', `推荐${_qualityKey(rec.width)}P（${vidSize.width}×${vidSize.height}）${vidNote}`);
+    const batchSize = getGenerationSize('batch');
+    const batchNote = batchSize.source === 'ref-missing' ? ` · ${_t('ratioRefMissing')}` : '';
+    setBadge('batch-quality-rec', `推荐${_qualityKey(rec.width)}P（${batchSize.width}×${batchSize.height}）${batchNote}`);
 
     // 更新时长输入框的 max 属性
     durationEl.max = String(maxDuration);
@@ -4488,484 +5234,28 @@ async function applyHardwareProfile() {
     }
 }
 
-// ── 软件更新弹窗 ──────────────────────────────────────────────
-let _currentAppVersion = 'v-';
-let _versionHistoryCache = null;
-
-function showSoftwareUpdate() {
-    document.getElementById('software-update-modal').style.display = 'flex';
-    loadVersionHistory();
-}
-function closeSoftwareUpdate() {
-    document.getElementById('software-update-modal').style.display = 'none';
-}
-
-async function loadVersionHistory() {
-    const listEl = document.getElementById('update-list');
-    const currentInfo = document.getElementById('current-version-info');
-    listEl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim);">加载中...</div>';
-    
+async function refreshAndSync() {
     try {
-        let versionData = null;
-        try {
-            const res = await fetch(`${BASE}/api/versions`);
-            if (res.ok) versionData = await res.json();
-        } catch(e) {}
-        
-        if (!versionData) {
-            const res = await fetch('/version_history.json');
-            if (res.ok) versionData = await res.json();
-        }
-        
-        if (!versionData) {
-            listEl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim);">无法获取版本历史</div>';
-            return;
-        }
-        
-        _versionHistoryCache = versionData;
-        
-        const currentVer = document.getElementById('app-version')?.textContent?.replace('v', '').trim() || '';
-        currentInfo.innerHTML = `<span style="font-size:12px;color:var(--text);">当前版本: <strong>${currentVer}</strong></span>`;
-        
-        const sortedVersions = Object.entries(versionData).sort((a, b) => {
-            const parseDate = (v) => {
-                const m = v.match(/(\d{4})\.(\d{2})\.(\d{2})/);
-                return m ? new Date(+m[1], +m[2]-1, +m[3]) : new Date(0);
-            };
-            return parseDate(b[0]) - parseDate(a[0]);
-        });
-        
-        listEl.innerHTML = '';
-        sortedVersions.forEach(([version, info], idx) => {
-            const isCurrent = version === currentVer;
-            const item = document.createElement('div');
-            item.className = 'update-item' + (isCurrent ? ' update-item-current' : '');
-            
-            const desc = info.description || info.changes?.[0] || '';
-            const changes = Array.isArray(info.changes) ? info.changes : [];
-            const gitVer = info.git_version || info.git_commit || '';
-            
-            item.innerHTML = `
-                <div class="update-item-header" onclick="toggleVersionDetail(this)">
-                    <div>
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <span class="update-version-tag">${version}</span>
-                            ${isCurrent ? '<span class="update-current-badge">当前</span>' : ''}
-                        </div>
-                        <div class="update-version-date">${info.date || ''}</div>
-                        ${desc ? `<div style="font-size:11px;color:var(--text-sub);margin-top:4px;">${desc}</div>` : ''}
-                    </div>
-                    <svg class="update-expand-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-                </div>
-                <div class="update-item-body">
-                    <div class="update-changes">
-                        <ul>${changes.map(c => `<li>${c}</li>`).join('')}</ul>
-                    </div>
-                    ${gitVer ? `<div class="update-git-source">Git 源码版本: <code>${gitVer}</code></div>` : ''}
-                </div>
-            `;
-            listEl.appendChild(item);
-        });
-    } catch(e) {
-        listEl.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-dim);">加载失败: ${e.message}</div>`;
-    }
-}
-
-function toggleVersionDetail(headerEl) {
-    const body = headerEl.nextElementSibling;
-    const icon = headerEl.querySelector('.update-expand-icon');
-    const isExpanded = body.classList.contains('expanded');
-    
-    if (isExpanded) {
-        body.classList.remove('expanded');
-        icon.classList.remove('expanded');
-    } else {
-        body.classList.add('expanded');
-        icon.classList.add('expanded');
-    }
-}
-
-async function checkForUpdates() {
-    const btn = document.getElementById('check-update-btn-modal');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;"></span> 检查中...';
-    
-    try {
-        const res = await fetch(`${BASE}/api/system/check-update`);
-        if (res.ok) {
-            const data = await res.json();
-            if (data.has_update) {
-                alert(`发现新版本: ${data.latest_version}\n${data.release_notes || ''}`);
-            } else {
-                alert('当前已是最新版本');
-            }
+        const syncRes = await fetch(`${BASE}/api/models/registry/sync`, { method: 'POST' });
+        const syncData = await syncRes.json().catch(() => ({}));
+        if (window.loadModelRegistry) await window.loadModelRegistry();
+        if (typeof loadModelCheckpoints === 'function') await loadModelCheckpoints();
+        if (typeof scanLoras === 'function') await scanLoras();
+        if (syncData.success) {
+            const msg = syncData.added > 0 || syncData.updated > 0
+                ? `同步完成：新增 ${syncData.added} 个，更新 ${syncData.updated} 个模型`
+                : '已同步，暂无新模型';
+            addLog(`✅ ${msg}`);
+        } else if (syncData.error) {
+            addLog(`⚠️ 同步失败: ${syncData.error}，已刷新本地列表`);
+        } else {
+            addLog('✅ 已刷新模型列表');
         }
     } catch(e) {
-        alert('检查更新失败: ' + e.message);
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M21 12a9 9 0 11-6.219-8.56"/><polyline points="21 3 21 9 15 9"/></svg> 获取更新';
+        addLog(`⚠️ 同步异常: ${e.message}，已刷新本地列表`);
+        if (window.loadModelRegistry) await window.loadModelRegistry();
     }
 }
-
-// ── 模型管理弹窗 ──────────────────────────────────────────────
-let _modelRegistryData = null;
-let _communityModelsData = null;
-let _modelSort = { field: 'tags', ascending: false };
-let _modelFilter = 'all';
-let _communityFilter = 'all';
-let _expandedModelRows = new Set();
-
-function showModelManagement() {
-    document.getElementById('model-mgmt-modal').style.display = 'flex';
-    loadModelRegistry();
-}
-function closeModelManagement() {
-    document.getElementById('model-mgmt-modal').style.display = 'none';
-}
-
-function toggleModelDirs() {
-    const el = document.getElementById('model-dirs-expand');
-    el.classList.toggle('show');
-    if (el.classList.contains('show')) loadModelDirs();
-}
-
-async function loadModelDirs() {
-    try {
-        const res = await fetch(`${BASE}/api/models/dirs`);
-        if (res.ok) {
-            const data = await res.json();
-            renderModelDirs(data.dirs || [], data.selected_dir || '');
-        }
-    } catch(e) {}
-}
-
-function renderModelDirs(dirs, selectedDir) {
-    const listEl = document.getElementById('model-dirs-list');
-    listEl.innerHTML = '';
-    dirs.forEach(dir => {
-        const item = document.createElement('div');
-        item.className = 'model-dir-item' + (dir === selectedDir ? ' selected' : '');
-        item.innerHTML = `
-            <span class="model-dir-path">${dir}</span>
-            <button class="model-dir-remove" onclick="removeModelDir('${dir.replace(/\\/g, '\\\\')}')">&times;</button>
-        `;
-        item.onclick = (e) => {
-            if (e.target.classList.contains('model-dir-remove')) return;
-            selectModelDir(dir);
-        };
-        listEl.appendChild(item);
-    });
-}
-
-async function addModelDir() {
-    const input = document.getElementById('model-dir-input');
-    const path = input.value.trim();
-    if (!path) return;
-    
-    try {
-        const res = await fetch(`${BASE}/api/models/dirs`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ dir: path, action: 'add' })
-        });
-        if (res.ok) {
-            input.value = '';
-            loadModelDirs();
-            loadModelRegistry();
-        }
-    } catch(e) { alert('添加失败: ' + e.message); }
-}
-
-async function removeModelDir(dir) {
-    try {
-        const res = await fetch(`${BASE}/api/models/dirs`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ dir, action: 'remove' })
-        });
-        if (res.ok) {
-            loadModelDirs();
-            loadModelRegistry();
-        }
-    } catch(e) { alert('移除失败: ' + e.message); }
-}
-
-async function selectModelDir(dir) {
-    try {
-        const res = await fetch(`${BASE}/api/models/dirs`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ dir, action: 'select' })
-        });
-        if (res.ok) {
-            loadModelDirs();
-            loadModelRegistry();
-        }
-    } catch(e) {}
-}
-
-function toggleModelSelectAll(checked) {
-    document.querySelectorAll('#model-reg-tbody .model-select-cb').forEach(cb => {
-        cb.checked = checked;
-    });
-}
-
-function toggleSort(field) {
-    if (_modelSort.field === field) {
-        _modelSort.ascending = !_modelSort.ascending;
-    } else {
-        _modelSort.field = field;
-        _modelSort.ascending = true;
-    }
-    updateSortIcons();
-    renderModelRegistryTable();
-}
-
-function updateSortIcons() {
-    ['name','type','size','tags','status'].forEach(f => {
-        const icon = document.getElementById('sort-' + f);
-        if (icon) {
-            icon.textContent = _modelSort.field === f ? (_modelSort.ascending ? '▲' : '▼') : '';
-            icon.classList.toggle('active', _modelSort.field === f);
-        }
-    });
-}
-
-function sortModels(models) {
-    const sorted = [...models];
-    const dir = _modelSort.ascending ? 1 : -1;
-    
-    sorted.sort((a, b) => {
-        const f = _modelSort.field;
-        let va, vb;
-        switch(f) {
-            case 'name': va = a.name || ''; vb = b.name || ''; break;
-            case 'type': va = a.model_type || ''; vb = b.model_type || ''; break;
-            case 'size': va = a.size_bytes || 0; vb = b.size_bytes || 0; break;
-            case 'tags': va = a.required ? 1 : 0; vb = b.required ? 1 : 0; break;
-            case 'status': va = a.installed ? 1 : 0; vb = b.installed ? 1 : 0; break;
-            default: return 0;
-        }
-        if (typeof va === 'string') return va.localeCompare(vb) * dir;
-        return (va - vb) * dir;
-    });
-    return sorted;
-}
-
-async function loadModelRegistry() {
-    try {
-        const res = await fetch(`${BASE}/api/models/registry`);
-        if (res.ok) {
-            const data = await res.json();
-            _modelRegistryData = data.models || data;
-            _communityModelsData = data.community_models || [];
-            renderModelRegistryTable();
-            renderCommunityModels();
-        }
-    } catch(e) {
-        console.warn('loadModelRegistry failed:', e);
-    }
-}
-
-function renderModelRegistryTable() {
-    const tbody = document.getElementById('model-reg-tbody');
-    if (!_modelRegistryData) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-dim);">加载中...</td></tr>';
-        return;
-    }
-    
-    let filtered = [..._modelRegistryData];
-    switch(_modelFilter) {
-        case 'required': filtered = filtered.filter(m => m.required); break;
-        case 'optional': filtered = filtered.filter(m => !m.required); break;
-        case 'installed': filtered = filtered.filter(m => m.installed); break;
-        case 'not-installed': filtered = filtered.filter(m => !m.installed); break;
-    }
-    
-    filtered = sortModels(filtered);
-    
-    tbody.innerHTML = '';
-    filtered.forEach((model, idx) => {
-        const isExpanded = _expandedModelRows.has(model.id || model.name);
-        const statusClass = model.installed ? 'installed' : 'not-installed';
-        const statusText = model.installed ? '已安装' : '未安装';
-        const sizeText = model.size_bytes ? (model.size_bytes / 1e9).toFixed(1) + ' GB' : '-';
-        const modelKey = model.id || model.name;
-        const isRequired = model.required;
-        
-        const tr = document.createElement('tr');
-        tr.className = 'model-row' + (isExpanded ? ' model-row-expanded' : '');
-        tr.innerHTML = `
-            <td class="model-reg-th-select"><input type="checkbox" class="model-select-cb" ${model.installed ? 'disabled' : ''}></td>
-            <td>
-                <div class="model-row-name">
-                    <button class="model-expand-btn ${isExpanded ? 'expanded' : ''}" onclick="toggleModelRowExpand('${modelKey}')">▶</button>
-                    ${isRequired ? '<span class="model-required-tag">必需</span>' : ''}
-                    ${model.name || modelKey}
-                </div>
-            </td>
-            <td>${model.model_type || model.type || 'file'}</td>
-            <td style="text-align:right">${sizeText}</td>
-            <td>${isRequired ? '必需' : '可选'}</td>
-            <td><span class="model-status-badge ${statusClass}">${statusText}</span></td>
-            <td>
-                ${model.installed 
-                    ? (model.can_uninstall ? `<button class="model-action-btn uninstall" onclick="uninstallModel('${modelKey}')">卸载</button>` : '—')
-                    : `<button class="model-action-btn download" onclick="downloadModel('${modelKey}')">下载</button>`
-                }
-            </td>
-        `;
-        tbody.appendChild(tr);
-        
-        const detailTr = document.createElement('tr');
-        detailTr.className = 'model-detail-row';
-        detailTr.innerHTML = `
-            <td colspan="7">
-                <div class="model-detail-content ${isExpanded ? 'expanded' : ''}" id="model-detail-${modelKey}">
-                    <p><strong>模型描述:</strong> ${model.description || '暂无描述'}</p>
-                    ${model.pipeline ? `<p><strong>Pipeline:</strong> ${model.pipeline}</p>` : ''}
-                    ${model.min_vram_gb ? `<p><strong>最低显存:</strong> ${model.min_vram_gb} GB</p>` : ''}
-                    ${model.recommended_tier ? `<p><strong>推荐等级:</strong> ${model.recommended_tier}</p>` : ''}
-                    <div class="model-detail-scenario">
-                        <strong>使用场景</strong>
-                        ${model.usage_scenarios ? model.usage_scenarios.join('<br>') : '通用视频生成'}
-                    </div>
-                </div>
-            </td>
-        `;
-        tbody.appendChild(detailTr);
-    });
-}
-
-function toggleModelRowExpand(key) {
-    if (_expandedModelRows.has(key)) {
-        _expandedModelRows.delete(key);
-    } else {
-        _expandedModelRows.add(key);
-    }
-    renderModelRegistryTable();
-}
-
-async function downloadModel(key) {
-    try {
-        const res = await fetch(`${BASE}/api/models/registry/download`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ model_id: key })
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            alert('下载已开始');
-            setTimeout(loadModelRegistry, 3000);
-        }
-    } catch(e) { alert('下载失败: ' + e.message); }
-}
-
-async function uninstallModel(key) {
-    if (!confirm(`确定要卸载 "${key}" 吗？`)) return;
-    try {
-        const res = await fetch(`${BASE}/api/models/registry/uninstall`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ model_id: key })
-        });
-        if (res.ok) loadModelRegistry();
-    } catch(e) { alert('卸载失败: ' + e.message); }
-}
-
-async function downloadSelectedModels() {
-    const checked = document.querySelectorAll('#model-reg-tbody .model-select-cb:checked');
-    if (checked.length === 0) { alert('请先勾选要下载的模型'); return; }
-    
-    for (const cb of checked) {
-        const row = cb.closest('tr');
-        const downloadBtn = row?.querySelector('.model-action-btn.download');
-        if (downloadBtn && !downloadBtn.disabled) downloadBtn.click();
-    }
-}
-
-function renderCommunityModels() {
-    const tbody = document.getElementById('community-models-tbody');
-    if (!_communityModelsData) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-dim);">加载中...</td></tr>';
-        return;
-    }
-    
-    let filtered = [..._communityModelsData];
-    switch(_communityFilter) {
-        case 'lora': filtered = filtered.filter(m => m.model_type === 'lora' || (m.tags || []).includes('lora')); break;
-        case 'text_encoder': filtered = filtered.filter(m => m.model_type === 'text_encoder' || (m.name || '').toLowerCase().includes('text')); break;
-        case 'other': filtered = filtered.filter(m => m.model_type !== 'lora' && m.model_type !== 'text_encoder'); break;
-    }
-    
-    tbody.innerHTML = '';
-    filtered.forEach(model => {
-        const statusClass = model.installed ? 'installed' : 'not-installed';
-        const statusText = model.installed ? '已安装' : '未安装';
-        const sizeText = model.size_bytes ? (model.size_bytes / 1e9).toFixed(1) + ' GB' : '-';
-        const modelKey = model.id || model.name;
-        
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td><div class="model-row-name">${model.name || modelKey}</div></td>
-            <td>${model.model_type || model.type || '-'}</td>
-            <td style="text-align:right">${sizeText}</td>
-            <td><span class="model-status-badge ${statusClass}">${statusText}</span></td>
-            <td>
-                ${model.installed 
-                    ? (model.can_uninstall ? `<button class="model-action-btn uninstall" onclick="uninstallCommunityModel('${modelKey}')">卸载</button>` : '—')
-                    : `<button class="model-action-btn download" onclick="downloadCommunityModel('${modelKey}')">下载</button>`
-                }
-            </td>
-        `;
-        tbody.appendChild(tr);
-    });
-}
-
-async function downloadCommunityModel(key) {
-    try {
-        const res = await fetch(`${BASE}/api/models/community/download`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ model_key: key })
-        });
-        if (res.ok) {
-            alert('下载已开始');
-            setTimeout(() => { loadModelRegistry(); }, 3000);
-        }
-    } catch(e) { alert('下载失败: ' + e.message); }
-}
-
-async function uninstallCommunityModel(key) {
-    if (!confirm(`确定要卸载 "${key}" 吗？`)) return;
-    try {
-        const res = await fetch(`${BASE}/api/models/community/uninstall`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ model_key: key })
-        });
-        if (res.ok) loadModelRegistry();
-    } catch(e) { alert('卸载失败: ' + e.message); }
-}
-
-// 事件委托：模型管理弹窗的筛选按钮
-document.addEventListener('click', (e) => {
-    if (e.target.hasAttribute('data-filter')) {
-        const filter = e.target.getAttribute('data-filter');
-        _modelFilter = filter;
-        e.target.closest('.model-reg-filter').querySelectorAll('.btn.btn-sm').forEach(b => b.classList.remove('active'));
-        e.target.classList.add('active');
-        renderModelRegistryTable();
-    }
-    if (e.target.hasAttribute('data-community-filter')) {
-        const filter = e.target.getAttribute('data-community-filter');
-        _communityFilter = filter;
-        e.target.closest('.model-reg-filter').querySelectorAll('.btn.btn-sm').forEach(b => b.classList.remove('active'));
-        e.target.classList.add('active');
-        renderCommunityModels();
-    }
-});
 
 // ── 动态联动事件绑定 ──────────────────────────────────────────
 // FPS/清晰度/时长 变化时自动更新推荐
@@ -5014,7 +5304,7 @@ setTimeout(_initDynamicRecommendation, 3500);
 let _envCheckData = null;
 
 async function loadEnvCheck() {
-    const panel = document.getElementById('env-check-panel');
+    const panel = document.getElementById('env-settings');
     const list = document.getElementById('env-check-list');
     const badge = document.getElementById('env-check-badge');
     const btn = document.getElementById('env-detect-btn');
@@ -5026,7 +5316,11 @@ async function loadEnvCheck() {
         btn.style.opacity = '0.6';
     }
     list.innerHTML = `<div style="font-size:11px;color:var(--text-dim);text-align:center;padding:8px;">${_t('envScanning')}</div>`;
-    panel.style.display = 'block';
+    if (panel.style.display === 'none') {
+        panel.style.display = 'block';
+        const btn = document.querySelector('button[onclick*="env-settings"]');
+        if (btn) btn.classList.add('active');
+    }
 
     try {
         const res = await fetch(`${BASE}/api/system/env-check`);
@@ -5045,12 +5339,16 @@ async function loadEnvCheck() {
 }
 
 function renderEnvCheck(data) {
-    const panel = document.getElementById('env-check-panel');
+    const panel = document.getElementById('env-settings');
     const list = document.getElementById('env-check-list');
     const badge = document.getElementById('env-check-badge');
     if (!panel || !list || !data) return;
 
-    panel.style.display = 'block';
+    if (panel.style.display === 'none') {
+        panel.style.display = 'block';
+        const btn = document.querySelector('button[onclick*="env-settings"]');
+        if (btn) btn.classList.add('active');
+    }
 
     if (data.has_issues) {
         badge.textContent = _t('envIssuesFound');
@@ -5313,5 +5611,7 @@ function renderEnvPreset(data) {
     details.innerHTML = html;
 }
 
-setTimeout(loadEnvCheck, 4000);
+setTimeout(() => {
+    fetch(`${BASE}/api/system/env-check`).then(r => r.json()).then(d => { _envCheckData = d; }).catch(() => {});
+}, 4000);
 

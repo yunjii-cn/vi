@@ -107,7 +107,7 @@ class RetakeHandler(StateHandlerBase):
             raise HTTPError(exc.status_code, exc.detail) from exc
 
         if result.video_bytes is not None:
-            output = self.config.outputs_dir / f"retake_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.mp4"
+            output = self.config.outputs_dir / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_retake_{int(duration)}s_LTX2.3.mp4"
             with open(output, "wb") as out:
                 out.write(result.video_bytes)
             return RetakeVideoResponse(status="complete", video_path=str(output))
@@ -142,7 +142,7 @@ class RetakeHandler(StateHandlerBase):
 
         generation_id = uuid.uuid4().hex[:8]
         seed = self._resolve_seed()
-        output_path = self.config.outputs_dir / f"retake_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{generation_id}.mp4"
+        output_path = self.config.outputs_dir / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_retake_{int(duration)}s_LTX2.3.mp4"
         regenerate_video, regenerate_audio = self._resolve_retake_mode(mode)
 
         try:

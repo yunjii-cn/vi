@@ -162,6 +162,7 @@ class GenerationProgress:
     progress: int
     current_step: int | None
     total_steps: int | None
+    log_message: str | None = None
 
 
 @dataclass

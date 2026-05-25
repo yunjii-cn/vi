@@ -60,6 +60,10 @@ def main():
     if icon_png.exists():
         pyinstaller_args.extend([f"--add-data={icon_png};."])
     
+    ico_png = ROOT_DIR / "ico.png"
+    if ico_png.exists():
+        pyinstaller_args.extend([f"--add-data={ico_png};."])
+    
     pyinstaller_args.append("main.py")
     
     print("  运行 PyInstaller...")

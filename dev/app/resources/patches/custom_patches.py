@@ -234,7 +234,93 @@ def _patch_safetensors_mmap():
         print(f"[PATCH] safetensors safe_open patch FAILED: {e}")
 
 
+def _patch_qwen3vl_compat():
+    try:
+        import importlib
+        try:
+            from transformers import Qwen3VLForConditionalGeneration, Qwen3VLProcessor
+            return
+        except ImportError:
+            pass
+        try:
+            spec = importlib.util.find_spec('diffusers')
+            if spec is None or spec.submodule_search_locations is None:
+                return
+            diffusers_root = list(spec.submodule_search_locations)[0]
+        except Exception:
+            return
+        import os
+        pipeline_file = os.path.join(diffusers_root, 'pipelines', 'nucleusmoe_image', 'pipeline_nucleusmoe_image.py')
+        if not os.path.isfile(pipeline_file):
+            return
+        with open(pipeline_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        marker = '# [YUNJI-PATCH] Qwen3VL compat'
+        if marker in content:
+            return
+        old_import = 'from transformers import Qwen3VLForConditionalGeneration, Qwen3VLProcessor'
+        if old_import not in content:
+            return
+        new_import = (
+            '# [YUNJI-PATCH] Qwen3VL compat\n'
+            'try:\n'
+            '    from transformers import Qwen3VLForConditionalGeneration, Qwen3VLProcessor\n'
+            'except ImportError:\n'
+            '    from transformers import Qwen2_5_VLForConditionalGeneration as Qwen3VLForConditionalGeneration, Qwen2_5_VLProcessor as Qwen3VLProcessor  # type: ignore[assignment]\n'
+        )
+        content = content.replace(old_import, new_import)
+        with open(pipeline_file, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print("[PATCH] Qwen3VL compatibility patch applied to diffusers pipeline file")
+    except Exception as e:
+        print(f"[PATCH] Qwen3VL compatibility patch FAILED: {e}")
+
+
+def _patch_t5gemma_compat():
+    try:
+        import importlib
+        try:
+            from transformers.models.t5gemma.modeling_t5gemma import T5GemmaEncoder
+            return
+        except (ImportError, ModuleNotFoundError):
+            pass
+        try:
+            spec = importlib.util.find_spec('diffusers')
+            if spec is None or spec.submodule_search_locations is None:
+                return
+            diffusers_root = list(spec.submodule_search_locations)[0]
+        except Exception:
+            return
+        import os
+        pipeline_file = os.path.join(diffusers_root, 'pipelines', 'prx', 'pipeline_prx.py')
+        if not os.path.isfile(pipeline_file):
+            return
+        with open(pipeline_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        marker = '# [YUNJI-PATCH] T5Gemma compat'
+        if marker in content:
+            return
+        old_import = 'from transformers.models.t5gemma.modeling_t5gemma import T5GemmaEncoder'
+        if old_import not in content:
+            return
+        new_import = (
+            '# [YUNJI-PATCH] T5Gemma compat\n'
+            'try:\n'
+            '    from transformers.models.t5gemma.modeling_t5gemma import T5GemmaEncoder\n'
+            'except (ImportError, ModuleNotFoundError):\n'
+            '    from transformers import T5EncoderModel as T5GemmaEncoder  # type: ignore[assignment]\n'
+        )
+        content = content.replace(old_import, new_import)
+        with open(pipeline_file, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print("[PATCH] T5Gemma compatibility patch applied to diffusers pipeline file")
+    except Exception as e:
+        print(f"[PATCH] T5Gemma compatibility patch FAILED: {e}")
+
+
 def install_all_patches():
+    _patch_qwen3vl_compat()
+    _patch_t5gemma_compat()
     _patch_av_open()
     _patch_siglip_vision_model()
     _patch_gemma3_rotary_emb()

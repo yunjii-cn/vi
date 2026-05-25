@@ -65,7 +65,7 @@ def route_model_download(
     if handler.downloads.is_download_running():
         raise HTTPError(409, "Download already in progress")
 
-    session_id = handler.downloads.start_model_download(model_types=req.modelTypes)
+    session_id = handler.downloads.start_model_download(model_types=req.modelTypes, use_mirror=req.useMirror)
     if session_id:
         return ModelDownloadStartResponse(
             status="started",

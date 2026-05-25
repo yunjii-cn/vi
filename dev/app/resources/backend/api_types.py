@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 NonEmptyPrompt = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 ModelFileType = Literal[
     "checkpoint",
+    "checkpoint_fp8",
     "upsampler",
     "distilled_lora",
     "ic_lora",
@@ -18,6 +19,7 @@ ModelFileType = Literal[
     "pose_processor",
     "text_encoder",
     "zit",
+    "tts",
 ]
 
 
@@ -267,7 +269,7 @@ class ErrorResponse(BaseModel):
 # ============================================================
 
 
-VideoResolution: TypeAlias = Literal["540p", "720p", "1080p", "1440p", "2160p"]
+VideoResolution: TypeAlias = Literal["360p", "480p", "540p", "720p", "1080p", "1440p", "2160p"]
 VideoModel: TypeAlias = Literal["fast", "pro"]
 
 
@@ -309,6 +311,7 @@ def _default_model_types() -> set[ModelFileType]:
 
 class ModelDownloadRequest(BaseModel):
     modelTypes: set[ModelFileType] = Field(default_factory=_default_model_types)
+    useMirror: bool = False
 
 
 class RequiredModelsResponse(BaseModel):

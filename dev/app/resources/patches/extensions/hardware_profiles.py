@@ -68,13 +68,16 @@ PROFILES: dict[str, HardwareProfile] = {
         tier="ultra",
         tier_name="极致性能",
         vram_range="48GB+ (A6000 / A100 / H100)",
-        vram_limit_gb=0,          # 不限制
-        prefetch_count=None,      # 不启用 layer streaming
+        vram_limit_gb=0,
+        prefetch_count=None,
         offload_enabled=False,
         upscaler_enabled=True,
         recommendations=[
             VideoRecommendation("1080p (推荐)", 1920, 1088, 401, 257, [24, 25, 30], "≈10-20秒/25帧"),
             VideoRecommendation("720p (快速)", 1280, 704, 569, 401, [24, 25, 30], "≈5-10秒/25帧"),
+            VideoRecommendation("540p (极速)", 960, 544, 801, 569, [24, 25, 30], "≈3-6秒/25帧"),
+            VideoRecommendation("480p", 768, 416, 1001, 681, [24, 25, 30], "≈2-4秒/25帧"),
+            VideoRecommendation("360p", 640, 352, 1201, 801, [24, 25, 30], "≈1-3秒/25帧"),
         ],
         tips=[
             "您的 GPU 显存充裕，无需任何限制",
@@ -95,6 +98,8 @@ PROFILES: dict[str, HardwareProfile] = {
             VideoRecommendation("1080p (推荐)", 1920, 1088, 257, 161, [24, 25], "≈30-60秒/25帧"),
             VideoRecommendation("720p (快速)", 1280, 704, 401, 257, [24, 25, 30], "≈15-30秒/25帧"),
             VideoRecommendation("540p (极速)", 960, 544, 569, 401, [24, 25, 30], "≈8-15秒/25帧"),
+            VideoRecommendation("480p", 768, 416, 681, 449, [24, 25, 30], "≈5-10秒/25帧"),
+            VideoRecommendation("360p", 640, 352, 801, 569, [24, 25, 30], "≈3-6秒/25帧"),
         ],
         tips=[
             "已自动启用 CPU offload + layer streaming，速度换稳定性",
@@ -116,6 +121,8 @@ PROFILES: dict[str, HardwareProfile] = {
             VideoRecommendation("1080p (挑战)", 1920, 1088, 89, 57, [24], "≈60-120秒/25帧"),
             VideoRecommendation("720p (推荐)", 1280, 704, 161, 97, [24, 25], "≈30-60秒/25帧"),
             VideoRecommendation("540p (快速)", 960, 544, 257, 161, [24, 25, 30], "≈15-25秒/25帧"),
+            VideoRecommendation("480p", 768, 416, 401, 257, [24, 25], "≈10-20秒/25帧"),
+            VideoRecommendation("360p", 640, 352, 569, 401, [24, 25, 30], "≈5-10秒/25帧"),
         ],
         tips=[
             "720p 是最佳平衡点，画质与速度兼顾",
@@ -136,6 +143,7 @@ PROFILES: dict[str, HardwareProfile] = {
             VideoRecommendation("720p (挑战)", 1280, 704, 89, 57, [24], "≈90-180秒/25帧"),
             VideoRecommendation("540p (推荐)", 960, 544, 161, 97, [24, 25], "≈40-80秒/25帧"),
             VideoRecommendation("480p (快速)", 768, 416, 257, 161, [24, 25], "≈25-50秒/25帧"),
+            VideoRecommendation("360p", 640, 352, 401, 257, [24, 25], "≈15-30秒/25帧"),
         ],
         tips=[
             "540p 是稳定首选，720p 仅短片段",
@@ -317,13 +325,13 @@ def classify_gpu(vram_gb: float | None) -> str:
 def _find_rec_for_quality(profile: HardwareProfile, quality: str) -> VideoRecommendation | None:
     """根据清晰度字符串 ("1080"/"720"/"540"/...) 找到对应的 VideoRecommendation。"""
     for r in profile.recommendations:
-        if quality == "1080" and r.width >= 1800:
+        if quality == "1080" and r.width >= 1500:
             return r
-        if quality == "720" and 800 <= r.width < 1800:
+        if quality == "720" and 1000 <= r.width < 1500:
             return r
-        if quality == "540" and 700 <= r.width < 800:
+        if quality == "540" and 800 <= r.width < 1000:
             return r
-        if quality == "480" and 600 <= r.width < 700:
+        if quality == "480" and 600 <= r.width < 800:
             return r
         if quality == "360" and r.width < 600:
             return r

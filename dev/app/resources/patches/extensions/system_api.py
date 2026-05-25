@@ -78,6 +78,29 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})
 
+    _fe_log_path = str(ctx.config_dir / "_fe_debug.log")
+
+    @app.post("/api/system/frontend-log")
+    async def route_frontend_log(request: Request):
+        try:
+            data = await request.json()
+            entries = data.get("entries") or []
+            if not entries:
+                return {"status": "ok", "received": 0}
+            with open(_fe_log_path, "a", encoding="utf-8") as f:
+                for entry in entries:
+                    ts = entry.get("ts", "")
+                    level = entry.get("level", "error")
+                    msg = entry.get("msg", "")
+                    src = entry.get("src", "")
+                    line = entry.get("line", 0)
+                    col = entry.get("col", 0)
+                    src_info = f" ({src}:{line}:{col})" if src else ""
+                    f.write(f"[{ts}] [FE-{level.upper()}] {msg}{src_info}\n")
+            return {"status": "ok", "received": len(entries)}
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
     @app.get("/api/system/low-vram-mode")
     async def route_get_low_vram_mode():
         enabled = bool(getattr(handler.pipelines, "low_vram_mode", False))

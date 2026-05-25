@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 from collections import deque
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Request
@@ -86,6 +87,15 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
             return result
         if isinstance(result, JSONResponse):
             raise RuntimeError(result.body.decode("utf-8", errors="replace"))
+        if isinstance(result, str):
+            r: dict[str, object] = {"status": "complete"}
+            if result.lower().endswith((".mp4", ".webm", ".avi")):
+                r["video_path"] = result
+            elif result.lower().endswith((".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac")):
+                r["audio_path"] = result
+            else:
+                r["video_path"] = result
+            return r
         view: dict[str, object] = {"status": getattr(result, "status", "complete") or "complete"}
         for attr in ("video_path", "image_paths", "audio_path", "video_url", "audio_url"):
             value = getattr(result, attr, None)
@@ -117,7 +127,9 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
 
     def _write_replay_sidecars(task: dict) -> None:
         metadata = _build_replay_metadata(task)
-        for raw_path in _result_media_paths(task.get("result")):
+        media_paths = _result_media_paths(task.get("result"))
+        print(f"[replay] _write_replay_sidecars called, media_paths={media_paths}")
+        for raw_path in media_paths:
             try:
                 media_path = Path(raw_path)
                 if str(raw_path).startswith("/outputs/"):
@@ -127,9 +139,11 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
                     if not media_path.exists():
                         media_path = ctx.get_output_path() / Path(raw_path).name
                 if not media_path.exists() or not media_path.is_file():
+                    print(f"[replay] media file not found: {media_path} (raw={raw_path})")
                     continue
                 replay_path = media_path.with_suffix(media_path.suffix + ".replay.json")
                 replay_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+                print(f"[replay] wrote sidecar: {replay_path}")
             except Exception as exc:
                 print(f"[replay] failed to write sidecar for {raw_path}: {exc}")
 

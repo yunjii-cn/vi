@@ -439,6 +439,11 @@ def build_exe():
         pyinstaller_args.extend(["--add-data", f"{icon_png};."])
         print(f"  已添加图标PNG: {icon_png}")
 
+    ico_png = str(ROOT_DIR / "ico.png")
+    if os.path.exists(ico_png):
+        pyinstaller_args.extend(["--add-data", f"{ico_png};."])
+        print(f"  已添加高清图标PNG: {ico_png}")
+
     vh_file = ROOT_DIR / "version_history.json"
     if vh_file.exists():
         pyinstaller_args.extend(["--add-data", f"{str(vh_file)};."])
@@ -525,6 +530,21 @@ def post_build(exe_path: Path):
     total_size = sum(f.stat().st_size for f in release_dir.rglob("*") if f.is_file())
     size_mb = total_size / (1024 * 1024)
     print(f"  发布目录大小: {size_mb:.1f} MB")
+
+    # 8. 生成 resources.zip（用于首次启动自举下载）
+    resources_zip = release_dir / "resources.zip"
+    resources_src = release_dir / "app" / "resources"
+    if resources_src.exists():
+        import zipfile
+        with zipfile.ZipFile(str(resources_zip), 'w', zipfile.ZIP_DEFLATED) as zf:
+            for file_path in resources_src.rglob("*"):
+                if file_path.is_file() and "__pycache__" not in str(file_path):
+                    arc_name = file_path.relative_to(resources_src)
+                    zf.write(str(file_path), str(arc_name))
+        zip_size_mb = resources_zip.stat().st_size / (1024 * 1024)
+        print(f"  ✓ 生成 resources.zip ({zip_size_mb:.2f} MB)")
+    else:
+        print("  ⚠ 未找到 resources/ 目录，跳过生成 resources.zip")
 
     return release_dir
 

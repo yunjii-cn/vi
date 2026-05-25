@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import tempfile
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -78,6 +80,33 @@ class VideoGenerationHandler(StateHandlerBase):
         self._pipelines = pipelines_handler
         self._text = text_handler
         self._ltx_api_client = ltx_api_client
+        self._progress_estimator_stop: threading.Event | None = None
+
+    def _start_progress_estimator(self, start_pct: int, end_pct: int, total_steps: int, time_constant: float = 50.0) -> None:
+        self._stop_progress_estimator()
+        stop_event = threading.Event()
+        self._progress_estimator_stop = stop_event
+        gen = self._generation
+
+        def _loop() -> None:
+            t0 = time.perf_counter()
+            while not stop_event.is_set():
+                stop_event.wait(2.0)
+                if stop_event.is_set():
+                    break
+                elapsed = time.perf_counter() - t0
+                ratio = 1 - math.exp(-elapsed / time_constant)
+                pct = int(start_pct + (end_pct - start_pct) * ratio)
+                step = max(1, int(total_steps * ratio))
+                gen.update_progress("inference", pct, step, total_steps)
+
+        t = threading.Thread(target=_loop, name="progress-estimator", daemon=True)
+        t.start()
+
+    def _stop_progress_estimator(self) -> None:
+        if self._progress_estimator_stop is not None:
+            self._progress_estimator_stop.set()
+            self._progress_estimator_stop = None
 
     def generate(self, req: GenerateVideoRequest) -> GenerateVideoResponse:
         if should_video_generate_with_ltx_api(
@@ -103,6 +132,8 @@ class VideoGenerationHandler(StateHandlerBase):
         logger.info("Resolution %s - using fast pipeline", resolution)
 
         RESOLUTION_MAP_16_9: dict[str, tuple[int, int]] = {
+            "360p": (640, 352),
+            "480p": (768, 416),
             "540p": (960, 544),
             "720p": (1280, 704),
             "1080p": (1920, 1088),
@@ -136,8 +167,9 @@ class VideoGenerationHandler(StateHandlerBase):
         seed = self._resolve_seed()
 
         try:
-            self._pipelines.load_gpu_pipeline("fast", should_warm=False)
             self._generation.start_generation(generation_id)
+
+            self._pipelines.load_gpu_pipeline("fast", should_warm=False)
 
             output_path = self.generate_video(
                 prompt=req.prompt,
@@ -205,7 +237,7 @@ class VideoGenerationHandler(StateHandlerBase):
             image.save(temp_image_path)
             images = [ImageConditioningInput(path=temp_image_path.replace("\\", "/"), frame_idx=0, strength=1.0)]
 
-        output_path = self._make_output_path()
+        output_path = self._make_output_path(width=width, height=height, fps=int(fps), duration=num_frames // int(fps) if int(fps) > 0 else 0)
 
         try:
             settings = self.state.app_settings
@@ -227,16 +259,20 @@ class VideoGenerationHandler(StateHandlerBase):
             width = round(width / 64) * 64
 
             t_inference_start = time.perf_counter()
-            pipeline_state.pipeline.generate(
-                prompt=enhanced_prompt,
-                seed=seed,
-                height=height,
-                width=width,
-                num_frames=num_frames,
-                frame_rate=fps,
-                images=images,
-                output_path=str(output_path),
-            )
+            self._start_progress_estimator(15, 90, total_steps)
+            try:
+                pipeline_state.pipeline.generate(
+                    prompt=enhanced_prompt,
+                    seed=seed,
+                    height=height,
+                    width=width,
+                    num_frames=num_frames,
+                    frame_rate=fps,
+                    images=images,
+                    output_path=str(output_path),
+                )
+            finally:
+                self._stop_progress_estimator()
             t_inference_end = time.perf_counter()
             logger.info("[%s] Inference: %.2fs", gen_mode, t_inference_end - t_inference_start)
 
@@ -264,6 +300,8 @@ class VideoGenerationHandler(StateHandlerBase):
         audio_path_str = str(validated_audio_path)
 
         RESOLUTION_MAP: dict[str, tuple[int, int]] = {
+            "360p": (640, 352),
+            "480p": (768, 416),
             "540p": (960, 576),
             "720p": (1280, 704),
             "1080p": (1920, 1088),
@@ -286,8 +324,9 @@ class VideoGenerationHandler(StateHandlerBase):
         generation_id = self._make_generation_id()
 
         try:
-            a2v_state = self._pipelines.load_a2v_pipeline()
             self._generation.start_generation(generation_id)
+
+            a2v_state = self._pipelines.load_a2v_pipeline()
 
             enhanced_prompt = req.prompt + self.config.camera_motion_prompts.get(req.cameraMotion, "")
             neg = req.negativePrompt if req.negativePrompt else self.config.default_negative_prompt
@@ -300,9 +339,8 @@ class VideoGenerationHandler(StateHandlerBase):
                 image.save(temp_image_path)
                 images = [ImageConditioningInput(path=temp_image_path.replace("\\", "/"), frame_idx=0, strength=1.0)]
 
-            output_path = self._make_output_path()
-
-            total_steps = 11  # distilled: 8 steps (stage 1) + 3 steps (stage 2)
+            output_path = self._make_output_path(width=width, height=height, fps=fps, duration=duration)
+            total_steps = 11
 
             a2v_settings = self.state.app_settings
             a2v_use_api = not self._text.should_use_local_encoding()
@@ -316,21 +354,25 @@ class VideoGenerationHandler(StateHandlerBase):
             self._text.prepare_text_encoding(enhanced_prompt, enhance_prompt=a2v_enhance)
             self._generation.update_progress("inference", 15, 0, total_steps)
 
-            a2v_state.pipeline.generate(
-                prompt=enhanced_prompt,
-                negative_prompt=neg,
-                seed=seed,
-                height=height,
-                width=width,
-                num_frames=num_frames,
-                frame_rate=fps,
-                num_inference_steps=total_steps,
-                images=images,
-                audio_path=audio_path_str,
-                audio_start_time=0.0,
-                audio_max_duration=None,
-                output_path=str(output_path),
-            )
+            self._start_progress_estimator(15, 90, total_steps)
+            try:
+                a2v_state.pipeline.generate(
+                    prompt=enhanced_prompt,
+                    negative_prompt=neg,
+                    seed=seed,
+                    height=height,
+                    width=width,
+                    num_frames=num_frames,
+                    frame_rate=fps,
+                    num_inference_steps=total_steps,
+                    images=images,
+                    audio_path=audio_path_str,
+                    audio_start_time=0.0,
+                    audio_max_duration=None,
+                    output_path=str(output_path),
+                )
+            finally:
+                self._stop_progress_estimator()
 
             if self._generation.is_generation_cancelled():
                 if output_path.exists():
@@ -390,9 +432,12 @@ class VideoGenerationHandler(StateHandlerBase):
             return 1000
         return int(time.time()) % 2147483647
 
-    def _make_output_path(self) -> Path:
+    def _make_output_path(self, width: int = 0, height: int = 0, fps: int = 0, duration: int = 0) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return self.config.outputs_dir / f"ltx2_video_{timestamp}_{self._make_generation_id()}.mp4"
+        res_part = f"_{width}x{height}" if width and height else ""
+        fps_part = f"_{fps}fps" if fps else ""
+        dur_part = f"_{duration}s" if duration else ""
+        return self.config.outputs_dir / f"{timestamp}{res_part}{fps_part}{dur_part}_LTX2.3.mp4"
 
     def _generate_forced_api(self, req: GenerateVideoRequest) -> GenerateVideoResponse:
         if self._generation.is_generation_running():
@@ -521,7 +566,8 @@ class VideoGenerationHandler(StateHandlerBase):
             if self._generation.is_generation_cancelled():
                 raise RuntimeError("Generation was cancelled")
 
-            output_path = self._write_forced_api_video(video_bytes)
+            _api_w, _api_h = (int(x) for x in api_resolution.split("x"))
+            output_path = self._write_forced_api_video(video_bytes, width=_api_w, height=_api_h, fps=req.fps, duration=req.duration)
             if self._generation.is_generation_cancelled():
                 output_path.unlink(missing_ok=True)
                 raise RuntimeError("Generation was cancelled")
@@ -539,7 +585,7 @@ class VideoGenerationHandler(StateHandlerBase):
                 return GenerateVideoCancelledResponse(status="cancelled")
             raise HTTPError(500, str(e)) from e
 
-    def _write_forced_api_video(self, video_bytes: bytes) -> Path:
-        output_path = self._make_output_path()
+    def _write_forced_api_video(self, video_bytes: bytes, width: int = 0, height: int = 0, fps: int = 0, duration: int = 0) -> Path:
+        output_path = self._make_output_path(width=width, height=height, fps=fps, duration=duration)
         output_path.write_bytes(video_bytes)
         return output_path
