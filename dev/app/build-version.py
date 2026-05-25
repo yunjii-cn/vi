@@ -224,7 +224,8 @@ def validate_code_before_build():
                         defined.add(item.name)
             if isinstance(node, ast.Call):
                 if isinstance(node.func, ast.Attribute) and node.func.attr.startswith("_"):
-                    called_private.add(node.func.attr)
+                    if isinstance(node.func.value, ast.Name) and node.func.value.id == "self":
+                        called_private.add(node.func.attr)
         missing = called_private - defined
         if missing:
             for m in sorted(missing):
