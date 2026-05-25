@@ -335,13 +335,20 @@
             const res = await fetch(`${BASE}/api/models/registry`);
             const data = await res.json().catch(() => ({}));
             const models = data.models || [];
-            const loraModels = models.filter(m => m.tags && m.tags.includes('lora') && m.downloaded && m.local_path);
-            lorasFromRegistry = loraModels.map(m => ({ name: m.filename || m.name, path: m.local_path }));
+            const loraModels = models.filter(m =>
+                ((m.tags && m.tags.includes('lora')) || m.model_category === 'lora') &&
+                m.downloaded && m.local_path
+            );
+            lorasFromRegistry = loraModels.map(m => ({
+                name: m.filename || m.name,
+                path: m.local_path,
+                description: m.description || '',
+            }));
             const localDirs = data.local_dirs || [];
             for (const dir of localDirs) {
                 for (const m of (dir.models || [])) {
                     if (m.model_type === 'lora') {
-                        lorasFromRegistry.push({ name: m.name, path: m.path });
+                        lorasFromRegistry.push({ name: m.name, path: m.path, description: '' });
                     }
                 }
             }
@@ -371,7 +378,12 @@
                 seenPaths.add(l.path);
                 const meta = metaByPath.get(l.path);
                 if (meta) {
-                    merged.push({ ...l, description: meta.description || '', trigger_words: meta.trigger_words || [], base_model: meta.base_model || '' });
+                    merged.push({
+                        ...l,
+                        description: l.description || meta.description || '',
+                        trigger_words: meta.trigger_words || [],
+                        base_model: meta.base_model || ''
+                    });
                 } else {
                     merged.push(l);
                 }
@@ -2332,11 +2344,11 @@
         if (!list) return;
         list.innerHTML = '';
 
-        const fastModels = models.filter(m => m.pipeline_mode === 'fast');
-        const devModels = models.filter(m => m.pipeline_mode === 'dev');
-        const upscalerModels = models.filter(m => m.pipeline_mode === 'upscaler');
-        const loraModels = models.filter(m => m.tags && m.tags.includes('lora'));
-        const otherModels = models.filter(m => !['fast','dev','upscaler'].includes(m.pipeline_mode) && !(m.tags && m.tags.includes('lora')));
+        const checkpointModels = models.filter(m => m.model_category === 'checkpoint');
+        const loraModels = models.filter(m => m.model_category === 'lora');
+        const upscalerModels = models.filter(m => m.model_category === 'upscaler');
+        const supportingModels = models.filter(m => m.model_category === 'supporting');
+        const otherModels = models.filter(m => !['checkpoint','lora','upscaler','supporting'].includes(m.model_category));
 
         const toolbar = document.createElement('div');
         toolbar.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;';
@@ -2440,10 +2452,18 @@
 
                 info.appendChild(nameRow);
 
-                const descRow = document.createElement('div');
-                descRow.style.cssText = 'font-size:9px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-                descRow.textContent = `${m.size_gb}GB · ${_t('modelRegMinVram') || 'Min VRAM'}: ${m.min_vram_gb}GB`;
-                info.appendChild(descRow);
+                if (m.description) {
+                    const descRow = document.createElement('div');
+                    descRow.style.cssText = 'font-size:9px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                    descRow.textContent = m.description;
+                    descRow.title = m.description;
+                    info.appendChild(descRow);
+                }
+
+                const sizeRow = document.createElement('div');
+                sizeRow.style.cssText = 'font-size:8px;color:rgba(255,255,255,0.3);white-space:nowrap;';
+                sizeRow.textContent = `${m.size_gb}GB · VRAM: ${m.min_vram_gb}GB+`;
+                info.appendChild(sizeRow);
 
                 row.appendChild(cb);
                 row.appendChild(info);
@@ -2466,14 +2486,15 @@
             }
         }
 
-        renderGroup(_t('modelRegCheckpoints') || 'Checkpoints', fastModels);
-        renderGroup(_t('modelRegDev') || 'Dev', devModels);
-        renderGroup(_t('modelRegUpscalers') || 'Upscalers', upscalerModels);
-        renderGroup(_t('modelRegLora') || 'LoRA', loraModels);
+        renderGroup(_t('modelRegCheckpoints') || '核心模型', checkpointModels);
+        renderGroup(_t('modelRegLora') || 'LoRA模型', loraModels);
+        renderGroup(_t('modelRegUpscalers') || '增强模型', upscalerModels);
+        renderGroup(_t('modelRegSupporting') || '辅助模型', supportingModels);
         renderGroup(_t('modelRegOther') || '其他', otherModels);
     }
 
     async function downloadRegistryModel(modelId, btn) {
+        const useMirror = document.getElementById('use-mirror-cb')?.checked || false;
         const origText = btn.textContent;
         btn.textContent = _t('modelRegDownloading') || '...';
         btn.disabled = true;
@@ -2482,7 +2503,7 @@
             const res = await fetch(`${BASE}/api/models/registry/download`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({model_id: modelId}),
+                body: JSON.stringify({model_id: modelId, use_mirror: useMirror}),
             });
             const data = await res.json();
             if (data.status === 'already_exists') {
@@ -2527,6 +2548,8 @@
                         btn.style.borderColor = 'rgba(76,175,80,0.3)';
                         btn.style.color = '#4CAF50';
                         loadModelCheckpoints();
+                        if (typeof loadCoreModels === 'function') loadCoreModels();
+                        if (typeof scanLoras === 'function') scanLoras();
                     }
                 } else if (data.active && data.model_id === modelId) {
                     const pct = Math.round(data.progress || 0);

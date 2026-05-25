@@ -22,6 +22,19 @@ from fastapi.responses import JSONResponse
 from extensions._context import ExtensionContext
 from extensions._utils import default_lora_dir, resolve_models_root
 
+_LORA_KNOWN_INFO: dict[str, dict] = {
+    "ltx-2-19b-distilled-lora-384.safetensors": {
+        "description": "Pro模式LoRA（视频生成Pro高质量模式必需，384步推理）",
+        "trigger_words": [],
+        "base_model": "Lightricks/LTX-2",
+    },
+    "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors": {
+        "description": "视频迁移控制模型（视频迁移功能必需，支持深度/姿态/参考图控制）",
+        "trigger_words": [],
+        "base_model": "Lightricks/LTX-2.3",
+    },
+}
+
 
 def _read_safetensors_metadata(file_path: str | Path) -> dict:
     p = Path(file_path)
@@ -119,6 +132,14 @@ def _scan_loras_in_dir(root: Path, suffixes: set[str], read_meta: bool = False) 
                             meta = _read_safetensors_metadata(full)
                             if meta:
                                 entry.update(meta)
+                            known = _LORA_KNOWN_INFO.get(fn)
+                            if known:
+                                if not entry.get("description"):
+                                    entry["description"] = known["description"]
+                                if not entry.get("trigger_words") and known.get("trigger_words"):
+                                    entry["trigger_words"] = known["trigger_words"]
+                                if not entry.get("base_model") and known.get("base_model"):
+                                    entry["base_model"] = known["base_model"]
                         found.append(entry)
     except OSError:
         pass

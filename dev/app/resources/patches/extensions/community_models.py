@@ -52,13 +52,16 @@ class ModelRegistryEntry:
     is_folder: bool = False
     pipeline_mode: str = "fast"
     tags: list[str] = field(default_factory=list)
+    model_category: str = "checkpoint"
 
+
+HF_MIRROR_ENDPOINT = "https://hf-mirror.com"
 
 _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
     "ltx-2.3-22b-distilled": ModelRegistryEntry(
         model_id="ltx-2.3-22b-distilled",
         name="LTX 2.3 22B Distilled",
-        description="Official distilled model, best quality, requires high VRAM",
+        description="视频生成核心模型（文生视频/图生视频/智能多帧，BF16精度，需24GB+显存）",
         source="official",
         repo_id="Lightricks/LTX-2.3",
         filename="ltx-2.3-22b-distilled.safetensors",
@@ -69,11 +72,12 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         recommended_tiers=["ultra", "high"],
         pipeline_mode="fast",
         tags=["official", "distilled", "bf16"],
+        model_category="checkpoint",
     ),
     "ltx-2.3-22b-distilled-1.1": ModelRegistryEntry(
         model_id="ltx-2.3-22b-distilled-1.1",
         name="LTX 2.3 22B Distilled v1.1",
-        description="Official distilled model v1.1, updated version with improved quality",
+        description="视频生成核心模型v1.1（改进版，BF16精度，需24GB+显存）",
         source="official",
         repo_id="Lightricks/LTX-2.3",
         filename="ltx-2.3-22b-distilled-1.1.safetensors",
@@ -84,11 +88,12 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         recommended_tiers=["ultra", "high"],
         pipeline_mode="fast",
         tags=["official", "distilled", "bf16"],
+        model_category="checkpoint",
     ),
     "ltx-2.3-22b-distilled-fp8": ModelRegistryEntry(
         model_id="ltx-2.3-22b-distilled-fp8",
         name="LTX 2.3 22B Distilled FP8",
-        description="Official FP8 quantized distilled model, saves ~4GB VRAM, recommended for most users",
+        description="FP8量化核心模型（视频生成，节省4GB显存，推荐10-24GB显卡）",
         source="official",
         repo_id="Lightricks/LTX-2.3",
         filename="ltx-2.3-22b-distilled-fp8.safetensors",
@@ -99,11 +104,12 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         recommended_tiers=["high", "medium", "low", "minimal"],
         pipeline_mode="fast",
         tags=["official", "distilled", "fp8", "recommended"],
+        model_category="checkpoint",
     ),
     "ltx-2.3-22b-dev-fp8": ModelRegistryEntry(
         model_id="ltx-2.3-22b-dev-fp8",
         name="LTX 2.3 22B Dev FP8",
-        description="Official FP8 dev model for Pro mode, higher quality but slower",
+        description="FP8开发模型（Pro高质量模式，需20GB+显存）",
         source="official",
         repo_id="Lightricks/LTX-Video",
         filename="ltx-2.3-22b-dev-fp8.safetensors",
@@ -114,11 +120,12 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         recommended_tiers=["ultra", "high"],
         pipeline_mode="dev",
         tags=["official", "dev", "fp8"],
+        model_category="checkpoint",
     ),
     "ltx-2.3-spatial-upscaler": ModelRegistryEntry(
         model_id="ltx-2.3-spatial-upscaler",
         name="LTX 2.3 Spatial Upscaler x2",
-        description="2x spatial upscaler for higher resolution output",
+        description="2x画质增强模型（视频生成高清输出）",
         source="official",
         repo_id="Lightricks/LTX-2.3",
         filename="ltx-2.3-spatial-upscaler-x2-1.0.safetensors",
@@ -129,6 +136,139 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         recommended_tiers=["ultra", "high", "medium"],
         pipeline_mode="upscaler",
         tags=["official", "upscaler"],
+        model_category="upscaler",
+    ),
+    "ltx-2-19b-distilled-lora-384": ModelRegistryEntry(
+        model_id="ltx-2-19b-distilled-lora-384",
+        name="LTX 2 19B Distilled LoRA 384",
+        description="Pro模式LoRA（视频生成Pro高质量模式必需，384步推理）",
+        source="official",
+        repo_id="Lightricks/LTX-2",
+        filename="ltx-2-19b-distilled-lora-384.safetensors",
+        size_gb=0.4,
+        quantization="bf16",
+        variant="distilled-lora",
+        min_vram_gb=4,
+        recommended_tiers=["ultra", "high"],
+        pipeline_mode="fast",
+        tags=["official", "lora", "distilled", "pro"],
+        model_category="lora",
+    ),
+    "ltx-2.3-22b-ic-lora-union-control": ModelRegistryEntry(
+        model_id="ltx-2.3-22b-ic-lora-union-control",
+        name="LTX 2.3 IC LoRA Union Control",
+        description="视频迁移控制模型（视频迁移功能必需，支持深度/姿态/参考图控制）",
+        source="official",
+        repo_id="Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control",
+        filename="ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors",
+        size_gb=0.65,
+        quantization="bf16",
+        variant="ic-lora",
+        min_vram_gb=4,
+        recommended_tiers=["ultra", "high", "medium"],
+        pipeline_mode="ic_lora",
+        tags=["official", "lora", "ic-lora", "video-transfer"],
+        model_category="lora",
+    ),
+    "dpt-hybrid-midas": ModelRegistryEntry(
+        model_id="dpt-hybrid-midas",
+        name="DPT Hybrid MiDaS",
+        description="深度估计模型（视频迁移-深度控制必需）",
+        source="official",
+        repo_id="Intel/dpt-hybrid-midas",
+        filename="dpt-hybrid-midas",
+        size_gb=0.5,
+        quantization="fp32",
+        variant="depth",
+        min_vram_gb=2,
+        recommended_tiers=["ultra", "high", "medium", "low"],
+        pipeline_mode="supporting",
+        tags=["official", "supporting", "depth"],
+        model_category="supporting",
+        is_folder=True,
+    ),
+    "yolox-l-person-detector": ModelRegistryEntry(
+        model_id="yolox-l-person-detector",
+        name="YOLOX-L Person Detector",
+        description="人物检测模型（视频迁移-姿态控制必需，检测画面中人物位置）",
+        source="official",
+        repo_id="hr16/yolox-onnx",
+        filename="yolox_l.torchscript.pt",
+        size_gb=0.2,
+        quantization="fp32",
+        variant="detection",
+        min_vram_gb=2,
+        recommended_tiers=["ultra", "high", "medium", "low"],
+        pipeline_mode="supporting",
+        tags=["official", "supporting", "detection"],
+        model_category="supporting",
+    ),
+    "dw-ll-pose-processor": ModelRegistryEntry(
+        model_id="dw-ll-pose-processor",
+        name="DWPose UCOCO 384",
+        description="姿态估计模型（视频迁移-姿态/动作控制必需，提取人体骨架）",
+        source="official",
+        repo_id="hr16/DWPose-TorchScript-BatchSize5",
+        filename="dw-ll_ucoco_384_bs5.torchscript.pt",
+        size_gb=0.13,
+        quantization="fp32",
+        variant="pose",
+        min_vram_gb=2,
+        recommended_tiers=["ultra", "high", "medium", "low"],
+        pipeline_mode="supporting",
+        tags=["official", "supporting", "pose"],
+        model_category="supporting",
+    ),
+    "gemma-3-12b-text-encoder": ModelRegistryEntry(
+        model_id="gemma-3-12b-text-encoder",
+        name="Gemma 3 12B QAT Q4 Text Encoder",
+        description="文本编码器（所有生成功能的提示词理解必需，Q4量化）",
+        source="official",
+        repo_id="Lightricks/gemma-3-12b-it-qat-q4_0-unquantized",
+        filename="gemma-3-12b-it-qat-q4_0-unquantized",
+        size_gb=25.0,
+        quantization="q4",
+        variant="text-encoder",
+        min_vram_gb=8,
+        recommended_tiers=["ultra", "high", "medium"],
+        pipeline_mode="supporting",
+        tags=["official", "supporting", "text-encoder"],
+        model_category="supporting",
+        is_folder=True,
+    ),
+    "z-image-turbo": ModelRegistryEntry(
+        model_id="z-image-turbo",
+        name="Z-Image-Turbo",
+        description="图像生成模型（AI图像生成功能必需）",
+        source="official",
+        repo_id="Tongyi-MAI/Z-Image-Turbo",
+        filename="Z-Image-Turbo",
+        size_gb=31.0,
+        quantization="bf16",
+        variant="image-gen",
+        min_vram_gb=8,
+        recommended_tiers=["ultra", "high", "medium"],
+        pipeline_mode="supporting",
+        tags=["official", "supporting", "image-gen"],
+        model_category="supporting",
+        is_folder=True,
+    ),
+    "voxcpm2-tts": ModelRegistryEntry(
+        model_id="voxcpm2-tts",
+        name="VoxCPM2 TTS",
+        description="语音合成模型（TTS语音/声音克隆功能必需）",
+        source="official",
+        repo_id="openbmb/VoxCPM2",
+        filename="VoxCPM2",
+        size_gb=8.0,
+        quantization="bf16",
+        variant="tts",
+        min_vram_gb=4,
+        recommended_tiers=["ultra", "high", "medium"],
+        pipeline_mode="supporting",
+        tags=["official", "supporting", "tts"],
+        model_category="supporting",
+        is_folder=True,
     ),
 }
 
@@ -170,6 +310,7 @@ def _entry_to_dict(entry: ModelRegistryEntry) -> dict[str, Any]:
         "is_folder": entry.is_folder,
         "pipeline_mode": entry.pipeline_mode,
         "tags": entry.tags,
+        "model_category": entry.model_category,
     }
 
 
@@ -189,6 +330,7 @@ def _dict_to_entry(d: dict[str, Any]) -> ModelRegistryEntry:
         is_folder=bool(d.get("is_folder", False)),
         pipeline_mode=d.get("pipeline_mode", "fast"),
         tags=d.get("tags", []),
+        model_category=d.get("model_category", "checkpoint"),
     )
 
 
@@ -443,6 +585,8 @@ def _get_registry_status() -> list[dict[str, Any]]:
             "recommended_tiers": entry.recommended_tiers,
             "pipeline_mode": entry.pipeline_mode,
             "tags": entry.tags,
+            "model_category": entry.model_category,
+            "is_folder": entry.is_folder,
             "downloaded": exists,
             "local_path": local_path,
             "repo_id": entry.repo_id,
@@ -451,26 +595,29 @@ def _get_registry_status() -> list[dict[str, Any]]:
     return results
 
 
-def _download_model_worker(entry: ModelRegistryEntry, models_dir: Path) -> None:
+def _download_model_worker(entry: ModelRegistryEntry, models_dir: Path, use_mirror: bool = False) -> None:
     global _download_status
     try:
         from huggingface_hub import hf_hub_download, snapshot_download
 
         _download_status = {"active": True, "model_id": entry.model_id, "progress": 0.0, "error": None}
-        logger.info("Downloading model %s from %s", entry.model_id, entry.repo_id)
+        logger.info("Downloading model %s from %s (mirror=%s)", entry.model_id, entry.repo_id, use_mirror)
 
         target_path = models_dir / entry.filename
+        mirror_kwargs = {"endpoint": HF_MIRROR_ENDPOINT} if use_mirror else {}
 
         if entry.is_folder:
             snapshot_download(
                 repo_id=entry.repo_id,
                 local_dir=str(target_path),
+                **mirror_kwargs,
             )
         else:
             hf_hub_download(
                 repo_id=entry.repo_id,
                 filename=entry.filename,
                 local_dir=str(models_dir),
+                **mirror_kwargs,
             )
 
         _download_status = {
@@ -606,6 +753,7 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
 
         model_id = data.get("model_id", "").strip()
         custom_dir_param = data.get("custom_dir", "").strip()
+        use_mirror = bool(data.get("use_mirror", False))
 
         if not model_id:
             return JSONResponse(status_code=400, content={"error": "Missing 'model_id'"})
@@ -638,6 +786,7 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
             thread = threading.Thread(
                 target=_download_model_worker,
                 args=(entry, download_dir),
+                kwargs={"use_mirror": use_mirror},
                 daemon=True,
             )
             thread.start()
