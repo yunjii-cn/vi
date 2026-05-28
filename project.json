@@ -1,0 +1,17 @@
+{
+    "brand_name": "云集智能视频创意站",
+    "repos": {
+        "github": "yunjii-cn/vi",
+        "gitee": "yunjii/vi"
+    },
+    "paths": {
+        "version_json": "ver/version.json",
+        "dev": "dev",
+        "app": "app",
+        "ver": "ver",
+        "dist": "dist",
+        "build": "build",
+        "release": "release",
+        "lock_file": ".yunji.lock"
+    }
+}
