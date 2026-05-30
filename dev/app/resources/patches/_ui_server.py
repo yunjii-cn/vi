@@ -4,7 +4,7 @@ from fastapi.responses import Response, StreamingResponse
 import uvicorn
 
 APP_NAME = '云集智能视频创意站'
-VERSION = '2026.06.02.0747'
+VERSION = '2026.06.02.2026'
 
 _ui_log_path = 'E:\\软件开发\\云集智能视频创意站\\dev\\temp\\logs\\ui_server.log'
 os.makedirs(os.path.dirname(_ui_log_path), exist_ok=True)
@@ -142,7 +142,8 @@ async def proxy_api(request: Request, path: str):
     headers = dict(request.headers)
     headers.pop("host", None)
     
-    is_media_request = path.startswith("system/file") or path.startswith("system/video-thumbnail")
+    is_upload_request = path.startswith("system/upload")
+    is_media_request = path.startswith("system/file") or path.startswith("system/video-thumbnail") or is_upload_request
     is_direct_file = path.startswith("system/file")
     
     if is_direct_file:
@@ -208,12 +209,24 @@ async def proxy_api(request: Request, path: str):
     
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.request(request.method, url, content=body, headers=headers)
-            return Response(
-                content=resp.content,
-                status_code=resp.status_code,
-                media_type=resp.headers.get("content-type", "application/json"),
-            )
+            if is_upload_request:
+                # Stream large uploads directly without buffering entire body
+                async with client.stream(request.method, url, content=body, headers=headers) as resp:
+                    resp_content = b""
+                    async for chunk in resp.aiter_bytes():
+                        resp_content += chunk
+                    return Response(
+                        content=resp_content,
+                        status_code=resp.status_code,
+                        media_type=resp.headers.get("content-type", "application/json"),
+                    )
+            else:
+                resp = await client.request(request.method, url, content=body, headers=headers)
+                return Response(
+                    content=resp.content,
+                    status_code=resp.status_code,
+                    media_type=resp.headers.get("content-type", "application/json"),
+                )
     except httpx.ConnectError:
         return Response(content=b'{"detail":"Backend unavailable","status":"offline"}', status_code=503, media_type="application/json")
     except httpx.TimeoutException:

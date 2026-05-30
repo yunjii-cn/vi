@@ -151,3 +151,27 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
             error_msg = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
             print(f"Upload error: {error_msg}")
             return JSONResponse(status_code=500, content={"error": str(e), "detail": error_msg})
+
+    @app.post("/api/system/upload-file")
+    async def route_upload_file(request: Request):
+        try:
+            form = await request.form()
+            upload_file = form.get("file")
+            if not upload_file:
+                return JSONResponse(status_code=400, content={"error": "No file provided"})
+            upload_dir = ctx.get_output_path() / "uploads"
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            filename = upload_file.filename or "upload.bin"
+            safe_filename = "".join([c for c in filename if c.isalnum() or c in "._-"])
+            if not safe_filename or safe_filename.startswith("."):
+                safe_filename = f"upload_{uuid.uuid4().hex[:6]}{safe_filename}"
+            file_path = upload_dir / f"up_{uuid.uuid4().hex[:6]}_{safe_filename}"
+            content = await upload_file.read()
+            with file_path.open("wb") as buffer:
+                buffer.write(content)
+            return {"status": "success", "path": str(file_path)}
+        except Exception as e:
+            import traceback
+            error_msg = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+            print(f"Upload file error: {error_msg}")
+            return JSONResponse(status_code=500, content={"error": str(e), "detail": error_msg})

@@ -642,7 +642,8 @@
 
     function _isImageModel(m) {
         const n = (m.name || '').toLowerCase();
-        return n.includes('image') || n.includes('zit') || n.includes('img') || m.model_type === 'image';
+        if (n.includes('lora') || n.includes('ic-lora') || n.includes('control')) return false;
+        return n.includes('z-image') || n.includes('zimage') || n.includes('zit-') || n.includes('zib-') || m.model_type === 'image';
     }
 
     function _isVideoCheckpoint(m) {
@@ -3532,17 +3533,12 @@
     async function handleUpscaleVideoUpload(file) {
         if (!file) return;
         try {
-            const b64Data = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = (e) => resolve(e.target.result);
-                reader.onerror = () => reject(new Error(_t('fileReadFail')));
-                reader.readAsDataURL(file);
-            });
+            const formData = new FormData();
+            formData.append("file", file);
             addLog(_fmt('uploadFileStart', { label: _t('upscaleVideo') || '高清视频', name: file.name }));
-            const res = await fetch(`${BASE}/api/system/upload-image`, {
+            const res = await fetch(`${BASE}/api/system/upload-file`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image: b64Data, filename: file.name })
+                body: formData
             });
             const data = await res.json();
             if (res.ok && data.path) {
