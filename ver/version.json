@@ -4,18 +4,30 @@
   "download_url": "https://github.com/yunjii-cn/vi/releases/latest",
   "gitee_download_url": "https://gitee.com/yunjii/vi/releases",
   "changes": [
-    "本地EXE检测刷新修复",
-    "缓存过时自动重新扫描",
-    "版本切换按钮显示修复"
+    "前端高清放大页面重排+比例选项+FormData上传",
+    "LoRA按基模分类筛选+描述映射",
+    "单EXE自部署+版本切换+缓存刷新修复"
   ],
   "versions": [
     {
       "version": "2026.06.03.1000",
       "date": "2026-06-03",
       "changes": [
-        "本地EXE检测刷新修复",
-        "缓存过时自动重新扫描",
-        "版本切换按钮显示修复"
+        "前端: 高清放大页面重排(目标清晰度→画面比例→缩放模式)",
+        "前端: 新增21:9超宽屏、3:2经典比例选项",
+        "前端: LoRA选择按基模分类(视频页仅LTX-Video,图像页仅Z-Image)",
+        "前端: 图像生成页新增LoRA机制",
+        "前端: 历史资产高清放大视频显示帧率和时长",
+        "前端: _isImageModel修复排除LoRA干扰图像模型列表",
+        "后端: 新增upscale_api扩展(高清放大帧率调整/抽帧/插帧)",
+        "后端: 新增/system/upload-file端点(FormData大文件上传)",
+        "后端: LoRA元数据完善(37个LoRA详细描述+触发词+基模标记)",
+        "启动器: 本地EXE检测刷新修复+缓存过时自动重新扫描",
+        "启动器: 版本切换按钮显示修复(current_version变量顺序)",
+        "启动器: 单EXE自部署机制(_find_dev_dir+_self_deploy+_create_hardlink)",
+        "启动器: Git版本历史(本地git log+远程commits API竞速获取)",
+        "启动器: EXE版本切换(_switch_to_exe硬链接更新)",
+        "启动器: 懒加载机制(_ver_rendered_count分页渲染)"
       ],
       "filename": "云集智能视频创意站-v2026.06.03.1000.exe"
     },
@@ -69,17 +81,22 @@
       "version": "2026.05.28.0930",
       "date": "2026-05-28",
       "changes": [
-        "修复高清放大视频上传改为FormData",
-        "移除多余重试按钮",
-        "上传代理超时和流式转发"
+        "前端: 高清放大视频上传改为FormData(替代base64)",
+        "前端: 移除多余重试按钮",
+        "后端: 上传代理超时300s和流式转发",
+        "后端: 新增/system/upload-file端点"
       ]
     },
     {
       "version": "2026.05.27.0245",
       "date": "2026-05-27",
       "changes": [
-        "修复视频迁移视频上传预览图页面刷新后丢失",
-        "state恢复时设置video的poster和src"
+        "前端: 修复视频迁移视频上传预览图页面刷新后丢失",
+        "前端: state恢复时设置video的poster和src",
+        "前端: 高清放大页面重排+新增比例选项",
+        "前端: LoRA按基模分类筛选+描述映射",
+        "后端: 新增upscale_api扩展",
+        "后端: LoRA元数据完善(37个LoRA详细描述+触发词+基模标记)"
       ],
       "filename": "云集智能视频创意站-v2026.05.27.0245.exe"
     },
