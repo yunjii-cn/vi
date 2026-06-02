@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LTX-2 | Multi-GPU Cinematic Studio</title>
+    <link rel="stylesheet" href="index.css?v=fix-replay-progress">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/plyr/3.7.8/plyr.css" media="print" onload="this.media='all'" />
+</head>
+<body>
+
+<datalist id="fps-options">
+    <option value="8">
+    <option value="12">
+    <option value="16">
+    <option value="24">
+    <option value="25">
+    <option value="30">
+    <option value="48">
+    <option value="60">
+</datalist>
+
+<aside class="sidebar">
+    <div class="sidebar-header">
+        <div id="app-brand" style="display: flex; align-items: center; gap: 10px; height: 42px; margin-bottom: 0; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.08);">
+            <img id="app-icon" src="/app-icon.png" style="width: 24px; height: 24px; border-radius: 5px;" onerror="this.style.display='none'">
+            <div id="app-name" style="font-weight: 800; font-size: 15px; color: var(--text-main); line-height: 1.2;">云集智能视频创意站</div>
+            <div style="flex:1;"></div>
+            <button type="button" onclick="togglePanel('env-settings')" class="btn-icon sidebar-top-btn" data-i18n-title="envCheckTitle" title="环境检测" style="gap:4px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="M12 6v6l4 2"></path></svg>
+                <span style="font-size:11px;" data-i18n="envCheckTitle">环境检测</span>
+            </button>
+            <button type="button" onclick="togglePanel('sys-settings')" class="btn-icon sidebar-top-btn" data-i18n-title="settingsTitle" title="系统高级设置" style="gap:4px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                <span style="font-size:11px;" data-i18n="settingsBtnText">系统设置</span>
+            </button>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div id="sys-indicator" class="indicator-ready" style="width: 12px; height: 12px; border-radius: 50%;"></div>
+                <span style="font-weight: 800; font-size: 18px;">LTX-2 STUDIO</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <button id="feDebugBtn" onclick="toggleFeDebug()" class="btn-outline" style="font-size:11px;padding:4px 10px;opacity:0.7;" data-i18n="feDebugOff">调试:关</button>
+                <button id="clearGpuBtn" onclick="clearGpu()" class="btn-outline" data-i18n="clearVram">释放显存</button>
+                <button type="button" id="lang-toggle-btn" class="lang-toggle">EN</button>
+            </div>
+        </div>
+        
+        <div class="top-status" style="margin-bottom: 20px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span id="sys-status" style="font-weight:bold; color: var(--text-dim); font-size: 12px;" data-i18n="sysScanning">正在扫描 GPU...</span>
+                <div class="vram-bar" style="width: 120px; min-width: 120px; margin-top: 0;"><div class="vram-used" id="vram-fill"></div></div>
+                <span id="vram-text" style="font-variant-numeric: tabular-nums; flex-shrink: 0; font-size: 11px; color: var(--text-dim);">0/32 GB</span>
+                <span id="gpu-name" style="display: none;"></span>
+            </div>
+        </div>
+
+        <div id="env-settings" style="display: none; padding: 14px; background: rgba(0,0,0,0.4) !important; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); backdrop-filter: blur(10px);">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                <div style="font-size: 13px; font-weight: bold; color: #fff;" data-i18n="envCheckTitle">环境检测</div>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                    <span id="env-check-badge" style="font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 600;"></span>
+                    <button id="env-detect-btn" onclick="loadEnvCheck()" style="font-size: 10px; padding: 3px 8px; background: var(--accent); border: 1px solid var(--accent); color: #fff; border-radius: 5px; cursor: pointer; font-weight: 600;" data-i18n="envDetect">检测</button>
+                </div>
+            </div>
+            <div id="env-check-list" style="display: flex; flex-direction: column; gap: 6px;"></div>
+            <div id="env-preset-section" style="display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <span style="font-size: 11px; font-weight: 700; color: var(--accent);" data-i18n="envPresetTitle">推荐预设</span>
+                    <span id="env-preset-tier" style="font-size: 9px; padding: 1px 5px; border-radius: 3px; background: rgba(255,255,255,0.06); color: var(--text-dim); font-weight: 600;"></span>
+                </div>
+                <div id="env-preset-details" style="font-size: 10px; color: var(--text-dim); line-height: 1.5;"></div>
+            </div>
+        </div>
+
+        <div id="sys-settings" style="display: none; padding: 14px; background: rgba(0,0,0,0.4) !important; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); backdrop-filter: blur(10px);">
+            <div style="font-size: 13px; font-weight: bold; margin-bottom: 12px; color: #fff;" data-i18n="advancedSettings">高级设置</div>
+            
+            <label style="font-size: 11px; margin-bottom: 6px;" data-i18n="deviceSelect">工作设备选择</label>
+            <select id="gpu-selector" onchange="switchGpu(this.value)" style="margin-bottom: 12px; font-size: 11px; padding: 6px;">
+                <option value="" data-i18n="gpuDetecting">正在检测 GPU...</option>
+            </select>
+
+            <label style="font-size: 11px; margin-bottom: 6px; margin-top: 12px;" data-i18n="vramLimitLabel">可用最高显存上限 (GB, 0为全开优先显存)</label>
+            <div style="display: flex; gap: 6px; margin-bottom: 9px; align-items: stretch;">
+                <input type="number" id="vram-limit-input" value="0" data-i18n-placeholder="vramLimitPh" placeholder="例如: 12 (0表示无限制)" style="flex: 1; height: 28px; box-sizing: border-box; font-size: 12px; padding: 0 10px;">
+                <button onclick="saveVramLimit()" style="font-size: 12px; padding: 0 10px; height: 28px; box-sizing: border-box; white-space: nowrap; background: var(--accent); border: 1px solid var(--accent); color: #fff; border-radius: 7px; cursor: pointer; font-weight: 600;" data-i18n="saveLabel">保存</button>
+            </div>
+            <div id="vram-limit-status" style="font-size: 10px; color: var(--text-dim);"></div>
+
+            <label style="font-size: 11px; margin-bottom: 6px; margin-top: 12px;" data-i18n="modelCheckpointLabel">视频模型</label>
+            <div style="display: flex; gap: 6px; margin-bottom: 6px; align-items: stretch;">
+                <select id="model-checkpoint-select" onchange="saveSelectedModelCheckpoint()" style="flex: 1; height: 28px; box-sizing: border-box; font-size: 12px; padding: 0 8px;">
+                    <option value="" data-i18n="modelCheckpointDefault">默认官方蒸馏模型</option>
+                </select>
+            </div>
+            <div id="model-checkpoint-status" style="font-size: 10px; color: var(--text-dim); margin-bottom: 6px;" data-i18n="modelCheckpointHint">推荐使用 distilled-fp8；仅显示 LTX 2.3 22B 蒸馏模型，避开 dev 模型。</div>
+            <div id="core-models-panel" style="margin-bottom: 8px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <span style="font-size: 11px; font-weight: 700; color: var(--text-main);" data-i18n="coreModelsTitle">核心模型</span>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <label style="font-size:9px;color:var(--text-dim);cursor:pointer;user-select:none;display:flex;align-items:center;gap:3px;">
+                            <input type="checkbox" id="use-mirror-cb" style="accent-color:#1565C0;width:12px;height:12px;cursor:pointer;">
+                            <span data-i18n="useMirrorLabel">国内镜像</span>
+                        </label>
+                    </div>
+                </div>
+                <div id="core-models-list" style="display: flex; flex-direction: column; gap: 3px;"></div>
+            </div>
+            <div id="model-registry-panel" style="margin-bottom: 8px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <span style="font-size: 11px; font-weight: 700; color: var(--text-main);" data-i18n="modelRegTitle">模型仓库</span>
+                    <button onclick="refreshAndSync()" style="font-size: 10px; padding: 2px 8px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: var(--text-dim); border-radius: 4px; cursor: pointer;" data-i18n="refresh">刷新</button>
+                </div>
+                <div id="model-registry-dirs" style="margin-bottom: 6px;"></div>
+                <div id="model-registry-list" style="display: flex; flex-direction: column; gap: 4px;"></div>
+            </div>
+
+            <div id="hw-profile-panel" style="margin-top: 14px; padding: 10px; background: rgba(255,255,255,0.04); border-radius: 8px; border: 1px solid rgba(255,255,255,0.08); display: none;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <div style="font-size: 12px; font-weight: 700; color: var(--accent);" data-i18n="hwProfileTitle">硬件配置推荐</div>
+                    <button onclick="applyHardwareProfile()" style="font-size: 10px; padding: 3px 8px; background: var(--accent); color: #fff; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;" data-i18n="hwApplyBtn">应用推荐</button>
+                </div>
+                <div id="hw-profile-gpu" style="font-size: 11px; color: var(--text-dim); margin-bottom: 6px;"></div>
+                <div id="hw-profile-tier" style="font-size: 11px; font-weight: 600; margin-bottom: 8px;"></div>
+                <div id="hw-profile-recs" style="margin-bottom: 8px;"></div>
+                <div id="hw-profile-tips" style="font-size: 10px; color: var(--text-dim); line-height: 1.5;"></div>
+            </div>
+            
+            <label style="font-size: 11px; margin-bottom: 6px; margin-top: 12px;" data-i18n="loraFolderPath">LoRA 文件夹路径（可选）</label>
+            <div style="display: flex; gap: 6px; margin-bottom: 9px; align-items: stretch;">
+                <input type="text" id="lora-dir-input" placeholder="留空使用 模型目录\loras" data-i18n-placeholder="loraFolderPathPlaceholder" style="flex: 1; height: 28px; box-sizing: border-box; font-size: 12px; padding: 0 10px;">
+                <button onclick="saveLoraDir()" style="font-size: 12px; padding: 0 10px; height: 28px; box-sizing: border-box; white-space: nowrap; background: var(--accent); border: 1px solid var(--accent); color: #fff; border-radius: 7px; cursor: pointer; font-weight: 600;" data-i18n="saveLabel">保存</button>
+            </div>
+            <div id="lora-placement-hint" style="font-size: 10px; color: var(--text-dim); line-height: 1.45; margin-bottom: 6px;" data-i18n="loraPlacementHint">将 LoRA 文件放到当前模型目录下的 loras 文件夹。</div>
+            <div id="lora-dir-status" style="font-size: 10px; color: var(--text-dim);"></div>
+        </div>
+
+        <div id="render-btn-group" style="padding: 0 0 8px 0;">
+            <button class="btn-primary" id="mainBtn" onclick="run()" data-i18n="mainRender">开始渲染</button>
+            <button class="btn-primary" id="tts-top-btn" onclick="runTtsOrAsr()" style="display:none;" data-i18n="ttsGenBtn">🎙️ 开始生成语音</button>
+            <button class="btn-primary" id="upscale-top-btn" onclick="runUpscale()" style="display:none;" data-i18n="upscaleGenBtn">🔍 开始高清放大</button>
+            <div id="gen-btn-row" style="display:none; flex-direction:row; gap:8px; margin-top:8px;">
+                <button class="btn-secondary" id="pauseBtn" onclick="togglePause()" data-i18n="mainPause">暂停</button>
+                <button class="btn-danger" id="cancelBtn" onclick="cancelCurrentTask()" data-i18n="mainCancel">取消</button>
+            </div>
+        </div>
+
+        <div id="queue-panel" style="padding: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; margin-bottom: 14px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px;">
+                <div style="font-size:12px; font-weight:800; color:var(--text-main);" data-i18n="queueTitle">任务队列</div>
+                <div id="queue-summary" style="font-size:10px; color:var(--text-dim);" data-i18n="queueIdle">空闲</div>
+            </div>
+            <div id="queue-list" style="display:flex; flex-direction:column; gap:6px;"></div>
+        </div>
+    </div>
+
+    <div class="sidebar-section" id="main-tabs-section">
+        <div class="tabs">
+            <div id="tab-video" class="tab" onclick="switchMode('video')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect><line x1="7" y1="2" x2="7" y2="22"></line><line x1="17" y1="2" x2="17" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line><line x1="2" y1="7" x2="7" y2="7"></line><line x1="2" y1="17" x2="7" y2="17"></line><line x1="17" y1="17" x2="22" y2="17"></line><line x1="17" y1="7" x2="22" y2="7"></line></svg>
+                <span data-i18n="tabVideo">视频生成</span>
+            </div>
+            <div id="tab-image" class="tab" onclick="switchMode('image')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                <span data-i18n="tabImage">图像生成</span>
+            </div>
+            <div id="tab-tts" class="tab" onclick="switchMode('tts')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                <span data-i18n="tabTts">TTS 语音</span>
+            </div>
+            <div id="tab-upscale" class="tab" onclick="switchMode('upscale')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+                <span data-i18n="tabUpscale">高清放大</span>
+            </div>
+        </div>
+
+        <div id="video-sub-tabs" style="display:none;margin-bottom:8px;">
+            <div style="display:flex;gap:4px;background:var(--bg-sub);border-radius:8px;padding:3px;">
+                <button id="subtab-i2v" class="video-sub-tab active" onclick="switchVideoSubMode('i2v')" data-i18n="subtabI2v">标准生成</button>
+                <button id="subtab-batch" class="video-sub-tab" onclick="switchVideoSubMode('batch')" data-i18n="subtabBatch">智能多帧</button>
+                <button id="subtab-motion" class="video-sub-tab" onclick="switchVideoSubMode('motion')" data-i18n="subtabMotion">视频迁移</button>
+            </div>
+        </div>
+
+        <div id="upscale-sub-tabs" style="display:none;margin-bottom:8px;">
+            <div style="display:flex;gap:4px;background:var(--bg-sub);border-radius:8px;padding:3px;">
+                <button id="upscale-subtab-video" class="upscale-sub-tab active" onclick="switchUpscaleSubMode('video')" data-i18n="upscaleSubtabVideo">🎬 视频放大</button>
+                <button id="upscale-subtab-image" class="upscale-sub-tab" onclick="switchUpscaleSubMode('image')" data-i18n="upscaleSubtabImage">🖼️ 图片放大</button>
+            </div>
+        </div>
+        
+        <div id="prompt-container">
+            <label data-i18n="promptLabel">视觉描述词 (Prompt)</label>
+            <textarea id="prompt" data-i18n-placeholder="promptPlaceholder" placeholder="在此输入视觉描述词 (Prompt)..." style="height: 90px; margin-bottom: 0;"></textarea>
+        </div>
+
+        <div id="seed-settings" class="seed-panel">
+            <div class="seed-panel-head">
+                <span data-i18n="seedLabel">随机种子 (Seed)</span>
+            </div>
+            <div class="seed-control">
+                <div class="seed-input-shell">
+                    <input type="number" id="seed-value" min="1" max="2147483647" value="42" disabled>
+                </div>
+                <div class="seed-mode-tabs" role="radiogroup" aria-label="Seed mode">
+                    <label class="seed-mode-option is-active">
+                        <input type="radio" name="seed-mode" value="random" checked onchange="updateSeedModeUI()">
+                        <span data-i18n="seedRandom">随机</span>
+                    </label>
+                    <label class="seed-mode-option">
+                        <input type="radio" name="seed-mode" value="fixed" onchange="updateSeedModeUI()">
+                        <span data-i18n="seedFixed">固定</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="sidebar-section" id="video-opts" style="display:none">
+        <div class="setting-group" id="video-source-group">
+            <div class="group-title" data-i18n="genSource">生成媒介 / Generation Source</div>
+            
+            <div class="flex-row" style="margin-bottom: 10px;">
+                <div class="flex-1">
+                    <label data-i18n="startFrame">起始帧 (首帧)</label>
+                    <div class="upload-zone" id="start-frame-drop-zone" onclick="document.getElementById('start-frame-input').click()">
+                        <div class="clear-img-overlay" id="clear-start-frame-overlay" onclick="event.stopPropagation(); clearFrame('start')">×</div>
+                        <div id="start-frame-placeholder">
+                            <div class="upload-icon">🖼️</div>
+                            <div class="upload-text" data-i18n="uploadStart">上传首帧</div>
+                        </div>
+                        <img id="start-frame-preview" class="preview-thumb">
+                        <input type="file" id="start-frame-input" accept="image/*" style="display:none" onchange="handleFrameUpload(this.files[0], 'start')">
+                    </div>
+                    <input type="hidden" id="start-frame-path">
+                </div>
+                <div class="flex-1">
+                    <label data-i18n="endFrame">结束帧 (尾帧)</label>
+                    <div class="upload-zone" id="end-frame-drop-zone" onclick="document.getElementById('end-frame-input').click()">
+                        <div class="clear-img-overlay" id="clear-end-frame-overlay" onclick="event.stopPropagation(); clearFrame('end')">×</div>
+                        <div id="end-frame-placeholder">
+                            <div class="upload-icon">🏁</div>
+                            <div class="upload-text" data-i18n="uploadEnd">上传尾帧 (可选)</div>
+                        </div>
+                        <img id="end-frame-preview" class="preview-thumb">
+                        <input type="file" id="end-frame-input" accept="image/*" style="display:none" onchange="handleFrameUpload(this.files[0], 'end')">
+                    </div>
+                    <input type="hidden" id="end-frame-path">
+                </div>
+            </div>
+
+            <div class="flex-row">
+                <div class="flex-1">
+                    <label data-i18n="refAudio">参考音频 (A2V)</label>
+                    <div class="upload-zone" id="audio-drop-zone" onclick="document.getElementById('vid-audio-input').click()">
+                        <div class="clear-img-overlay" id="clear-audio-overlay" onclick="event.stopPropagation(); clearUploadedAudio()">×</div>
+                        <div id="audio-upload-placeholder">
+                            <div class="upload-icon">🎵</div>
+                            <div class="upload-text" data-i18n="uploadAudio">点击上传音频</div>
+                        </div>
+                        <div id="audio-upload-status" style="display:none;">
+                            <div class="upload-icon" style="color:var(--accent); opacity:1;">✔️</div>
+                            <div id="audio-filename-status" class="upload-text"></div>
+                        </div>
+                        <input type="file" id="vid-audio-input" accept="audio/*" style="display:none" onchange="handleAudioUpload(this.files[0])">
+                    </div>
+                    <input type="hidden" id="uploaded-audio-path">
+                </div>
+            </div>
+            <div style="font-size: 10px; color: var(--text-dim); text-align: center; margin-top: 5px;" data-i18n="sourceHint">
+                💡 若仅上传首帧 = 图生视频/音视频；若同时上传首尾帧 = 首尾插帧。
+            </div>
+        </div>
+
+        <div class="setting-group">
+            <div class="group-title" data-i18n="basicEngine">基础画面 / Basic EngineSpecs</div>
+            <div>
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:0;"><label data-i18n="videoModel" style="margin-bottom:0;">视频模型</label><span id="vid-model-hint" style="font-size:10px;color:var(--accent);font-weight:600;" data-i18n="vidModelHint">蒸馏→8+3步；dev→自定义步数</span></div>
+                <select id="vid-model-select" onchange="onVidModelChange()">
+                    <option value="" data-i18n="modelCheckpointDefault">默认官方蒸馏模型</option>
+                </select>
+            </div>
+            <div class="flex-row">
+                <div class="flex-1">
+                    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;"><label data-i18n="qualityLevel" style="margin-bottom:0;">分辨率</label><span id="vid-quality-rec" style="display:none;font-size:10px;color:var(--accent);font-weight:600;"></span></div>
+                    <select id="vid-quality" onchange="updateResPreview()">
+                        <option value="1080">1080P Full HD</option>
+                        <option value="720" selected>720P Standard</option>
+                        <option value="540">540P Preview</option>
+                        <option value="480">480P Lite</option>
+                        <option value="360">360P Minimal</option>
+                    </select>
+                </div>
+                <div class="flex-1">
+                    <label data-i18n="aspectRatio">画幅比例</label>
+                    <select id="vid-ratio" onchange="updateResPreview()">
+                        <option value="16:9" data-i18n="ratio169">16:9 电影宽幅</option>
+                        <option value="9:16" data-i18n="ratio916">9:16 移动竖屏</option>
+                        <option value="1:1" data-i18n="ratio11">1:1 方形</option>
+                        <option value="4:3" data-i18n="ratio43">4:3 经典横幅</option>
+                        <option value="3:4" data-i18n="ratio34">3:4 经典竖幅</option>
+                        <option value="21:9" data-i18n="ratio219">21:9 超宽银幕</option>
+                        <option value="9:21" data-i18n="ratio921">9:21 超长竖屏</option>
+                        <option value="ref" data-i18n="ratioRef">跟随参考图</option>
+                        <option value="custom" data-i18n="ratioCustom">自定义尺寸</option>
+                    </select>
+                </div>
+            </div>
+            <div id="vid-custom-size" class="flex-row" style="display:none; margin-top: -2px; margin-bottom: 10px;">
+                <div class="flex-1"><label data-i18n="width">宽度</label><input type="number" id="vid-custom-w" value="1280" min="64" step="64" onchange="updateResPreview()"></div>
+                <div class="flex-1"><label data-i18n="height">高度</label><input type="number" id="vid-custom-h" value="704" min="64" step="64" onchange="updateResPreview()"></div>
+            </div>
+            <div class="flex-row">
+                <div class="flex-1">
+                    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;"><label data-i18n="fpsLabel" style="margin-bottom:0;">帧率 (FPS)</label><span id="vid-fps-rec" style="display:none;font-size:10px;color:var(--accent);font-weight:600;"></span></div>
+                    <input type="number" id="vid-fps" value="24" min="1" max="120" step="1" list="fps-options">
+                </div>
+                <div class="flex-1">
+                    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;"><label data-i18n="durationLabel" style="margin-bottom:0;">时长 (秒)</label><span id="vid-duration-rec" style="display:none;font-size:10px;color:var(--accent);font-weight:600;"></span></div>
+                    <input type="number" id="vid-duration" value="5" min="1" step="1">
+                    <div id="vid-duration-warn" style="font-size:10px; margin-top:2px; line-height:1.3; color:var(--text-dim);"></div>
+                </div>
+            </div>
+
+            <div style="margin-top: 10px;">
+                <label style="display:flex;justify-content:space-between;align-items:center;">
+                    <span data-i18n="motionSpeedLabel">运动速度</span>
+                    <span id="vid-motion-speed-val" style="color:var(--accent);font-size:11px;font-weight:800;">1.0x</span>
+                </label>
+                <input type="range" id="vid-motion-speed" value="1" min="0.25" max="3" step="0.25" style="width:100%;" oninput="document.getElementById('vid-motion-speed-val').textContent = Number(this.value).toFixed(2).replace(/\\.?0+$/, '') + 'x'">
+            </div>
+
+            <label style="margin-top: 12px;" data-i18n="cameraMotion">镜头运动方式</label>
+            <select id="vid-motion">
+                <option value="static" selected data-i18n="motionStatic">Static (静止机位)</option>
+                <option value="dolly_in" data-i18n="motionDollyIn">Dolly In (推近)</option>
+                <option value="dolly_out" data-i18n="motionDollyOut">Dolly Out (拉远)</option>
+                <option value="dolly_left" data-i18n="motionDollyLeft">Dolly Left (向左)</option>
+                <option value="dolly_right" data-i18n="motionDollyRight">Dolly Right (向右)</option>
+                <option value="jib_up" data-i18n="motionJibUp">Jib Up (升臂)</option>
+                <option value="jib_down" data-i18n="motionJibDown">Jib Down (降臂)</option>
+                <option value="focus_shift" data-i18n="motionFocus">Focus Shift (焦点)</option>
+            </select>
+            <div class="flex-row" style="margin-top: 12px;">
+                <div class="flex-1">
+                    <label data-i18n="stepsLabel" style="margin-bottom:0;">推理步数</label>
+                    <div id="vid-steps-distilled" style="font-size:13px; color:var(--text-main); padding:5px 0;">8+3步 (蒸馏)</div>
+                    <input type="number" id="vid-steps" value="30" min="1" max="100" step="1" style="display:none;">
+                </div>
+            </div>
+            <div class="checkbox-container" style="margin-top: 8px;">
+                <input type="checkbox" id="vid-audio" checked>
+                <label for="vid-audio" data-i18n="audioGen">生成 AI 环境音 (Audio Gen)</label>
+            </div>
+
+            <div class="lora-control-head" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <label data-i18n="selectLora" style="margin: 0;">选择 LoRA</label>
+                <button type="button" onclick="addLoraSelection('loras-container')" style="background:none; border:none; color:var(--accent); cursor:pointer; font-size:16px; padding:0 4px;" title="添加 LoRA">+</button>
+            </div>
+            <div id="loras-container" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;"></div>
+        </div>
+    </div>
+
+    <div class="sidebar-section" id="motion-opts" style="display:none">
+        <div class="setting-group">
+            <div>
+                <label data-i18n="motionTransferModeLabel">迁移类型</label>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:6px;">
+                    <button type="button" id="motion-mode-action" class="btn-outline" onclick="setVideoTransferMode('action')" style="height:32px;background:var(--accent);color:#fff;border-color:var(--accent);" data-i18n="motionModeAction">动作迁移</button>
+                    <button type="button" id="motion-mode-camera" class="btn-outline" onclick="setVideoTransferMode('camera')" style="height:32px;" data-i18n="motionModeCamera">运镜迁移</button>
+                    <button type="button" id="motion-mode-repaint" class="btn-outline" onclick="setVideoTransferMode('repaint')" style="height:32px;" data-i18n="motionModeRepaint">视频重绘</button>
+                </div>
+            </div>
+
+            <div id="motion-action-control-section" style="margin-top: 12px;">
+                <div style="display:flex;align-items:center;gap:6px;position:relative;">
+                    <label data-i18n="motionControlType">控制类型</label>
+                    <span class="help-bubble" onclick="toggleHelpBubble('motion-control-help')" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--border);color:var(--text-dim);font-size:10px;font-weight:700;cursor:pointer;user-select:none;line-height:1;">?</span>
+                    <div id="motion-control-help" class="help-bubble-content" style="display:none;position:absolute;top:22px;left:0;z-index:100;padding:10px 12px;background:rgba(20,20,30,0.97);border:1px solid var(--border);border-radius:8px;font-size:11px;color:var(--text-sub);line-height:1.5;max-width:280px;box-shadow:0 4px 16px rgba(0,0,0,0.5);" data-i18n="motionControlLimitHint">
+                        当前 IC-LoRA 架构使用 SimpleDenoiser（无 CFG 引导），且 Union-Control 模型为 canny+depth+pose 联合控制，非专用姿态模型，因此姿态迁移精度有限。提高「注意力强度」可增强参考信号的影响力，但无法达到 ControlNet 级别的精确控制。
+                    </div>
+                </div>
+                <select id="motion-conditioning-type">
+                    <option value="pose" selected data-i18n="motionControlPose">Pose 姿态</option>
+                    <option value="canny" data-i18n="motionControlCanny">Canny 轮廓</option>
+                    <option value="depth" data-i18n="motionControlDepth">Depth 深度</option>
+                    <option value="video" hidden>Video</option>
+                </select>
+            </div>
+
+            <label style="margin-top: 12px;" data-i18n="motionRefVideoLabel">参考动作视频</label>
+            <div class="upload-zone" id="motion-video-drop-zone" onclick="document.getElementById('motion-video-input').click()" style="aspect-ratio:1;">
+                <div class="clear-img-overlay" id="clear-motion-video-overlay" onclick="event.stopPropagation(); clearMotionVideo()">×</div>
+                <div id="motion-video-placeholder">
+                    <div class="upload-icon">🎬</div>
+                    <div data-i18n="motionVideoUploadText">点击或拖拽视频</div>
+                    <small data-i18n="motionVideoUploadHint">提取动作/轮廓作为控制</small>
+                </div>
+                <div id="motion-video-status" style="display:none; position:absolute;inset:0;padding:10px;text-align:center;">
+                    <video id="motion-video-preview" style="width:100%;height:100%;object-fit:contain;border-radius:6px;" muted></video>
+                    <div id="motion-video-name" style="position:absolute;bottom:6px;left:10px;right:10px;font-size:11px;color:var(--text-sub);word-break:break-all;background:rgba(0,0,0,0.5);border-radius:4px;padding:2px 6px;"></div>
+                </div>
+            </div>
+            <input type="file" id="motion-video-input" accept="video/*" hidden onchange="handleMotionVideoUpload(this.files[0])">
+            <input type="hidden" id="motion-video-path">
+
+            <div id="motion-image-section">
+                <label style="margin-top: 12px;" data-i18n="motionTargetImageLabel">目标主体图</label>
+                <div class="upload-zone" id="motion-image-drop-zone" onclick="document.getElementById('motion-image-input').click()" style="aspect-ratio:1;">
+                    <div class="clear-img-overlay" id="clear-motion-image-overlay" onclick="event.stopPropagation(); clearMotionImage()">×</div>
+                    <div id="motion-image-placeholder">
+                        <div class="upload-icon">🖼️</div>
+                        <div data-i18n="motionImageUploadText">点击或拖拽图片</div>
+                        <small data-i18n="motionImageUploadHint">作为主体/首帧引导</small>
+                    </div>
+                    <img id="motion-image-preview" style="display:none; width:100%; height:100%; object-fit:contain; border-radius:10px;">
+                </div>
+                <input type="file" id="motion-image-input" accept="image/*" hidden onchange="handleMotionImageUpload(this.files[0])">
+                <input type="hidden" id="motion-image-path">
+            </div>
+
+            <div style="margin-top: 12px;">
+                <label data-i18n="qualityLevel">分辨率</label>
+                <select id="motion-quality" onchange="updateMotionResPreview()">
+                    <option value="1080">1080P Full HD</option>
+                    <option value="720" selected>720P Standard</option>
+                    <option value="540">540P Preview</option>
+                    <option value="480">480P Lite</option>
+                    <option value="360">360P Minimal</option>
+                </select>
+                <div id="motion-res-preview" style="font-size:11px;color:var(--text-dim);margin-top:2px;">跟随参考视频比例</div>
+            </div>
+
+            <div class="flex-row" style="margin-top: 12px;">
+                <div class="flex-1">
+                    <label data-i18n="fpsLabel" style="margin-bottom:0;">帧率 (FPS)</label>
+                    <input type="number" id="motion-fps" value="24" min="1" max="120" step="1" list="fps-options">
+                </div>
+                <div class="flex-1">
+                    <label data-i18n="durationLabel" style="margin-bottom:0;">时长 (秒)</label>
+                    <input type="number" id="motion-duration" value="5" min="1" step="1">
+                </div>
+            </div>
+
+            <div style="margin-top: 10px;">
+                <label style="display:flex;justify-content:space-between;align-items:center;">
+                    <span data-i18n="motionSpeedLabel">运动速度</span>
+                    <span id="motion-motion-speed-val" style="color:var(--accent);font-size:11px;font-weight:800;">1.0x</span>
+                </label>
+                <input type="range" id="motion-motion-speed" value="1" min="0.25" max="3" step="0.25" style="width:100%;" oninput="document.getElementById('motion-motion-speed-val').textContent = Number(this.value).toFixed(2).replace(/\\.?0+$/, '') + 'x'">
+            </div>
+
+            <div class="lora-control-head" style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; margin-bottom: 8px;">
+                <label data-i18n="selectLora" style="margin: 0; font-size: 11px;">选择 LoRA</label>
+                <button type="button" onclick="addLoraSelection('motion-loras-container')" style="background:none; border:none; color:var(--accent); cursor:pointer; font-size:16px; padding:0 4px;" title="添加 LoRA">+</button>
+            </div>
+            <div id="motion-loras-container" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;"></div>
+
+            <div class="flex-row" style="margin-top: 4px;">
+                <div class="flex-1">
+                    <label data-i18n="stepsLabel" style="margin-bottom:0;">推理步数</label>
+                    <div id="motion-steps-distilled" style="font-size:13px; color:var(--text-main); padding:5px 0;">8+3步 (蒸馏)</div>
+                </div>
+                <div class="flex-1">
+                    <label data-i18n="seedLabel" style="margin-bottom:0;">种子</label>
+                    <div style="display:flex;gap:4px;align-items:center;">
+                        <input type="number" id="motion-seed" value="" min="0" max="2147483647" step="1" placeholder="随机" style="flex:1;">
+                        <button type="button" onclick="const el=document.getElementById('motion-seed');el.value=Math.floor(Math.random()*2147483647);" style="background:none;border:1px solid var(--border);color:var(--text-dim);border-radius:4px;padding:2px 6px;cursor:pointer;font-size:11px;" title="随机种子">🎲</button>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top: 12px;">
+                <label style="display:flex;justify-content:space-between;align-items:center;">
+                    <span id="motion-strength-label" data-i18n="motionControlStrength">控制强度</span>
+                    <span id="motion-strength-val" style="color:var(--accent);font-size:11px;font-weight:800;">1</span>
+                </label>
+                <input type="range" id="motion-strength" value="1" min="0" max="2" step="0.05" style="width:100%;" oninput="document.getElementById('motion-strength-val').textContent = Number(this.value).toFixed(2).replace(/\.?0+$/, '')">
+            </div>
+
+            <div style="margin-top: 10px;">
+                <label style="display:flex;justify-content:space-between;align-items:center;">
+                    <span data-i18n="motionAttentionStrength">注意力强度</span>
+                    <span id="motion-attention-val" style="color:var(--accent);font-size:11px;font-weight:800;">1</span>
+                </label>
+                <input type="range" id="motion-attention-strength" value="1" min="0" max="1" step="0.05" style="width:100%;" oninput="document.getElementById('motion-attention-val').textContent = Number(this.value).toFixed(2).replace(/\.?0+$/, '')">
+            </div>
+        </div>
+    </div>
+
+    <div id="image-opts" class="sidebar-section" style="display:none">
+        <div class="flex-row">
+            <div class="flex-1">
+                <label data-i18n="qualityLevel">分辨率</label>
+                <select id="img-quality" onchange="updateImgResPreview()">
+                    <option value="1080">1080P Full HD</option>
+                    <option value="720" selected>720P Standard</option>
+                    <option value="540">540P Preview</option>
+                    <option value="480">480P Lite</option>
+                    <option value="360">360P Minimal</option>
+                </select>
+            </div>
+            <div class="flex-1">
+                <label data-i18n="aspectRatio">画幅比例</label>
+                <select id="img-ratio" onchange="updateImgResPreview()">
+                    <option value="1:1" data-i18n="ratio11">1:1 方形</option>
+                    <option value="16:9" data-i18n="ratio169">16:9 电影宽幅</option>
+                    <option value="9:16" data-i18n="ratio916">9:16 移动竖屏</option>
+                    <option value="4:3" data-i18n="ratio43">4:3 经典横幅</option>
+                    <option value="3:4" data-i18n="ratio34">3:4 经典竖幅</option>
+                    <option value="21:9" data-i18n="ratio219">21:9 超宽银幕</option>
+                    <option value="9:21" data-i18n="ratio921">9:21 超长竖屏</option>
+                    <option value="custom" data-i18n="ratioCustom">自定义尺寸</option>
+                </select>
+            </div>
+        </div>
+        <div id="img-custom-res" class="flex-row" style="display:none; margin-top: -2px; margin-bottom: 10px;">
+            <div class="flex-1"><label data-i18n="width">宽度</label><input type="number" id="img-w" value="1024" min="64" step="16" onchange="updateImgResPreview()"></div>
+            <div class="flex-1"><label data-i18n="height">高度</label><input type="number" id="img-h" value="1024" min="64" step="16" onchange="updateImgResPreview()"></div>
+        </div>
+        <div id="img-res-preview" style="font-size:10px;color:var(--text-dim);font-family:ui-monospace,monospace;margin-bottom:6px;"></div>
+
+        <div class="label-group" style="margin-top: 10px;">
+            <label data-i18n="samplingSteps">采样步数 (Steps)</label>
+            <span class="val-badge" id="stepsVal">28</span>
+        </div>
+        <div class="slider-container">
+            <input type="range" id="img-steps" min="1" max="50" value="28" oninput="document.getElementById('stepsVal').innerText=this.value">
+        </div>
+
+        <label style="margin-top: 12px; font-size: 11px;" data-i18n="imgModelLabel">图像模型</label>
+        <select id="img-model-select" style="margin-bottom: 8px; font-size: 11px; padding: 4px 8px;">
+            <option value="" data-i18n="imgModelDefault">默认 Z-Image-Turbo</option>
+        </select>
+
+        <div class="lora-control-head" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; margin-top: 8px;">
+            <label data-i18n="selectLora" style="margin: 0; font-size: 11px;">选择 LoRA</label>
+            <button type="button" onclick="addLoraSelection('img-loras-container')" style="background:none; border:none; color:var(--accent); cursor:pointer; font-size:16px; padding:0 4px;" title="添加 LoRA">+</button>
+        </div>
+        <div id="img-loras-container" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;"></div>
+    </div>
+
+    <div class="sidebar-section" id="batch-opts" style="display:none">
+        <div class="setting-group">
+            <div class="group-title" data-i18n="smartMultiFrameGroup">智能多帧</div>
+            <div class="smart-param-mode-label" data-i18n="workflowModeLabel">工作流模式（点击切换）</div>
+            <div class="smart-param-modes" role="radiogroup" aria-label="工作流模式">
+                <label class="smart-param-mode-opt">
+                    <input type="radio" name="batch-workflow" value="single" checked onchange="onBatchWorkflowChange()">
+                    <span class="smart-param-mode-title" data-i18n="wfSingle">单次多关键帧</span>
+                </label>
+                <label class="smart-param-mode-opt">
+                    <input type="radio" name="batch-workflow" value="segments" onchange="onBatchWorkflowChange()">
+                    <span class="smart-param-mode-title" data-i18n="wfSegments">分段拼接</span>
+                </label>
+            </div>
+            
+            <label data-i18n="uploadImages">上传图片</label>
+            <div class="upload-zone" id="batch-images-drop-zone" onclick="document.getElementById('batch-images-input').click()" style="min-height: 72px; margin-bottom: 0;">
+                <div id="batch-images-placeholder">
+                    <div class="upload-icon">📁</div>
+                    <div class="upload-text" data-i18n="uploadMulti1">点击或拖入多张图片</div>
+                    <div class="upload-hint" data-i18n="uploadMulti2">支持一次选多张，可多次添加</div>
+                </div>
+                <input type="file" id="batch-images-input" accept="image/*" multiple style="display:none" onchange="handleBatchImagesUpload(this.files, true)">
+            </div>
+            <input type="hidden" id="batch-images-path">
+
+            <div class="batch-thumb-strip-wrap" id="batch-thumb-strip-wrap" style="display: none;">
+                <div class="batch-thumb-strip-head">
+                    <span class="batch-thumb-strip-title" data-i18n="batchStripTitle">已选图片 · 顺序 = 播放先后</span>
+                    <span class="batch-thumb-strip-hint" data-i18n="batchStripHint">在缩略图上按住拖动排序；松手落入虚线框位置</span>
+                </div>
+                <div class="batch-images-container" id="batch-images-container"></div>
+            </div>
+
+            <div style="font-size: 10px; color: var(--text-dim); margin-bottom: 12px; margin-top: 10px; line-height: 1.45;" data-i18n-html="batchFfmpegHint">
+                💡 <strong>分段模式</strong>：2 张 = 1 段；3 张 = 2 段再拼接。<strong>单次模式</strong>：几张图就几个 latent 锚点，一条视频出片。<br>
+                多段需 <code style="font-size:9px;">ffmpeg</code>：装好后加 PATH，或设环境变量 <code style="font-size:9px;">LTX_FFMPEG_PATH</code>，或在 <code style="font-size:9px;">%LOCALAPPDATA%\LTXDesktop\ffmpeg_path.txt</code> 第一行写 ffmpeg.exe 完整路径。
+            </div>
+
+            <label style="margin-top: 8px;" data-i18n="bgmLabel">成片配乐（可选，统一音轨）</label>
+            <div class="upload-zone" id="batch-audio-drop-zone" onclick="document.getElementById('batch-audio-input').click()" style="min-height: 44px; margin-bottom: 8px; position: relative;">
+                <div class="clear-img-overlay" id="clear-batch-audio-overlay" onclick="event.stopPropagation(); clearBatchBackgroundAudio()" style="display: none;">×</div>
+                <div id="batch-audio-placeholder">
+                    <div class="upload-text" style="font-size: 11px;" data-i18n="bgmUploadHint">上传一条完整 BGM（生成完成后会替换整段成片的音轨）</div>
+                </div>
+                <div id="batch-audio-status" style="display: none; font-size: 11px; color: var(--accent);"></div>
+                <input type="file" id="batch-audio-input" accept="audio/*" style="display:none" onchange="handleBatchBackgroundAudioUpload(this.files[0])">
+            </div>
+            <input type="hidden" id="batch-background-audio-path">
+
+            <div id="batch-segments-container" style="margin-top: 15px;"></div>
+        </div>
+
+        <div class="setting-group">
+            <div class="group-title" data-i18n="basicEngine">基础画面 / Basic EngineSpecs</div>
+            <div class="flex-row">
+                <div class="flex-1">
+                    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;"><label data-i18n="qualityLevel" style="margin-bottom:0;">分辨率</label><span id="batch-quality-rec" style="display:none;font-size:10px;color:var(--accent);font-weight:600;"></span></div>
+                    <select id="batch-quality" onchange="updateBatchResPreview()">
+                        <option value="1080">1080P Full HD</option>
+                        <option value="720" selected>720P Standard</option>
+                        <option value="540">540P Preview</option>
+                        <option value="480">480P Lite</option>
+                        <option value="360">360P Minimal</option>
+                    </select>
+                </div>
+                <div class="flex-1">
+                    <label data-i18n="aspectRatio">画幅比例</label>
+                    <select id="batch-ratio" onchange="updateBatchResPreview()">
+                        <option value="16:9" data-i18n="ratio169">16:9 电影宽幅</option>
+                        <option value="9:16" data-i18n="ratio916">9:16 移动竖屏</option>
+                        <option value="1:1" data-i18n="ratio11">1:1 方形</option>
+                        <option value="4:3" data-i18n="ratio43">4:3 经典横幅</option>
+                        <option value="3:4" data-i18n="ratio34">3:4 经典竖幅</option>
+                        <option value="21:9" data-i18n="ratio219">21:9 超宽银幕</option>
+                        <option value="9:21" data-i18n="ratio921">9:21 超长竖屏</option>
+                        <option value="ref" data-i18n="ratioRef">跟随参考图</option>
+                        <option value="custom" data-i18n="ratioCustom">自定义尺寸</option>
+                    </select>
+                </div>
+            </div>
+            <div id="batch-custom-size" class="flex-row" style="display:none; margin-top: -2px; margin-bottom: 10px;">
+                <div class="flex-1"><label data-i18n="width">宽度</label><input type="number" id="batch-custom-w" value="1280" min="64" step="64" onchange="updateBatchResPreview()"></div>
+                <div class="flex-1"><label data-i18n="height">高度</label><input type="number" id="batch-custom-h" value="704" min="64" step="64" onchange="updateBatchResPreview()"></div>
+            </div>
+
+            <div style="margin-top: 10px;">
+                <label style="display:flex;justify-content:space-between;align-items:center;">
+                    <span data-i18n="motionSpeedLabel">运动速度</span>
+                    <span id="batch-motion-speed-val" style="color:var(--accent);font-size:11px;font-weight:800;">1.0x</span>
+                </label>
+                <input type="range" id="batch-motion-speed" value="1" min="0.25" max="3" step="0.25" style="width:100%;" oninput="document.getElementById('batch-motion-speed-val').textContent = Number(this.value).toFixed(2).replace(/\.?0+$/, '') + 'x'">
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <label data-i18n="selectLora" style="margin: 0;">选择 LoRA</label>
+                <button type="button" onclick="addLoraSelection('batch-loras-container')" style="background:none; border:none; color:var(--accent); cursor:pointer; font-size:16px; padding:0 4px;" title="添加 LoRA">+</button>
+            </div>
+            <div id="batch-loras-container" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;"></div>
+        </div>
+    </div>
+
+    <div id="tts-opts" class="sidebar-section" style="display:none; padding-top: 0;">
+        <div id="tts-status-bar" style="padding: 8px 12px; border-radius: 8px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); margin-bottom: 14px; font-size: 11px; color: var(--text-dim);" data-i18n="ttsStatusBarDetecting">
+            🔍 正在检测 TTS 模型...
+        </div>
+
+        <div id="tts-sub-tabs" style="margin-bottom:8px;">
+            <div style="display:flex;gap:4px;background:var(--bg-sub);border-radius:8px;padding:3px;">
+                <button id="tts-subtab-text" class="tts-sub-tab active" onclick="switchTtsSubMode('text_only')" data-i18n="ttsModeTextOnly">🗣️ 文字转语音</button>
+                <button id="tts-subtab-asr" class="tts-sub-tab" onclick="switchTtsSubMode('asr')" data-i18n="ttsSubtabAsr">🔍 语音转文字</button>
+                <button id="tts-subtab-clone" class="tts-sub-tab" onclick="switchTtsSubMode('clone')" data-i18n="ttsModeClone">🎙️ 声音克隆</button>
+                <button id="tts-subtab-ultimate" class="tts-sub-tab" onclick="switchTtsSubMode('ultimate_clone')" data-i18n="ttsModeUltimate">⭐ 终极克隆</button>
+            </div>
+        </div>
+
+        <div id="tts-text-section" class="setting-group">
+            <div class="group-title" data-i18n="ttsTextTitle">合成文本 / Text</div>
+            <label style="font-size:11px; color:var(--text-dim); margin-bottom:5px; display:block;" data-i18n-html="ttsTextHint">
+                支持在文本开头加英文括号描述声音，例如：<code style="font-size:10px;">(年轻女声，温柔甜美)</code>
+            </label>
+            <textarea id="tts-text" data-i18n-placeholder="ttsTextPlaceholder" placeholder="输入要合成的文本内容..." style="width:100%; height:90px; padding:8px; font-size:12px; box-sizing:border-box; resize:vertical; border-radius:8px; border:1px solid var(--border); background:var(--item); color:var(--text);"></textarea>
+        </div>
+
+        <div id="tts-audio-section" style="display:none;" class="setting-group">
+            <label id="tts-audio-label" style="font-size:11px; margin-bottom:4px; display:block;" data-i18n="ttsRefLabel">📎 参考音频（Reference）</label>
+            <div class="upload-zone" id="tts-ref-drop" onclick="document.getElementById('tts-ref-input').click()" style="min-height:48px; margin-bottom:6px; position:relative;">
+                <div class="clear-img-overlay" id="tts-ref-clear" onclick="event.stopPropagation(); clearTtsRef()" style="display:none;">×</div>
+                <div id="tts-ref-placeholder">
+                    <div class="upload-icon">🎵</div>
+                    <div class="upload-text" style="font-size:11px;" data-i18n="ttsRefUploadHint">点击上传参考音频 (.wav / .mp3)</div>
+                </div>
+                <div id="tts-ref-status" style="display:none; font-size:11px; color:var(--accent); padding:8px; text-align:center;"></div>
+                <input type="file" id="tts-ref-input" accept="audio/*" style="display:none" onchange="handleTtsRefUpload(this.files[0])">
+            </div>
+            <button id="tts-clone-transcribe-btn" onclick="transcribeTtsRef('clone')" style="display:none; width:100%; padding:6px 0; font-size:11px; border-radius:6px; border:1px solid var(--border); background:var(--item); color:var(--text); cursor:pointer; margin-bottom:6px;" data-i18n="ttsTranscribeBtn">🔍 识别为文字</button>
+        </div>
+
+        <div id="tts-ultimate-section" style="display:none;" class="setting-group">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+                <label style="font-size:11px;" data-i18n="ttsUltimateLabel">📝 参考音频对应的文本转录（可选，能显著提升相似度）</label>
+                <button id="tts-ultimate-transcribe-btn" onclick="transcribeTtsRef('ultimate')" style="display:none; padding:2px 8px; font-size:10px; border-radius:4px; border:1px solid var(--border); background:var(--item); color:var(--text); cursor:pointer; white-space:nowrap;" data-i18n="ttsTranscribeBtn">🔍 识别为文字</button>
+            </div>
+            <textarea id="tts-prompt-text" data-i18n-placeholder="ttsUltimatePlaceholder" placeholder="与参考音频完全一致的文本内容..." style="width:100%; height:60px; padding:6px 8px; font-size:11px; box-sizing:border-box; resize:vertical; border-radius:6px; border:1px solid var(--border); background:var(--item); color:var(--text); margin-bottom:6px;"></textarea>
+        </div>
+
+        <div id="tts-asr-result-section" style="display:none;" class="setting-group">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+                <div class="group-title" style="margin-bottom:0;" data-i18n="asrResultTitle">识别结果 / Result</div>
+                <button id="asr-copy-btn" onclick="copyAsrResult()" style="display:none; padding:2px 10px; font-size:10px; border-radius:4px; border:1px solid var(--border); background:var(--item); color:var(--text); cursor:pointer;" data-i18n="asrCopyBtn">📋 复制</button>
+            </div>
+            <div id="asr-result" style="min-height:60px; padding:8px 10px; font-size:12px; border-radius:6px; border:1px solid var(--border); background:var(--item); color:var(--text); line-height:1.6; white-space:pre-wrap; word-break:break-all;"></div>
+        </div>
+
+        <div id="tts-params-section" class="setting-group">
+            <div class="group-title" data-i18n="ttsParamsTitle">高级参数 / Parameters</div>
+            <div class="flex-row" style="gap:12px;">
+                <div class="flex-1">
+                    <div class="label-group">
+                        <label style="font-size:11px;" data-i18n="ttsCfgLabel">CFG 强度</label>
+                        <span class="val-badge" id="ttsCfgVal">2.0</span>
+                    </div>
+                    <div class="slider-container">
+                        <input type="range" id="tts-cfg" min="0.5" max="5.0" step="0.5" value="2.0"
+                               oninput="document.getElementById('ttsCfgVal').textContent=this.value">
+                    </div>
+                </div>
+                <div class="flex-1">
+                    <div class="label-group">
+                        <label style="font-size:11px;" data-i18n="ttsStepsLabel">推理步数</label>
+                        <span class="val-badge" id="ttsStepsVal">10</span>
+                    </div>
+                    <div class="slider-container">
+                        <input type="range" id="tts-steps" min="5" max="50" step="5" value="10"
+                               oninput="document.getElementById('ttsStepsVal').textContent=this.value">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="tts-result-section" style="display:none;" class="setting-group">
+            <div class="group-title" data-i18n="ttsResultTitle">生成结果 / Output</div>
+            <audio id="tts-audio-player" controls style="width:100%; border-radius:8px; margin-bottom:6px;"></audio>
+            <a id="tts-download-link" href="#" download style="font-size:11px; color:var(--accent); text-decoration:none;" data-i18n="ttsDownload">⬇️ 下载音频</a>
+        </div>
+    </div>
+
+    <div id="upscale-opts" class="sidebar-section" style="display:none; padding-top: 0;">
+        <div id="upscale-status-bar" style="padding: 8px 12px; border-radius: 8px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); margin-bottom: 14px; font-size: 11px; color: var(--text-dim);" data-i18n="upscaleStatusBarDetecting">
+            🔍 正在检测放大引擎...
+        </div>
+
+        <div id="upscale-video-section" class="setting-group">
+            <div class="group-title" data-i18n="upscaleVideoTitle">视频高清放大 / Video Upscale</div>
+            <label data-i18n="upscaleInputVideo">输入视频</label>
+            <div class="upload-zone" id="upscale-video-drop-zone" onclick="document.getElementById('upscale-video-input').click()">
+                <div class="clear-img-overlay" id="clear-upscale-video-overlay" onclick="event.stopPropagation(); clearUpscaleVideo()">×</div>
+                <div id="upscale-video-placeholder">
+                    <div class="upload-icon">🎬</div>
+                    <div class="upload-text" data-i18n="upscaleVideoUploadHint">点击或拖拽视频文件</div>
+                </div>
+                <video id="upscale-video-preview" class="preview-thumb" muted></video>
+                <div id="upscale-video-name" style="font-size:11px;color:var(--text-sub);word-break:break-all;margin-top:4px;display:none;"></div>
+            </div>
+            <input type="file" id="upscale-video-input" accept="video/*" style="display:none" onchange="handleUpscaleVideoUpload(this.files[0])">
+            <input type="hidden" id="upscale-video-path">
+        </div>
+
+        <div id="upscale-image-section" style="display:none;" class="setting-group">
+            <div class="group-title" data-i18n="upscaleImageTitle">图片高清放大 / Image Upscale</div>
+            <label data-i18n="upscaleInputImage">输入图片</label>
+            <div class="upload-zone" id="upscale-image-drop-zone" onclick="document.getElementById('upscale-image-input').click()">
+                <div class="clear-img-overlay" id="clear-upscale-image-overlay" onclick="event.stopPropagation(); clearUpscaleImage()">×</div>
+                <div id="upscale-image-placeholder">
+                    <div class="upload-icon">🖼️</div>
+                    <div class="upload-text" data-i18n="upscaleImageUploadHint">点击或拖拽图片文件</div>
+                </div>
+                <img id="upscale-image-preview" class="preview-thumb">
+            </div>
+            <input type="file" id="upscale-image-input" accept="image/*" style="display:none" onchange="handleUpscaleImageUpload(this.files[0])">
+            <input type="hidden" id="upscale-image-path">
+        </div>
+
+        <div class="setting-group" style="margin-top:12px;">
+            <div class="group-title" data-i18n="upscaleParamsTitle">放大参数 / Parameters</div>
+            <div>
+                <label data-i18n="upscaleEngine">放大引擎</label>
+                <select id="upscale-engine" onchange="onUpscaleEngineChange()">
+                    <option value="realesrgan" selected data-i18n="upscaleEngineRealESRGAN">Real-ESRGAN (高保真)</option>
+                    <option value="ltx_fast" data-i18n="upscaleEngineLtxFast">LTX 快速放大</option>
+                </select>
+            </div>
+            <div id="upscale-quality-section" style="display:none;margin-top:10px;">
+                <label data-i18n="upscaleQualityLabel">目标清晰度</label>
+                <select id="upscale-quality" onchange="onUpscaleQualityChange()">
+                    <option value="720p" data-i18n="upscaleTarget720p">720P 高清</option>
+                    <option value="1080p" selected data-i18n="upscaleTarget1080p">1080P 全高清</option>
+                    <option value="2k" data-i18n="upscaleTarget2k">2K 超清</option>
+                    <option value="4k" data-i18n="upscaleTarget4k">4K 极清</option>
+                </select>
+                <div id="upscale-resolution-preview" style="margin-top:4px;font-size:10px;color:var(--text-dim);"></div>
+            </div>
+            <div style="margin-top:10px;">
+                <label data-i18n="upscaleRatioLabel">画面比例</label>
+                <select id="upscale-ratio" onchange="onUpscaleRatioChange()">
+                    <option value="original" selected data-i18n="upscaleRatioOriginal">原始比例</option>
+                    <option value="16:9" data-i18n="upscaleRatio169">16:9 宽屏</option>
+                    <option value="9:16" data-i18n="upscaleRatio916">9:16 竖屏</option>
+                    <option value="21:9" data-i18n="upscaleRatio219">21:9 超宽屏</option>
+                    <option value="3:2" data-i18n="upscaleRatio32">3:2 经典</option>
+                    <option value="4:3" data-i18n="upscaleRatio43">4:3 标准</option>
+                    <option value="1:1" data-i18n="upscaleRatio11">1:1 方形</option>
+                    <option value="scale" data-i18n="upscaleTargetScale">按倍数放大</option>
+                    <option value="custom" data-i18n="upscaleTargetCustom">自定义尺寸</option>
+                </select>
+            </div>
+            <div id="upscale-resize-mode-section" style="display:none;margin-top:8px;">
+                <label data-i18n="upscaleResizeModeLabel">缩放模式</label>
+                <select id="upscale-resize-mode" onchange="onUpscaleResizeModeChange()">
+                    <option value="fit" selected data-i18n="upscaleResizeFit">适应（保持比例，可能留黑边）</option>
+                    <option value="crop" data-i18n="upscaleResizeCrop">裁剪（保持比例，裁剪多余部分）</option>
+                    <option value="stretch" data-i18n="upscaleResizeStretch">拉伸（填充到指定尺寸）</option>
+                </select>
+                <div id="upscale-resize-preview" style="margin-top:6px;font-size:10px;color:var(--text-dim);"></div>
+            </div>
+            <div id="upscale-fps-section" style="margin-top:10px;">
+                <label data-i18n="upscaleFpsLabel">输出帧率</label>
+                <select id="upscale-fps" style="width:100%;margin-top:4px;" onchange="onUpscaleFpsChange()">
+                    <option value="0" selected data-i18n="upscaleFpsOriginal">不调整（保持原始帧率）</option>
+                    <option value="16" data-i18n="upscaleFps16">16 fps</option>
+                    <option value="24" data-i18n="upscaleFps24">24 fps</option>
+                    <option value="30" data-i18n="upscaleFps30">30 fps</option>
+                    <option value="60" data-i18n="upscaleFps60">60 fps</option>
+                    <option value="custom" data-i18n="upscaleFpsCustom">自定义帧数</option>
+                </select>
+                <input type="number" id="upscale-fps-custom" min="1" max="240" value="24" style="display:none;width:100%;margin-top:4px;" placeholder="输入帧数">
+                <div id="upscale-fps-hint" style="font-size:10px;color:var(--text-dim);margin-top:2px;" data-i18n="upscaleFpsHint">低于原始帧率=抽帧，高于原始帧率=插帧</div>
+            </div>
+            <div id="upscale-scale-section" class="flex-row" style="display:none;margin-top:10px;">
+                <div class="flex-1">
+                    <label data-i18n="upscaleScale">放大倍数</label>
+                    <select id="upscale-scale">
+                        <option value="2" selected data-i18n="upscaleScale2x">2倍 (2x)</option>
+                        <option value="4" data-i18n="upscaleScale4x">4倍 (4x)</option>
+                    </select>
+                </div>
+                <div class="flex-1" id="upscale-model-section">
+                    <label data-i18n="upscaleModel">放大模型</label>
+                    <select id="upscale-model">
+                        <option value="realesrgan-x4plus" selected data-i18n="upscaleModelX4Plus">通用 x4plus</option>
+                        <option value="realesrgan-x4plus-anime" data-i18n="upscaleModelAnime">动漫 x4plus-anime</option>
+                        <option value="realesrgan-x2plus" data-i18n="upscaleModelX2Plus">通用 x2plus</option>
+                    </select>
+                </div>
+            </div>
+            <div id="upscale-custom-size-section" style="display:none;margin-top:10px;">
+                <div class="flex-row">
+                    <div class="flex-1">
+                        <label data-i18n="upscaleTargetWidth">目标宽度</label>
+                        <input type="number" id="upscale-target-width" min="1" max="8192" placeholder="宽度 (px)" style="width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--panel-2);color:var(--text);font-size:12px;">
+                    </div>
+                    <div style="display:flex;align-items:flex-end;padding-bottom:5px;padding-left:4px;padding-right:4px;color:var(--text-dim);">×</div>
+                    <div class="flex-1">
+                        <label data-i18n="upscaleTargetHeight">目标高度</label>
+                        <input type="number" id="upscale-target-height" min="1" max="8192" placeholder="高度 (px)" style="width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--panel-2);color:var(--text);font-size:12px;">
+                    </div>
+                </div>
+            </div>
+            <div id="upscale-denoise-section" style="margin-top:10px;">
+                <label style="display:flex;justify-content:space-between;align-items:center;">
+                    <span data-i18n="upscaleDenoiseLabel">降噪强度</span>
+                    <span id="upscale-denoise-val" style="color:var(--accent);font-size:11px;font-weight:800;">0.5</span>
+                </label>
+                <input type="range" id="upscale-denoise" value="0.5" min="0" max="1" step="0.1" style="width:100%;" oninput="document.getElementById('upscale-denoise-val').textContent = Number(this.value).toFixed(1)">
+                <div style="font-size:10px;color:var(--text-dim);margin-top:2px;" data-i18n="upscaleDenoiseHint">0=保留原始细节，1=强力降噪</div>
+            </div>
+            <div id="upscale-tile-section" style="margin-top:10px;">
+                <label style="display:flex;justify-content:space-between;align-items:center;">
+                    <span data-i18n="upscaleTileSizeLabel">分块大小 (Tile)</span>
+                    <span id="upscale-tile-val" style="color:var(--accent);font-size:11px;font-weight:800;">自动</span>
+                </label>
+                <input type="range" id="upscale-tile-size" value="0" min="0" max="1024" step="64" style="width:100%;" oninput="_updateTileSizeDisplay()">
+                <div id="upscale-tile-hint" style="font-size:10px;color:var(--text-dim);margin-top:2px;" data-i18n="upscaleTileSizeHint">0=自动根据显存设置，值越小越省显存但越慢</div>
+            </div>
+        </div>
+    </div>
+
+    <div style="padding: 0 30px 30px 30px;"></div>
+
+    <div class="sidebar-footer">
+        <div class="copyright-text">© 2025-2026 武汉市云集智能科技有限公司</div>
+        <button type="button" class="copyright-btn" onclick="showCopyright()">版权声明</button>
+    </div>
+</aside>
+
+<div id="copyright-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeCopyright()">
+    <div class="modal-content">
+        <div class="modal-header">
+            <span>版权声明 / Copyright Notice</span>
+            <button type="button" class="modal-close" onclick="closeCopyright()">✕</button>
+        </div>
+        <div class="modal-body">
+            <p><strong>云集智能视频创意站</strong></p>
+            <p>版本：<span id="copyright-version">-</span></p>
+            <hr>
+            <p><strong>一、著作权声明</strong></p>
+            <p>本软件（"云集智能视频创意站"）由<strong>一释寻</strong>（真名：熊艺杰）独立开发完成，著作权归<strong>武汉市云集智能科技有限公司</strong>所有。未经著作权人书面授权，任何单位或个人不得以任何形式复制、修改、传播、出租、出借或以其他方式侵犯本软件的著作权。</p>
+            <p><strong>二、公司信息</strong></p>
+            <p>公司名称：武汉市云集智能科技有限公司<br>法定代表人：熊艺杰</p>
+            <p><strong>三、作者信息</strong></p>
+            <p>软件作者：一释寻（熊艺杰）<br>手机/微信：18717171477<br>QQ：8210616</p>
+            <p><strong>四、许可范围</strong></p>
+            <p>本软件为授权使用软件。用户须通过合法途径获取使用授权，并在授权范围内使用。严禁以下行为：</p>
+            <ul>
+                <li>反向工程、反编译或反汇编本软件</li>
+                <li>删除或修改本软件中的版权声明及标识</li>
+                <li>将本软件用于任何非法用途</li>
+                <li>未经授权将本软件进行商业分发或转售</li>
+            </ul>
+            <p><strong>五、免责声明</strong></p>
+            <p>本软件按"现状"提供，不作任何明示或暗示的保证。对于因使用本软件而产生的任何直接或间接损失，著作权人不承担任何责任。</p>
+            <p><strong>六、技术说明</strong></p>
+            <p>本软件基于 LTX-2 视频生成引擎构建，部分功能依赖开源组件，相关开源协议另行标注。</p>
+            <hr>
+            <p style="font-size:10px; color:var(--text-dim);">最后更新：2026年5月</p>
+        </div>
+    </div>
+</div>
+
+<main class="workspace">
+    <section class="viewer" id="viewer-section">
+        <div class="monitor" id="viewer">
+            <button id="preview-download-btn" type="button" onclick="downloadCurrentPreviewAsset()" class="preview-download-btn" style="display:none;">
+                <span class="preview-download-btn-icon" aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 3v12"></path>
+                        <path d="M7 10l5 5 5-5"></path>
+                        <path d="M5 21h14"></path>
+                    </svg>
+                </span>
+                <span class="preview-download-btn-text" data-i18n="downloadLabel">下载</span>
+            </button>
+            <div id="preview-replay-actions" class="preview-replay-actions" style="display:none;">
+                <button type="button" onclick="loadCurrentPreviewSeed()" style="background:var(--accent);border:1px solid var(--accent);color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;font-weight:600;" data-i18n="previewLoadSeed">载入种子</button>
+                <button type="button" onclick="loadCurrentPreviewParams()" style="background:var(--accent);border:1px solid var(--accent);color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;font-weight:600;" data-i18n="previewLoadParams">载入参数</button>
+            </div>
+            <div id="loading-txt" data-i18n="waitingTask">等待分配渲染任务...</div>
+            <img id="res-img" src="">
+            <div id="video-wrapper" style="width:100%; height:100%; display:none; max-height:100%; align-items:center; justify-content:center;">
+                <video id="res-video" controls autoplay loop playsinline></video>
+            </div>
+            <div id="audio-wrapper">
+                <div class="audio-preview-art" id="audio-preview-art" role="button" tabindex="0">
+                    <div class="audio-preview-icon">♪</div>
+                    <div id="audio-preview-title">TTS Audio</div>
+                </div>
+                <audio id="res-audio" controls></audio>
+            </div>
+            <div class="progress-container"><div id="progress-fill"></div></div>
+        </div>
+    </section>
+
+    <div id="resize-handle" style="
+        height: 5px; background: transparent; cursor: row-resize;
+        flex-shrink: 0; position: relative; z-index: 50;
+        display: flex; align-items: center; justify-content: center;
+    " data-i18n-title="resizeHandleTitle" title="拖动调整面板高度">
+        <div style="width: 40px; height: 3px; background: var(--border); border-radius: 999px; pointer-events: none;"></div>
+    </div>
+
+    <section class="library" id="library-section">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 15px; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 10px;">
+            <div style="display: flex; gap: 20px;">
+                <span id="tab-history" style="font-size: 11px; font-weight: 800; color: var(--accent); cursor: pointer; border-bottom: 2px solid var(--accent); padding-bottom: 11px; margin-bottom: -11px;" onclick="switchLibTab('history')" data-i18n="libHistory">历史资产 / ASSETS</span>
+                <span id="tab-log" style="font-size: 11px; font-weight: 800; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; padding-bottom: 11px; margin-bottom: -11px;" onclick="switchLibTab('log')" data-i18n="libLog">系统日志 / LOGS</span>
+            </div>
+            <div style="display: flex; gap: 6px; align-items: center;">
+                <div id="history-layout-toggle" style="display: flex; gap: 2px; background: rgba(255,255,255,0.04); border-radius: 6px; padding: 2px; border: 1px solid var(--border);">
+                    <button type="button" class="layout-btn active" data-layout="list" onclick="setHistoryLayout('list')" title="图+列表">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><line x1="14" y1="5" x2="21" y2="5"/><line x1="14" y1="8" x2="21" y2="8"/><rect x="3" y="14" width="7" height="7" rx="1"/><line x1="14" y1="16" x2="21" y2="16"/><line x1="14" y1="19" x2="21" y2="19"/></svg>
+                    </button>
+                    <button type="button" class="layout-btn" data-layout="grid" onclick="setHistoryLayout('grid')" title="网格">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                    </button>
+                </div>
+                <button type="button" onclick="fetchHistory(currentHistoryPage)" style="background: var(--accent); border: 1px solid var(--accent); border-radius: 6px; color: #fff; font-size: 11px; padding: 4px 10px; cursor: pointer; font-weight: 600;" data-i18n="refresh">刷新</button>
+            </div>
+        </div>
+        
+        <div id="log-container" style="display: none; flex: 1; flex-direction: column;">
+            <div id="log" data-i18n="logReady">> LTX-2 Studio Ready. Expecting commands...</div>
+        </div>
+        
+        <div id="history-wrapper">
+            <div id="history-container"></div>
+        </div>
+        <div id="pagination-bar" style="display:none;"></div>
+    </section>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plyr/3.7.8/plyr.min.js" async></script>
+    <script src="i18n.js?v=en-tabs-1"></script>
+    <script>
+    window.__jsDiag = { errors: [], milestones: [] };
+    window.addEventListener('error', function(e) {
+        window.__jsDiag.errors.push({ msg: e.message, file: e.filename, line: e.lineno, col: e.colno });
+        console.error('[DIAG] JS Error:', e.message, e.filename, e.lineno);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+        window.__jsDiag.errors.push({ msg: 'UnhandledPromise: ' + (e.reason && e.reason.message || e.reason), file: '', line: 0 });
+        console.error('[DIAG] Unhandled Rejection:', e.reason);
+    });
+    </script>
+    <script src="index.js?v=progress-ui-v5"></script>
+    <script>
+    (function() {
+        var d = window.__jsDiag;
+        d.milestones.push('post-indexjs');
+        var fns = ['switchMode','loadModelCheckpoints','loadModelRegistry','run','clearGpu','scanLoras','loadLoraDir','listGpus','switchLibTab','checkStatus'];
+        var missing = fns.filter(function(n) { return typeof window[n] !== 'function'; });
+        d.milestones.push('missing-fns:' + missing.join(','));
+        if (missing.length > 0) {
+            console.error('[DIAG] Missing global functions:', missing);
+            var banner = document.createElement('div');
+            banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#d32f2f;color:#fff;padding:10px 16px;font-size:13px;font-family:monospace;';
+            banner.textContent = '[DEBUG] JS加载异常 - 缺失函数: ' + missing.join(', ') + ' | 错误: ' + d.errors.map(function(e){return e.msg+'(L'+e.line+')'}).join('; ');
+            document.body.appendChild(banner);
+        } else {
+            var videoOpts = document.getElementById('video-opts');
+            if (videoOpts && videoOpts.style.display === 'none') {
+                console.warn('[DIAG] video-opts still hidden, forcing switchMode(video)');
+                try { window.switchMode('video'); } catch(e) { console.error('[DIAG] switchMode fallback failed:', e); }
+            }
+            var modelSelect = document.getElementById('model-checkpoint-select');
+            if (modelSelect && modelSelect.options.length <= 1) {
+                console.warn('[DIAG] model list empty, forcing loadModelCheckpoints + loadModelRegistry');
+                try { window.loadModelCheckpoints(); } catch(e) { console.error('[DIAG] loadModelCheckpoints fallback failed:', e); }
+                try { window.loadModelRegistry(); } catch(e) { console.error('[DIAG] loadModelRegistry fallback failed:', e); }
+            }
+        }
+    })();
+    </script>
+
+</body>
+</html>

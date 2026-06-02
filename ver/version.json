@@ -1,14 +1,30 @@
 {
-  "latest": "2026.06.03.1000",
+  "latest": "2026.06.03.0642",
   "release_date": "2026-06-03",
-  "download_url": "https://github.com/yunjii-cn/vi/releases/latest",
-  "gitee_download_url": "https://gitee.com/yunjii/vi/releases",
+  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.03.0642",
+  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.03.0642",
   "changes": [
-    "前端高清放大FormData上传+LoRA分类筛选",
-    "后端upload-file端点+上传流式代理",
-    "启动器自部署+版本切换+Git历史+缓存刷新"
+    "前端: 高清放大视频上传改为FormData",
+    "前端: _isImageModel修复排除LoRA",
+    "前端: LoRA按基模分类筛选",
+    "后端: 新增/system/upload-file端点",
+    "后端: 上传代理流式转发+300s超时",
+    "启动器: 单EXE自部署+版本切换+Git历史+缓存刷新"
   ],
   "versions": [
+    {
+      "version": "2026.06.03.0642",
+      "date": "2026-06-03 06:43",
+      "changes": [
+        "前端: 高清放大视频上传改为FormData",
+        "前端: _isImageModel修复排除LoRA",
+        "前端: LoRA按基模分类筛选",
+        "后端: 新增/system/upload-file端点",
+        "后端: 上传代理流式转发+300s超时",
+        "启动器: 单EXE自部署+版本切换+Git历史+缓存刷新"
+      ],
+      "filename": "云集智能视频创意站-v2026.06.03.0642.exe"
+    },
     {
       "version": "2026.06.03.1000",
       "date": "2026-06-03",
