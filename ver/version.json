@@ -4,30 +4,29 @@
   "download_url": "https://github.com/yunjii-cn/vi/releases/latest",
   "gitee_download_url": "https://gitee.com/yunjii/vi/releases",
   "changes": [
-    "前端高清放大页面重排+比例选项+FormData上传",
-    "LoRA按基模分类筛选+描述映射",
-    "单EXE自部署+版本切换+缓存刷新修复"
+    "前端高清放大FormData上传+LoRA分类筛选",
+    "后端upload-file端点+上传流式代理",
+    "启动器自部署+版本切换+Git历史+缓存刷新"
   ],
   "versions": [
     {
       "version": "2026.06.03.1000",
       "date": "2026-06-03",
       "changes": [
-        "前端: 高清放大页面重排(目标清晰度→画面比例→缩放模式)",
-        "前端: 新增21:9超宽屏、3:2经典比例选项",
-        "前端: LoRA选择按基模分类(视频页仅LTX-Video,图像页仅Z-Image)",
-        "前端: 图像生成页新增LoRA机制",
-        "前端: 历史资产高清放大视频显示帧率和时长",
+        "前端: 高清放大视频上传改为FormData(替代base64,支持大文件)",
         "前端: _isImageModel修复排除LoRA干扰图像模型列表",
-        "后端: 新增upscale_api扩展(高清放大帧率调整/抽帧/插帧)",
+        "前端: LoRA选择按基模分类(视频页仅LTX-Video,图像页仅Z-Image)",
         "后端: 新增/system/upload-file端点(FormData大文件上传)",
-        "后端: LoRA元数据完善(37个LoRA详细描述+触发词+基模标记)",
-        "启动器: 本地EXE检测刷新修复+缓存过时自动重新扫描",
-        "启动器: 版本切换按钮显示修复(current_version变量顺序)",
+        "后端: 上传代理流式转发+300s超时",
         "启动器: 单EXE自部署机制(_find_dev_dir+_self_deploy+_create_hardlink)",
         "启动器: Git版本历史(本地git log+远程commits API竞速获取)",
-        "启动器: EXE版本切换(_switch_to_exe硬链接更新)",
-        "启动器: 懒加载机制(_ver_rendered_count分页渲染)"
+        "启动器: EXE版本切换(_switch_to_exe硬链接更新+_list_stable_exes扫描ver/和dev/)",
+        "启动器: Git提交切换(_switch_git_commit: stash+checkout+stash pop)",
+        "启动器: 懒加载机制(_ver_rendered_count分页渲染)",
+        "启动器: 版本切换按钮修复(current_version变量顺序+缓存刷新)",
+        "启动器: _refresh_local_exe_status缓存加载时重新检测本地EXE",
+        "构建: build-version.py支持自部署目录结构+project.json打包",
+        "配置: 新增project.json(品牌名/仓库/路径)+launcher.py入口重写"
       ],
       "filename": "云集智能视频创意站-v2026.06.03.1000.exe"
     },
@@ -82,9 +81,8 @@
       "date": "2026-05-28",
       "changes": [
         "前端: 高清放大视频上传改为FormData(替代base64)",
-        "前端: 移除多余重试按钮",
-        "后端: 上传代理超时300s和流式转发",
-        "后端: 新增/system/upload-file端点"
+        "后端: 新增/system/upload-file端点",
+        "后端: 上传代理超时300s和流式转发"
       ]
     },
     {
