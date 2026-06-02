@@ -6110,6 +6110,9 @@ class MainWindow(QMainWindow):
         self._refresh_model_status()
 
     def _build_update_page(self):
+        self._active_update_source = "github_mirror"
+        self._ver_race_errors = {}
+
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -6254,11 +6257,9 @@ class MainWindow(QMainWindow):
         self._ver_list_page_size = 20
         self._ver_rendered_count = 0
         self._ver_cache_file = os.path.join(self._app_dir, "data", "update_cache.json") if self._app_dir else ""
-        self._active_update_source = "github_mirror"
         self._ver_race_winner = ""
         self._latest_version = ""
         self._latest_info = None
-        self._ver_race_errors = {}
 
         self._update_current_version_card()
         self._ver_status_label.setText("加载中...")
