@@ -1,5 +1,45 @@
 [
   {
+    "version": "2026.05.27.0245",
+    "date": "2026-05-27 02:47",
+    "message": "修复视频迁移视频上传预览图页面刷新后丢失;state恢复时设置video的poster和src",
+    "changes": [
+      "修复视频迁移视频上传预览图页面刷新后丢失;state恢复时设置video的poster和src"
+    ],
+    "name": "云集智能视频创意站-v2026.05.27.0245.exe",
+    "download_url": ""
+  },
+  {
+    "version": "2026.05.27.0129",
+    "date": "2026-05-27 01:30",
+    "message": "修复pose人物检测模型缺失导致全黑视频;无人物检测返回灰色中性帧;历史资产添加日期时间;下载pose模型person_detector+pose_processor",
+    "changes": [
+      "修复pose人物检测模型缺失导致全黑视频;无人物检测返回灰色中性帧;历史资产添加日期时间;下载pose模型person_detector+pose_processor"
+    ],
+    "name": "云集智能视频创意站-v2026.05.27.0129.exe",
+    "download_url": ""
+  },
+  {
+    "version": "2026.05.26.0129",
+    "date": "2026-05-26 01:30",
+    "message": "--check-only",
+    "changes": [
+      "--check-only"
+    ],
+    "name": "云集智能视频创意站-v2026.05.26.0129.exe",
+    "download_url": ""
+  },
+  {
+    "version": "2026.05.26.0127",
+    "date": "2026-05-26 01:29",
+    "message": "--check-only",
+    "changes": [
+      "--check-only"
+    ],
+    "name": "云集智能视频创意站-v2026.05.26.0127.exe",
+    "download_url": ""
+  },
+  {
     "version": "2026.05.25.1311",
     "date": "2026-05-25 13:12",
     "message": "LTX2.3模型库完善",

@@ -28,7 +28,7 @@ from extensions._utils import ffmpeg_concat_copy, ffmpeg_mux_background_audio, f
 def install(app: FastAPI, ctx: ExtensionContext) -> None:
     @app.post("/api/system/upscale-video")
     async def route_upscale_video(request: Request):
-        return JSONResponse(status_code=410, content={"error": "视频增强功能已移除：LTX 当前实现不是真正的保真超分。"})
+        return JSONResponse(status_code=410, content={"error": "视频增强功能已移除：LTX 当前实现不是真正的保真放大。"})
 
     @app.post("/api/vram-limit")
     async def route_save_vram_limit(request: Request):
@@ -111,6 +111,11 @@ def execute_batch(data: dict, ctx: ExtensionContext) -> GenerateVideoResponse | 
     loraStrength = float(data.get("loraStrength") or 1.0)
     loraPaths = data.get("loraPaths")
     loraStrengths = data.get("loraStrengths")
+    motion_speed = float(data.get("motionSpeed") or 1.0)
+    if motion_speed < 0.25:
+        motion_speed = 0.25
+    if motion_speed > 3.0:
+        motion_speed = 3.0
 
     vg = getattr(ctx.handler, "video_generation", None)
     if vg is None or not callable(getattr(vg, "generate", None)):
@@ -147,6 +152,7 @@ def execute_batch(data: dict, ctx: ExtensionContext) -> GenerateVideoResponse | 
             modelPath=modelPath, loraPath=loraPath, loraStrength=loraStrength,
             loraPaths=loraPaths, loraStrengths=loraStrengths,
             seed=(replay_seed + idx if replay_seed else None),
+            motionSpeed=motion_speed,
         )
 
         def _one_gen(r: GenerateVideoRequest = req):

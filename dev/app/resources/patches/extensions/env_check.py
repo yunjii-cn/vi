@@ -39,21 +39,22 @@ from fastapi import FastAPI, Request as FastAPIRequest
 from fastapi.responses import JSONResponse
 
 if sys.platform == 'win32':
-    _SILENT_FLAGS = subprocess.CREATE_NO_WINDOW | 0x00000008
+    _SILENT_FLAGS = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
 else:
     _SILENT_FLAGS = 0
 
 
 def _silent_run(*args, **kwargs):
-    si = subprocess.STARTUPINFO()
-    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    si.wShowWindow = 0
-    kwargs['startupinfo'] = si
     if sys.platform == 'win32':
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0
+        kwargs['startupinfo'] = si
         if 'creationflags' in kwargs:
             kwargs['creationflags'] = kwargs['creationflags'] | _SILENT_FLAGS
         else:
             kwargs['creationflags'] = _SILENT_FLAGS
+    kwargs.setdefault('stdin', subprocess.DEVNULL)
     return subprocess.run(*args, **kwargs)
 
 from extensions._context import ExtensionContext
@@ -75,6 +76,8 @@ RECOMMENDED_VERSIONS = {
         "python_match": "exact_major_minor",
         "ffmpeg": "any",
         "nvidia_driver_min": "560.70",
+        "faster_whisper": "any",
+        "realesrgan": "any",
     },
     "high": {
         "cuda": "12.8",
@@ -85,6 +88,8 @@ RECOMMENDED_VERSIONS = {
         "python_match": "exact_major_minor",
         "ffmpeg": "any",
         "nvidia_driver_min": "560.70",
+        "faster_whisper": "any",
+        "realesrgan": "any",
     },
     "medium": {
         "cuda": "12.8",
@@ -95,6 +100,8 @@ RECOMMENDED_VERSIONS = {
         "python_match": "exact_major_minor",
         "ffmpeg": "any",
         "nvidia_driver_min": "560.70",
+        "faster_whisper": "any",
+        "realesrgan": "any",
     },
     "low": {
         "cuda": "12.8",
@@ -105,6 +112,8 @@ RECOMMENDED_VERSIONS = {
         "python_match": "exact_major_minor",
         "ffmpeg": "any",
         "nvidia_driver_min": "560.70",
+        "faster_whisper": "any",
+        "realesrgan": "any",
     },
     "minimal": {
         "cuda": "12.8",
@@ -115,6 +124,8 @@ RECOMMENDED_VERSIONS = {
         "python_match": "exact_major_minor",
         "ffmpeg": "any",
         "nvidia_driver_min": "560.70",
+        "faster_whisper": "any",
+        "realesrgan": "any",
     },
 }
 
@@ -122,7 +133,7 @@ RECOMMENDED_VERSIONS = {
 ENV_PRESETS = {
     "ultra": {
         "preset_name": "极致性能预设",
-        "target_hardware": "48GB+ VRAM (A6000 48GB / A100 40-80GB / H100 80GB / RTX A6000)",
+        "target_hardware": "32GB+ VRAM (RTX 5090 32GB / A6000 48GB / A100 40-80GB / H100 80GB)",
         "stack": {
             "python": "3.12",
             "pytorch": "2.9.0+cu128",
@@ -143,14 +154,14 @@ ENV_PRESETS = {
             "layer_streaming": False,
             "upscaler": True,
             "sage_attention": True,
-            "fp8_inference": "optional (原生FP8如Ada/Hopper架构)",
+            "fp8_inference": "RTX 5090: native FP8 (Blackwell); Ada/Hopper: native FP8",
             "max_resolution": "1080p",
             "recommended_resolution": "1080p",
         },
         "system_requirements": {
             "min_ram_gb": 32,
             "recommended_ram_gb": 64,
-            "min_vram_gb": 48,
+            "min_vram_gb": 32,
             "min_disk_gb": 40,
         },
         "performance_estimate": {
@@ -161,13 +172,13 @@ ENV_PRESETS = {
         "tips": [
             "VRAM充裕，无需任何限制",
             "推荐使用完整蒸馏模型+upscaler获得最佳画质",
-            "如GPU为Ada Lovelace/Hopper架构，可开启原生FP8进一步加速",
+            "RTX 5090 支持原生 FP8 + SageAttention，推理速度极快",
             "SageAttention可显著降低注意力计算开销",
         ],
     },
     "high": {
         "preset_name": "高性能预设",
-        "target_hardware": "20-24GB VRAM (RTX 3090 24GB / RTX 4090 24GB / RTX A5000 24GB)",
+        "target_hardware": "20-31GB VRAM (RTX 3090 24GB / RTX 4090 24GB / RTX A5000 24GB)",
         "stack": {
             "python": "3.12",
             "pytorch": "2.9.0+cu128",
@@ -594,6 +605,52 @@ def _detect_nvidia_driver() -> dict[str, Any]:
     }
 
 
+def _detect_faster_whisper() -> dict[str, Any]:
+    version = None
+    try:
+        import importlib.metadata
+        version = importlib.metadata.version("faster-whisper")
+    except Exception:
+        try:
+            import faster_whisper
+            version = getattr(faster_whisper, "__version__", None)
+            if version is None:
+                version = "installed"
+        except Exception:
+            pass
+
+    return {
+        "name": "faster-whisper",
+        "version": version,
+        "source": "pip" if version else "not_found",
+        "is_gpu": False,
+        "variant": None,
+    }
+
+
+def _detect_realesrgan() -> dict[str, Any]:
+    version = None
+    try:
+        import importlib.metadata
+        version = importlib.metadata.version("realesrgan")
+    except Exception:
+        try:
+            import realesrgan
+            version = getattr(realesrgan, "__version__", None)
+            if version is None:
+                version = "installed"
+        except Exception:
+            pass
+
+    return {
+        "name": "Real-ESRGAN",
+        "version": version,
+        "source": "pip" if version else "not_found",
+        "is_gpu": False,
+        "variant": None,
+    }
+
+
 def _normalize(v: str) -> list[int]:
     v = v.split("+")[0]
     parts = []
@@ -672,6 +729,8 @@ def perform_env_check() -> dict[str, Any]:
         _detect_python_version(),
         _detect_ffmpeg(),
         _detect_nvidia_driver(),
+        _detect_faster_whisper(),
+        _detect_realesrgan(),
     ]
 
     results = []
@@ -684,6 +743,9 @@ def perform_env_check() -> dict[str, Any]:
             "python": "python",
             "ffmpeg": "ffmpeg",
             "nvidia_driver": "nvidia_driver_min",
+            "faster_whisper": "faster_whisper",
+            "real_esrgan": "realesrgan",
+            "realesrgan": "realesrgan",
         }.get(comp_key, None)
 
         rec_version = recommended.get(rec_key, None) if rec_key else None
@@ -860,10 +922,20 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
         if not component:
             return JSONResponse(status_code=400, content={"error": "Missing 'component' field"})
 
+        _COMPONENT_ALIASES = {
+            "realesrgan": "real_esrgan",
+            "fasterwhisper": "faster_whisper",
+            "nvidiadriver": "nvidia_driver",
+        }
+
+        def _normalize_comp(name):
+            return name.lower().replace(" ", "_").replace("-", "_")
+
         env_info = perform_env_check()
         comp_info = None
         for c in env_info["components"]:
-            if c["name"].lower().replace(" ", "_").replace("-", "_") == component:
+            norm = _normalize_comp(c["name"])
+            if norm == component or _COMPONENT_ALIASES.get(component) == norm:
                 comp_info = c
                 break
 
@@ -934,6 +1006,62 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
                     "recommended_version": rec_version,
                 },
             )
+
+        if component == "faster_whisper":
+            try:
+                pip_args = [
+                    sys.executable, "-m", "pip", "install",
+                    "faster-whisper", "--quiet",
+                ]
+                result = _silent_run(
+                    pip_args,
+                    capture_output=True, text=True, timeout=600,
+                )
+                if result.returncode == 0:
+                    return {
+                        "status": "success",
+                        "component": component,
+                        "message": "faster-whisper installed successfully",
+                        "stdout": result.stdout[-500:] if result.stdout else "",
+                    }
+                else:
+                    return JSONResponse(
+                        status_code=500,
+                        content={
+                            "error": f"pip install failed: {result.stderr[-500:] if result.stderr else 'unknown'}",
+                            "component": component,
+                        },
+                    )
+            except Exception as e:
+                return JSONResponse(status_code=500, content={"error": str(e), "component": component})
+
+        if component == "realesrgan":
+            try:
+                pip_args = [
+                    sys.executable, "-m", "pip", "install",
+                    "realesrgan", "basicsr", "--quiet",
+                ]
+                result = _silent_run(
+                    pip_args,
+                    capture_output=True, text=True, timeout=600,
+                )
+                if result.returncode == 0:
+                    return {
+                        "status": "success",
+                        "component": component,
+                        "message": "Real-ESRGAN + basicsr installed successfully",
+                        "stdout": result.stdout[-500:] if result.stdout else "",
+                    }
+                else:
+                    return JSONResponse(
+                        status_code=500,
+                        content={
+                            "error": f"pip install failed: {result.stderr[-500:] if result.stderr else 'unknown'}",
+                            "component": component,
+                        },
+                    )
+            except Exception as e:
+                return JSONResponse(status_code=500, content={"error": str(e), "component": component})
 
         if component == "python":
             return JSONResponse(

@@ -287,6 +287,8 @@ class GenerateVideoRequest(BaseModel):
     imagePath: str | None = None
     audioPath: str | None = None
     aspectRatio: Literal["16:9", "9:16"] = "16:9"
+    distilled: bool = True
+    numInferenceSteps: int | None = None
 
     @model_validator(mode="after")
     def _validate_a2v_model(self) -> "GenerateVideoRequest":
@@ -352,7 +354,7 @@ class RetakeRequest(BaseModel):
     mode: RetakeMode = "replace_audio_and_video"
 
 
-ConditioningType: TypeAlias = Literal["canny", "depth"]
+ConditioningType: TypeAlias = Literal["canny", "depth", "pose", "video"]
 
 
 class IcLoraExtractRequest(BaseModel):
@@ -381,7 +383,14 @@ class IcLoraGenerateRequest(BaseModel):
     conditioning_type: ConditioningType
     prompt: NonEmptyPrompt
     conditioning_strength: float = 1.0
-    num_inference_steps: int = 30
+    attention_strength: float = 1.0
     cfg_guidance_scale: float = 1.0
     negative_prompt: str = ""
     images: list[IcLoraImageInput] = Field(default_factory=_default_ic_lora_images)
+    fps: int | float | None = None
+    duration: int | float | None = None
+    quality: str | None = None
+    seed: int | None = None
+    loraPaths: list[str] | None = None
+    loraStrengths: list[int | float] | None = None
+    modelPath: str | None = None

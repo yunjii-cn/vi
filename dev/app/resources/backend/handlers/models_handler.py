@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from api_types import ModelFileStatus, ModelInfo, ModelsStatusResponse, TextEncoderStatus
 from handlers.base import StateHandlerBase, with_state_lock
-from runtime_config.model_download_specs import MODEL_FILE_ORDER, resolve_model_path, resolve_required_model_types
+from runtime_config.model_download_specs import MODEL_FILE_ORDER, resolve_required_model_types
 from state.app_state_types import AppState, AvailableFiles, ModelFileType
 
 if TYPE_CHECKING:
@@ -34,7 +34,7 @@ class ModelsHandler(StateHandlerBase):
         files: AvailableFiles = {}
         for model_type in MODEL_FILE_ORDER:
             spec = self.config.spec_for(model_type)
-            path = resolve_model_path(self.models_dir, self.config.model_download_specs, model_type)
+            path = self.resolve_model(model_type)
             if spec.is_folder:
                 ready = path.exists() and any(path.iterdir()) if path.exists() else False
                 files[model_type] = path if ready else None

@@ -29,7 +29,6 @@ from handlers.base import StateHandlerBase
 from handlers.generation_handler import GenerationHandler
 from handlers.pipelines_handler import PipelinesHandler
 from handlers.text_handler import TextHandler
-from runtime_config.model_download_specs import resolve_model_path
 from server_utils.media_validation import (
     normalize_optional_path,
     validate_audio_file,
@@ -154,6 +153,11 @@ class VideoGenerationHandler(StateHandlerBase):
                 width, height = get_9_16_size(resolution)
             case "16:9":
                 width, height = get_16_9_size(resolution)
+            case _:
+                if req.customWidth and req.customHeight:
+                    width, height = req.customWidth, req.customHeight
+                else:
+                    width, height = get_16_9_size(resolution)
 
         num_frames = self._compute_num_frames(duration, fps)
 
@@ -213,7 +217,7 @@ class VideoGenerationHandler(StateHandlerBase):
         if self._generation.is_generation_cancelled():
             raise RuntimeError("Generation was cancelled")
 
-        if not resolve_model_path(self.models_dir, self.config.model_download_specs,"checkpoint").exists():
+        if not self.resolve_model("checkpoint").exists() and not self.resolve_model("checkpoint_fp8").exists():
             raise RuntimeError("Models not downloaded. Please download the AI models first using the Model Status menu.")
 
         total_steps = 8
@@ -260,6 +264,7 @@ class VideoGenerationHandler(StateHandlerBase):
 
             t_inference_start = time.perf_counter()
             self._start_progress_estimator(15, 90, total_steps)
+            self._generation.set_denoising_cancel_active()
             try:
                 pipeline_state.pipeline.generate(
                     prompt=enhanced_prompt,
@@ -273,6 +278,7 @@ class VideoGenerationHandler(StateHandlerBase):
                 )
             finally:
                 self._stop_progress_estimator()
+                self._generation.clear_denoising_cancel_active()
             t_inference_end = time.perf_counter()
             logger.info("[%s] Inference: %.2fs", gen_mode, t_inference_end - t_inference_start)
 
@@ -355,6 +361,7 @@ class VideoGenerationHandler(StateHandlerBase):
             self._generation.update_progress("inference", 15, 0, total_steps)
 
             self._start_progress_estimator(15, 90, total_steps)
+            self._generation.set_denoising_cancel_active()
             try:
                 a2v_state.pipeline.generate(
                     prompt=enhanced_prompt,
@@ -373,6 +380,7 @@ class VideoGenerationHandler(StateHandlerBase):
                 )
             finally:
                 self._stop_progress_estimator()
+                self._generation.clear_denoising_cancel_active()
 
             if self._generation.is_generation_cancelled():
                 if output_path.exists():

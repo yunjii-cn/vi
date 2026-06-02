@@ -31,6 +31,12 @@ def route_generate_cancel(handler: AppHandler = Depends(get_state_service)) -> C
     return handler.generation.cancel_generation()
 
 
+@router.post("/generate/force-cancel", response_model=CancelResponse)
+def route_generate_force_cancel(handler: AppHandler = Depends(get_state_service)) -> CancelResponse:
+    """POST /api/generate/force-cancel — force cancel by unloading GPU pipelines."""
+    return handler.generation.force_cancel_generation()
+
+
 @router.get("/generation/progress", response_model=GenerationProgressResponse)
 def route_generation_progress(handler: AppHandler = Depends(get_state_service)) -> GenerationProgressResponse:
     """GET /api/generation/progress."""

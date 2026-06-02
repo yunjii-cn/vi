@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, StringConstraints
 NonEmptyPrompt = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 ModelFileType = Literal[
     "checkpoint",
+    "checkpoint_fp8",
     "upsampler",
     "distilled_lora",
     "ic_lora",
@@ -18,6 +19,7 @@ ModelFileType = Literal[
     "pose_processor",
     "text_encoder",
     "zit",
+    "tts",
 ]
 
 
@@ -329,6 +331,9 @@ class GenerateVideoRequest(BaseModel):
     loraPaths: list[str] | None = None
     loraStrengths: list[float] | None = None
     seed: int | None = None
+    distilled: bool = True
+    numInferenceSteps: int | None = None
+    motionSpeed: float = 1.0
 
 
 class GenerateImageRequest(BaseModel):
@@ -393,12 +398,18 @@ class IcLoraGenerateRequest(BaseModel):
     conditioning_type: Literal["canny", "depth", "pose", "video"]
     prompt: NonEmptyPrompt
     conditioning_strength: float = 1.0
-    num_inference_steps: int = 30
+    attention_strength: float = 1.0
     cfg_guidance_scale: float = 1.0
     negative_prompt: str = ""
     images: list[IcLoraImageInput] = Field(default_factory=_default_ic_lora_images)
-    ic_lora_path: str | None = None
+    fps: int | float | None = None
+    duration: int | float | None = None
+    quality: str | None = None
     seed: int | None = None
+    loraPaths: list[str] | None = None
+    loraStrengths: list[int | float] | None = None
+    modelPath: str | None = None
+    motionSpeed: float = 1.0
 
 
 ConditioningType: TypeAlias = Literal["canny", "depth", "pose", "video"]

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import struct
 from pathlib import Path
 
@@ -29,9 +30,184 @@ _LORA_KNOWN_INFO: dict[str, dict] = {
         "base_model": "Lightricks/LTX-2",
     },
     "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors": {
-        "description": "视频迁移控制模型（视频迁移功能必需，支持深度/姿态/参考图控制）",
+        "description": "视频迁移控制模型（视频迁移功能必需，支持深度/姿态/参考图控制，ref0.5版本平衡控制力与自由度）",
         "trigger_words": [],
         "base_model": "Lightricks/LTX-2.3",
+    },
+    "90sAnimationStyle.safetensors": {
+        "description": "90年代经典动画风格，模拟复古赛璐璐动画质感，色彩饱和、线条粗犷，适合怀旧动画、复古卡通视频创作",
+        "trigger_words": ["90s animation style", "retro cartoon"],
+        "base_model": "Lightricks/LTX-2.3",
+    },
+    "Cinematic_sci-fi-cyberpunk.safetensors": {
+        "description": "科幻赛博朋克电影风格，霓虹灯光、未来都市、暗色调高对比度，适合科幻短片、赛博朋克场景视频",
+        "trigger_words": ["sci-fi", "cyberpunk", "cinematic"],
+        "base_model": "Lightricks/LTX-2.3",
+    },
+    "Claymation.safetensors": {
+        "description": "黏土动画风格，模拟定格动画中黏土角色的圆润质感和手工痕迹，适合趣味短片、儿童内容、创意广告",
+        "trigger_words": ["claymation", "clay animation"],
+        "base_model": "Lightricks/LTX-2.3",
+    },
+    "CozyFelt.safetensors": {
+        "description": "温暖毛毡风格，模拟手工毛毡布艺的柔软纹理和温馨色调，适合治愈系视频、温馨场景、儿童内容",
+        "trigger_words": ["cozy felt", "felt craft"],
+        "base_model": "Lightricks/LTX-2.3",
+    },
+    "FantasyPuppetStyle.safetensors": {
+        "description": "奇幻木偶风格，模拟提线木偶和布偶的质感与动态，适合奇幻故事、童话改编、创意艺术视频",
+        "trigger_words": ["fantasy puppet", "puppet style"],
+        "base_model": "Lightricks/LTX-2.3",
+    },
+    "Fantasy_Anime.safetensors": {
+        "description": "奇幻动漫风格，融合日式动画的精致画面与奇幻世界观，适合奇幻冒险、魔法战斗、异世界题材视频",
+        "trigger_words": ["fantasy anime", "magical anime"],
+        "base_model": "Lightricks/LTX-2.3",
+    },
+    "Fantasy_Painterly.safetensors": {
+        "description": "奇幻绘画风格，模拟油画/水彩的手绘笔触质感，画面具有浓厚的艺术感和绘画肌理，适合艺术风格视频、插画动画",
+        "trigger_words": ["painterly", "fantasy painting"],
+        "base_model": "Lightricks/LTX-2.3",
+    },
+    "Fantasy_Realism.safetensors": {
+        "description": "奇幻写实风格，在写实基础上融入奇幻元素，光影真实但场景超现实，适合奇幻电影、概念艺术视频",
+        "trigger_words": ["fantasy realism", "magical realism"],
+        "base_model": "Lightricks/LTX-2.3",
+    },
+    "LTX2.3_Crisp_Enhance.safetensors": {
+        "description": "清晰增强LoRA，提升画面锐度和细节清晰度，使视频画面更加精致通透，适合需要高清晰度的产品展示、风景视频",
+        "trigger_words": ["crisp", "sharp", "detailed"],
+        "base_model": "Lightricks/LTX-2.3",
+    },
+    "LTX2.3_Soft_Enhance.safetensors": {
+        "description": "柔和增强LoRA，为画面添加柔光滤镜效果，色彩温润、过渡平滑，适合人像美化、梦幻氛围、柔焦效果视频",
+        "trigger_words": ["soft", "gentle", "dreamy"],
+        "base_model": "Lightricks/LTX-2.3",
+    },
+    "Luxe_Sensual.safetensors": {
+        "description": "奢华感官风格，高端质感的柔光与金属反光效果，画面华丽精致，适合奢侈品广告、高端产品展示、时尚大片",
+        "trigger_words": ["luxe", "sensual", "luxury"],
+        "base_model": "Lightricks/LTX-2.3",
+    },
+    "PaperCutOutStyle.safetensors": {
+        "description": "纸雕剪纸风格，模拟层叠剪纸的立体效果和纸张纹理，适合创意动画、文化宣传、节日主题视频",
+        "trigger_words": ["paper cut", "paper craft", "papercut"],
+        "base_model": "Lightricks/LTX-2.3",
+    },
+    "Pixar_Toon.safetensors": {
+        "description": "皮克斯卡通风格，3D卡通渲染质感，角色圆润可爱、色彩明快，适合动画短片、儿童内容、趣味视频",
+        "trigger_words": ["pixar style", "3d cartoon", "pixar toon"],
+        "base_model": "Lightricks/LTX-2.3",
+    },
+    "Post_Apocalyptic.safetensors": {
+        "description": "末世废土风格，荒芜废墟、破败建筑、灰暗色调，适合末日题材、科幻废土、生存类视频",
+        "trigger_words": ["post-apocalyptic", "wasteland", "ruins"],
+        "base_model": "Lightricks/LTX-2.3",
+    },
+    "Wild_West.safetensors": {
+        "description": "西部荒野风格，美国西部牛仔、荒漠小镇、夕阳旷野，适合西部题材、冒险故事、复古风格视频",
+        "trigger_words": ["wild west", "cowboy", "western"],
+        "base_model": "Lightricks/LTX-2.3",
+    },
+    "Z-Iamge-人像美学.safetensors": {
+        "description": "Z-Image人像美学增强，优化人像肤色、光影和整体美感，适合人像写真、美妆展示、人物特写视频",
+        "trigger_words": [],
+        "base_model": "Z-Image",
+    },
+    "Z-Image-Fun-Lora-Distill-8-Steps-2603-ComfyUI.safetensors": {
+        "description": "Z-Image蒸馏加速LoRA，仅需8步即可生成高质量图像，大幅提升生成速度，适合快速预览、批量生成场景",
+        "trigger_words": [],
+        "base_model": "Z-Image",
+    },
+    "Z-Image｜轻柔东方审美人像摄影写真风格_v1.0.safetensors": {
+        "description": "轻柔东方审美人像摄影风格，呈现东方美学的柔和光影与含蓄韵味，适合中式写真、古风人像、东方美学视频",
+        "trigger_words": [],
+        "base_model": "Z-Image",
+    },
+    "Z-image-眼睛细节增强-DetailedEyes-LoRA_V2.safetensors": {
+        "description": "眼睛细节增强V2，显著提升眼部细节和眼神表现力，瞳孔虹膜纹理更丰富，适合人像特写、眼部细节优化",
+        "trigger_words": ["detailed eyes"],
+        "base_model": "Z-Image",
+    },
+    "Z-image-高清人像.safetensors": {
+        "description": "高清人像增强，提升人像整体清晰度和细节表现，肤质细腻、五官精致，适合高清人像视频、写真输出",
+        "trigger_words": [],
+        "base_model": "Z-Image",
+    },
+    "ZIB-电影光Chiaroscuro and Cinematic Lighting Style.safetensors": {
+        "description": "电影光效明暗对比风格（Chiaroscuro），强烈的明暗对比营造戏剧性氛围，适合电影感视频、戏剧性场景、艺术短片",
+        "trigger_words": ["chiaroscuro", "cinematic lighting"],
+        "base_model": "Z-Image",
+    },
+    "ZIT-伦勃朗光线rembrandt_ZIT_tyler_x_harris.safetensors": {
+        "description": "伦勃朗光线风格，经典三角光人像布光，面部一侧受光、一侧阴影，适合经典人像、艺术摄影、戏剧性肖像",
+        "trigger_words": ["rembrandt lighting"],
+        "base_model": "Z-Image",
+    },
+    "ZIT-影棚摄影photolab_v2.safetensors": {
+        "description": "影棚摄影风格V2，专业影棚布光效果，干净背景、精准控光，适合产品摄影、人像棚拍、商业展示视频",
+        "trigger_words": ["photolab", "studio photography"],
+        "base_model": "Z-Image",
+    },
+    "ZIT-电影光Cinematic Chiaroscuro Lighting.safetensors": {
+        "description": "电影级明暗对比光效，好莱坞式电影布光质感，适合电影感视频、叙事短片、氛围感场景",
+        "trigger_words": ["cinematic chiaroscuro"],
+        "base_model": "Z-Image",
+    },
+    "ZIT-电影黑暗MschCine26_V1.safetensors": {
+        "description": "电影暗调风格，低调照明、暗色系画面、悬疑氛围，适合悬疑片、恐怖片、暗黑风格视频",
+        "trigger_words": ["dark cinematic"],
+        "base_model": "Z-Image",
+    },
+    "ZiB-female解剖学_anatomy.safetensors": {
+        "description": "女性人体解剖学增强，优化女性人体结构和比例的准确性，适合人物创作、艺术参考、人体结构优化",
+        "trigger_words": ["anatomy"],
+        "base_model": "Z-Image",
+    },
+    "hina_zImageTurbo_asianMix_v4.59C-bf16.safetensors": {
+        "description": "亚洲面孔混合模型V4.59C，优化亚洲人面孔特征表现，适合亚洲人像、东亚面孔、多元人像视频",
+        "trigger_words": [],
+        "base_model": "Z-Image",
+    },
+    "redcraftRedzimageUpdatedDEC03_redzimage15AIO-lora.safetensors": {
+        "description": "RedCraft Z-Image更新版AIO LoRA，综合增强画质与细节的多功能LoRA，适合通用画质提升、多场景增强",
+        "trigger_words": [],
+        "base_model": "Z-Image",
+    },
+    "woman877-zimage.safetensors": {
+        "description": "女性人像增强，优化女性面部和整体人像表现，适合女性写真、时尚人像、美妆展示",
+        "trigger_words": [],
+        "base_model": "Z-Image",
+    },
+    "z-Image-3D卡通_V1.safetensors": {
+        "description": "3D卡通风格V1，将图像转化为3D卡通渲染效果，角色立体可爱，适合卡通动画、趣味视频、儿童内容",
+        "trigger_words": ["3d cartoon"],
+        "base_model": "Z-Image",
+    },
+    "z-image 极致氛围光影LORA_V1.0.safetensors": {
+        "description": "极致氛围光影LoRA V1.0，强化场景氛围感和光影表现力，光效层次丰富，适合氛围感视频、光影艺术、情绪短片",
+        "trigger_words": [],
+        "base_model": "Z-Image",
+    },
+    "z-image-女帝-ben_nd.safetensors": {
+        "description": "女帝风格，呈现高贵冷艳的女性形象，气场强大、气质出众，适合女王范人像、时尚大片、角色塑造",
+        "trigger_words": [],
+        "base_model": "Z-Image",
+    },
+    "z-image-极致写实.safetensors": {
+        "description": "极致写实增强，追求照片级真实感，细节丰富、质感逼真，适合超写实人像、产品展示、高保真视频",
+        "trigger_words": [],
+        "base_model": "Z-Image",
+    },
+    "z-image-细节增强v2.safetensors": {
+        "description": "细节增强V2，提升画面整体细节表现力，纹理更清晰、层次更丰富，适合细节优化、画质提升、微距效果",
+        "trigger_words": [],
+        "base_model": "Z-Image",
+    },
+    "z-image_小情绪_v1.1.safetensors": {
+        "description": "小情绪风格V1.1，捕捉细腻微妙的情绪表达，适合情绪短片、文艺人像、情感故事视频",
+        "trigger_words": [],
+        "base_model": "Z-Image",
     },
 }
 
@@ -114,6 +290,40 @@ def _load_custom_models_dirs(ctx: ExtensionContext) -> list[Path]:
     return dirs
 
 
+_HF_SHARD_RE = re.compile(r"^(model|diffusion_pytorch_model|pytorch_model)-\d+-of-\d+$", re.IGNORECASE)
+
+_NON_LORA_PATTERNS = re.compile(
+    r"(?:^|[-_])"
+    r"(?:upscaler|vae|text_encoder|tokenizer|scheduler|unet|transformer|controlnet)"
+    r"(?:[-_]|$)",
+    re.IGNORECASE,
+)
+
+
+def _is_likely_lora(fn: str, dirpath: str) -> bool:
+    stem = Path(fn).stem
+    if _HF_SHARD_RE.match(stem):
+        return False
+    if stem.startswith(".") or stem.startswith("__"):
+        return False
+    name_lower = fn.lower()
+    dir_lower = dirpath.lower()
+    if "lora" in name_lower or "lora" in dir_lower:
+        return True
+    if _NON_LORA_PATTERNS.search(stem):
+        return False
+    size_indicators = ("22b", "19b", "8b", "7b", "3b", "1b", "2.3", "2-3", "distilled", "checkpoint")
+    if any(ind in name_lower for ind in size_indicators):
+        return False
+    return True
+
+
+def _beautify_lora_name(fn: str) -> str:
+    n = Path(fn).stem
+    n = n.replace("-", " ").replace("_", " ").strip()
+    return n or fn
+
+
 def _scan_loras_in_dir(root: Path, suffixes: set[str], read_meta: bool = False) -> list[dict]:
     found: list[dict] = []
     try:
@@ -121,13 +331,16 @@ def _scan_loras_in_dir(root: Path, suffixes: set[str], read_meta: bool = False) 
             for fn in filenames:
                 suf = Path(fn).suffix.lower()
                 if suf in suffixes:
+                    if not _is_likely_lora(fn, dirpath):
+                        continue
                     full = Path(dirpath) / fn
                     if full.is_file():
                         try:
                             resolved = str(full.resolve())
                         except OSError:
                             resolved = str(full)
-                        entry: dict = {"name": fn, "path": resolved}
+                        display_name = _beautify_lora_name(fn)
+                        entry: dict = {"name": display_name, "filename": fn, "path": resolved}
                         if read_meta and suf == ".safetensors":
                             meta = _read_safetensors_metadata(full)
                             if meta:

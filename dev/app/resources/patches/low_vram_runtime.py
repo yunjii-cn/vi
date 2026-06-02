@@ -43,7 +43,7 @@ def write_low_vram_pref(enabled: bool) -> None:
 
 
 def apply_low_vram_config_tweaks(handler: Any) -> None:
-    """在官方 RuntimeConfig 上尽量关闭 fast 超分等（若字段存在）。"""
+    """在官方 RuntimeConfig 上尽量关闭 fast 放大等（若字段存在）。"""
     cfg = getattr(handler, "config", None)
     if cfg is None:
         return
@@ -97,7 +97,7 @@ def install_low_vram_on_pipelines(handler: Any) -> None:
             )
         else:
             logger.info(
-                "low_vram_mode: 已开启（尝试关闭 fast 超分；若显存仍高，多为权重常驻 GPU，需降分辨率/时长或 FP8 权重）"
+                "low_vram_mode: 已开启（尝试关闭 fast 放大；若显存仍高，多为权重常驻 GPU，需降分辨率/时长或 FP8 权重）"
             )
     else:
         restore_full_vram_config_tweaks(handler)
@@ -133,6 +133,18 @@ def install_low_vram_pipeline_hooks(pl: Any) -> None:
 
         pl.load_a2v_pipeline = types.MethodType(_load_a2v_wrapped, pl)
 
+    if hasattr(pl, "load_ic_lora"):
+        _orig_ic_lora = pl.load_ic_lora
+        pl._ltx_orig_load_ic_lora_for_low_vram = _orig_ic_lora
+
+        def _load_ic_lora_wrapped(self: Any, *a: Any, **kw: Any) -> Any:
+            r = _orig_ic_lora(*a, **kw)
+            if getattr(self, "low_vram_mode", False):
+                try_sequential_offload_on_pipeline_state(r)
+            return r
+
+        pl.load_ic_lora = types.MethodType(_load_ic_lora_wrapped, pl)
+
     # Monkey patch: 接管 1.0.3 新增的底层 layer streaming 来实现完美的线性显存控制
     if not getattr(pl, "_ltx_layer_streaming_patched", False):
         pl._ltx_layer_streaming_patched = True
@@ -145,11 +157,9 @@ def install_low_vram_pipeline_hooks(pl: Any) -> None:
                     _orig_call = pipeline_cls.__call__
                     
                     def _patched_call(self, *args, **kwargs):
-                        # 同时支持用户手动设置 vram_limit 和自动检测
                         lim = get_vram_limit()
                         auto = auto_detect_low_vram()
                         if lim is not None or auto:
-                            # 自动检测时使用默认 VRAM 作为 limit 来计算 prefetch count
                             effective_lim = lim
                             if effective_lim is None and auto:
                                 try:
@@ -158,7 +168,8 @@ def install_low_vram_pipeline_hooks(pl: Any) -> None:
                                         effective_lim = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
                                 except Exception:
                                     effective_lim = 24.0
-                            count = get_streaming_prefetch_count(effective_lim)
+                            is_bf16 = _is_bf16_model_pipeline(self)
+                            count = get_streaming_prefetch_count(effective_lim, is_bf16_model=is_bf16)
                             kwargs["streaming_prefetch_count"] = count
                             if count is None:
                                 logger.info(
@@ -166,9 +177,10 @@ def install_low_vram_pipeline_hooks(pl: Any) -> None:
                                 )
                             else:
                                 logger.info(
-                                    "low_vram_mode: Dynamically tuned layer streaming prefetch count to %s for %sGB limit.",
+                                    "low_vram_mode: Dynamically tuned layer streaming prefetch count to %s for %sGB limit (model=%s).",
                                     count,
                                     effective_lim,
+                                    "BF16" if is_bf16 else "FP8",
                                 )
                                 
                         return _orig_call(self, *args, **kwargs)
@@ -204,13 +216,25 @@ def get_vram_limit() -> float | None:
     return None
 
 
-def get_streaming_prefetch_count(vram_limit: float | None = None) -> int | None:
+def _is_bf16_model_pipeline(pipeline: Any) -> bool:
+    for attr in ("stage", "stage_1", "stage_2"):
+        stage = getattr(pipeline, attr, None)
+        if stage is not None:
+            quant = getattr(stage, "_quantization", None)
+            if quant is not None:
+                return False
+    return True
+
+
+def get_streaming_prefetch_count(vram_limit: float | None = None, is_bf16_model: bool = False) -> int | None:
     """把设置里的显存上限映射为 layer streaming 强度。
 
     ``0`` 或留空表示纯 GPU / 速度优先，不启用层流式加载。
     
     Args:
         vram_limit: 显存上限 (GB)。若为 None 则从 settings.json 读取。
+        is_bf16_model: 是否为 BF16 模型（无量化）。BF16 模型每层约 1.2GB，
+            FP8 模型每层约 0.67GB，需要更保守的 prefetch count 以避免 OOM。
     """
     if vram_limit is None:
         lim = get_vram_limit()
@@ -220,10 +244,24 @@ def get_streaming_prefetch_count(vram_limit: float | None = None) -> int | None:
         return None
     if lim <= 10.0:
         return 1
-    if lim >= 27.0:
+    if lim >= 27.0 and not is_bf16_model:
         return None
-    extra_gb = float(lim) - 10.0
-    return max(1, min(32, 1 + round(extra_gb / 0.67)))
+    if lim >= 48.0 and is_bf16_model:
+        return None
+
+    if is_bf16_model:
+        per_layer_gb = 1.2
+        reserved_gb = 18.0
+    else:
+        per_layer_gb = 0.67
+        reserved_gb = 10.0
+
+    available_gb = float(lim) - reserved_gb
+    if available_gb <= 0:
+        return 1
+
+    max_layers_on_gpu = int(available_gb / per_layer_gb)
+    return max(1, min(32, max_layers_on_gpu - 1))
 
 
 def should_use_cpu_offload() -> bool:

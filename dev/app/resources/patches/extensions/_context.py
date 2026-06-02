@@ -31,6 +31,11 @@ class ExtensionContext:
         "upstream_version",
         "upstream_repo",
         "_queue_state",
+        "_tts_progress_lock",
+        "_tts_progress_state",
+        "_execute_tts_from_queue",
+        "_upscale_progress_state",
+        "_execute_upscale_from_queue",
     )
 
     def __init__(
@@ -47,6 +52,11 @@ class ExtensionContext:
         self.upstream_version = UPSTREAM_VERSION
         self.upstream_repo = UPSTREAM_REPO
         self._queue_state: dict | None = None
+        self._tts_progress_lock = None
+        self._tts_progress_state = None
+        self._execute_tts_from_queue = None
+        self._upscale_progress_state = None
+        self._execute_upscale_from_queue = None
 
     def get_output_path(self) -> Path:
         return self._get_output_path()
@@ -66,6 +76,7 @@ class ExtensionContext:
                 "wake": __import__("threading").Event(),
                 "shutdown": __import__("threading").Event(),
                 "worker_started": False,
+                "paused": False,
             }
         return self._queue_state
 

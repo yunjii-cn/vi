@@ -37,7 +37,7 @@
         ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
 
         .sidebar-header {
-            padding: 24px 24px 4px;
+            padding: 14px 24px 4px;
             position: sticky;
             top: 0;
             z-index: 25;
@@ -119,6 +119,33 @@
         html[lang="en"] .tabs { gap: 3px; padding: 3px; }
         html[lang="en"] .tab { font-size: 11px; padding: 8px 0; font-weight: 700; }
         html[lang="en"] .tab svg { width: 13px; height: 13px; margin-right: 4px !important; flex-shrink: 0; }
+
+        .video-sub-tab {
+            flex: 1; padding: 6px 0; text-align: center; border-radius: 6px;
+            cursor: pointer; font-size: 11px; color: var(--text-dim);
+            transition: all 0.2s; font-weight: 600; border: none; background: transparent;
+        }
+        .video-sub-tab.active { background: var(--accent); color: #fff; box-shadow: 0 1px 4px rgba(220,38,38,0.35); }
+        .video-sub-tab:hover:not(.active) { background: rgba(255,255,255,0.06); color: var(--text); }
+        html[lang="en"] .video-sub-tab { font-size: 10px; }
+
+        .tts-sub-tab {
+            flex: 1; padding: 6px 0; text-align: center; border-radius: 6px;
+            cursor: pointer; font-size: 11px; color: var(--text-dim);
+            transition: all 0.2s; font-weight: 600; border: none; background: transparent;
+        }
+        .tts-sub-tab.active { background: var(--accent); color: #fff; box-shadow: 0 1px 4px rgba(220,38,38,0.35); }
+        .tts-sub-tab:hover:not(.active) { background: rgba(255,255,255,0.06); color: var(--text); }
+        html[lang="en"] .tts-sub-tab { font-size: 10px; }
+
+        .upscale-sub-tab {
+            flex: 1; padding: 6px 0; text-align: center; border-radius: 6px;
+            cursor: pointer; font-size: 11px; color: var(--text-dim);
+            transition: all 0.2s; font-weight: 600; border: none; background: transparent;
+        }
+        .upscale-sub-tab.active { background: var(--accent); color: #fff; box-shadow: 0 1px 4px rgba(220,38,38,0.35); }
+        .upscale-sub-tab:hover:not(.active) { background: rgba(255,255,255,0.06); color: var(--text); }
+        html[lang="en"] .upscale-sub-tab { font-size: 10px; }
 
         .label-group { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
         label { display: block; font-size: 11px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
@@ -365,7 +392,7 @@
         .upload-icon { font-size: 18px; margin-bottom: 6px; opacity: 0.45; }
         .upload-text { font-size: 11px; color: var(--text); }
         .upload-hint { font-size: 10px; color: var(--text-dim); margin-top: 3px; }
-        .preview-thumb { width: 100%; height: auto; max-height: 100px; object-fit: contain; border-radius: 8px; display: none; margin-top: 10px; }
+        .preview-thumb { width: 100%; height: auto; max-height: 200px; object-fit: contain; border-radius: 8px; display: none; margin-top: 10px; }
         .clear-img-overlay {
             position: absolute; top: 8px; right: 8px; background: rgba(255,59,48,0.85); color: white;
             width: 20px; height: 20px; border-radius: 10px; display: none; align-items: center; justify-content: center;
@@ -407,10 +434,19 @@
         .btn-primary:active { opacity: 0.82; }
         .btn-primary:disabled { background: rgba(255,255,255,0.08); color: var(--text-dim); cursor: not-allowed; }
 
+        .btn-secondary {
+            flex: 1; padding: 12px;
+            background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 9px; color: var(--text-main); font-weight: 700; font-size: 13.5px;
+            cursor: pointer; margin-top: 8px;
+            transition: background 0.15s;
+        }
+        .btn-secondary:hover { background: rgba(255,255,255,0.14); }
+
         .btn-danger {
-            width: 100%; padding: 12px; background: #DC2626; border: none;
+            flex: 1; padding: 12px; background: #DC2626; border: none;
             border-radius: 9px; color: #fff; font-weight: 700; font-size: 13.5px;
-            cursor: pointer; margin-top: 8px; display: none; transition: background 0.15s;
+            cursor: pointer; margin-top: 8px; transition: background 0.15s;
         }
         .btn-danger:hover { background: #EF4444; }
 

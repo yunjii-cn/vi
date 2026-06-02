@@ -1,0 +1,21 @@
+{
+  "latest": "2026.05.27.0245",
+  "release_date": "2026-05-27",
+  "download_url": "https://github.com/yunjii-cn/vi/releases/latest",
+  "gitee_download_url": "https://gitee.com/yunjii/vi/releases",
+  "changes": [
+    "修复视频迁移视频上传预览图页面刷新后丢失",
+    "state恢复时设置video的poster和src"
+  ],
+  "versions": [
+    {
+      "version": "2026.05.27.0245",
+      "date": "2026-05-27",
+      "changes": [
+        "修复视频迁移视频上传预览图页面刷新后丢失",
+        "state恢复时设置video的poster和src"
+      ],
+      "filename": "云集智能视频创意站-v2026.05.27.0245.exe"
+    }
+  ]
+}

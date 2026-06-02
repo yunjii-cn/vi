@@ -150,6 +150,24 @@ def resolve_model_path(
     return models_dir / _normalized_relative_path(specs, model_type)
 
 
+def resolve_model_path_multi(
+    models_dirs: list[Path],
+    specs: Mapping[ModelFileType, ModelFileDownloadSpec],
+    model_type: ModelFileType,
+) -> Path:
+    relative = _normalized_relative_path(specs, model_type)
+    spec = specs[model_type]
+    for d in models_dirs:
+        candidate = d / relative
+        if spec.is_folder:
+            if candidate.is_dir() and any(candidate.iterdir()):
+                return candidate
+        else:
+            if candidate.is_file():
+                return candidate
+    return models_dirs[0] / relative
+
+
 def resolve_downloading_dir(models_dir: Path) -> Path:
     return models_dir / ".downloading"
 

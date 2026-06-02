@@ -202,6 +202,7 @@ _instance_debug.log
 
 # Temporary reference files
 stable_*.py
+项目参考/
 
 # ── .trae/ 规则 ──
 .trae/

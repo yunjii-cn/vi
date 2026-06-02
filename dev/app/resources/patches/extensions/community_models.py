@@ -53,6 +53,10 @@ class ModelRegistryEntry:
     pipeline_mode: str = "fast"
     tags: list[str] = field(default_factory=list)
     model_category: str = "checkpoint"
+    usage_scenario: str = ""
+    trigger_word: str = ""
+    requires: list[str] = field(default_factory=list)
+    preview_url: str = ""
 
 
 HF_MIRROR_ENDPOINT = "https://hf-mirror.com"
@@ -73,6 +77,9 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         pipeline_mode="fast",
         tags=["official", "distilled", "bf16"],
         model_category="checkpoint",
+        usage_scenario="文生视频、图生视频、智能多帧拼接",
+        trigger_word="",
+        requires=[],
     ),
     "ltx-2.3-22b-distilled-1.1": ModelRegistryEntry(
         model_id="ltx-2.3-22b-distilled-1.1",
@@ -89,6 +96,9 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         pipeline_mode="fast",
         tags=["official", "distilled", "bf16"],
         model_category="checkpoint",
+        usage_scenario="文生视频、图生视频、智能多帧拼接（改进版）",
+        trigger_word="",
+        requires=[],
     ),
     "ltx-2.3-22b-distilled-fp8": ModelRegistryEntry(
         model_id="ltx-2.3-22b-distilled-fp8",
@@ -105,6 +115,9 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         pipeline_mode="fast",
         tags=["official", "distilled", "fp8", "recommended"],
         model_category="checkpoint",
+        usage_scenario="文生视频、图生视频、智能多帧拼接（FP8量化，低显存推荐）",
+        trigger_word="",
+        requires=[],
     ),
     "ltx-2.3-22b-dev-fp8": ModelRegistryEntry(
         model_id="ltx-2.3-22b-dev-fp8",
@@ -121,6 +134,9 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         pipeline_mode="dev",
         tags=["official", "dev", "fp8"],
         model_category="checkpoint",
+        usage_scenario="Pro高质量视频生成（20GB+显存）",
+        trigger_word="",
+        requires=["ltx-2-19b-distilled-lora-384"],
     ),
     "ltx-2.3-spatial-upscaler": ModelRegistryEntry(
         model_id="ltx-2.3-spatial-upscaler",
@@ -137,6 +153,9 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         pipeline_mode="upscaler",
         tags=["official", "upscaler"],
         model_category="upscaler",
+        usage_scenario="视频2x画质增强（配合核心模型使用）",
+        trigger_word="",
+        requires=["ltx-2.3-22b-distilled-fp8"],
     ),
     "ltx-2-19b-distilled-lora-384": ModelRegistryEntry(
         model_id="ltx-2-19b-distilled-lora-384",
@@ -153,6 +172,9 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         pipeline_mode="fast",
         tags=["official", "lora", "distilled", "pro"],
         model_category="lora",
+        usage_scenario="Pro模式必需LoRA（配合Dev模型使用）",
+        trigger_word="",
+        requires=["ltx-2.3-22b-dev-fp8"],
     ),
     "ltx-2.3-22b-ic-lora-union-control": ModelRegistryEntry(
         model_id="ltx-2.3-22b-ic-lora-union-control",
@@ -169,6 +191,9 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         pipeline_mode="ic_lora",
         tags=["official", "lora", "ic-lora", "video-transfer"],
         model_category="lora",
+        usage_scenario="视频迁移：深度控制、姿态控制、参考图控制",
+        trigger_word="",
+        requires=["ltx-2.3-22b-distilled-fp8", "dpt-hybrid-midas"],
     ),
     "dpt-hybrid-midas": ModelRegistryEntry(
         model_id="dpt-hybrid-midas",
@@ -186,6 +211,9 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         tags=["official", "supporting", "depth"],
         model_category="supporting",
         is_folder=True,
+        usage_scenario="视频迁移-深度控制：从参考图提取深度图",
+        trigger_word="",
+        requires=["ltx-2.3-22b-ic-lora-union-control"],
     ),
     "yolox-l-person-detector": ModelRegistryEntry(
         model_id="yolox-l-person-detector",
@@ -202,6 +230,9 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         pipeline_mode="supporting",
         tags=["official", "supporting", "detection"],
         model_category="supporting",
+        usage_scenario="视频迁移-姿态控制：检测画面中人物位置",
+        trigger_word="",
+        requires=["dw-ll-pose-processor", "ltx-2.3-22b-ic-lora-union-control"],
     ),
     "dw-ll-pose-processor": ModelRegistryEntry(
         model_id="dw-ll-pose-processor",
@@ -218,6 +249,9 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         pipeline_mode="supporting",
         tags=["official", "supporting", "pose"],
         model_category="supporting",
+        usage_scenario="视频迁移-姿态/动作控制：提取人体骨架关键点",
+        trigger_word="",
+        requires=["yolox-l-person-detector", "ltx-2.3-22b-ic-lora-union-control"],
     ),
     "gemma-3-12b-text-encoder": ModelRegistryEntry(
         model_id="gemma-3-12b-text-encoder",
@@ -235,6 +269,9 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         tags=["official", "supporting", "text-encoder"],
         model_category="supporting",
         is_folder=True,
+        usage_scenario="所有生成功能的提示词理解（无API Key时必需）",
+        trigger_word="",
+        requires=[],
     ),
     "z-image-turbo": ModelRegistryEntry(
         model_id="z-image-turbo",
@@ -252,6 +289,9 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         tags=["official", "supporting", "image-gen"],
         model_category="supporting",
         is_folder=True,
+        usage_scenario="AI图像生成：文生图、图生图",
+        trigger_word="",
+        requires=[],
     ),
     "voxcpm2-tts": ModelRegistryEntry(
         model_id="voxcpm2-tts",
@@ -269,6 +309,28 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         tags=["official", "supporting", "tts"],
         model_category="supporting",
         is_folder=True,
+        usage_scenario="TTS语音合成、声音克隆",
+        trigger_word="",
+        requires=[],
+    ),
+    "ltx2.3-22b-ic-lora-cameraman": ModelRegistryEntry(
+        model_id="ltx2.3-22b-ic-lora-cameraman",
+        name="IC-LoRA Cameraman v1",
+        description="摄影师运镜LoRA（视频迁移-摄像机运镜控制，模拟专业摄影机运动）",
+        source="community",
+        repo_id="Lightricks/LTX-2.3-22B_IC-LoRA-Cameraman",
+        filename="LTX2.3-22B_IC-LoRA-Cameraman_v1_10500.safetensors",
+        size_gb=0.3,
+        quantization="bf16",
+        variant="ic-lora-cameraman",
+        min_vram_gb=4,
+        recommended_tiers=["ultra", "high", "medium"],
+        pipeline_mode="ic_lora",
+        tags=["community", "lora", "ic-lora", "camera-motion"],
+        model_category="lora",
+        usage_scenario="视频迁移-摄像机运镜：推拉摇移、跟随拍摄等专业运镜效果",
+        trigger_word="",
+        requires=["ltx-2.3-22b-ic-lora-union-control"],
     ),
 }
 
@@ -311,6 +373,10 @@ def _entry_to_dict(entry: ModelRegistryEntry) -> dict[str, Any]:
         "pipeline_mode": entry.pipeline_mode,
         "tags": entry.tags,
         "model_category": entry.model_category,
+        "usage_scenario": entry.usage_scenario,
+        "trigger_word": entry.trigger_word,
+        "requires": entry.requires,
+        "preview_url": entry.preview_url,
     }
 
 
@@ -331,6 +397,10 @@ def _dict_to_entry(d: dict[str, Any]) -> ModelRegistryEntry:
         pipeline_mode=d.get("pipeline_mode", "fast"),
         tags=d.get("tags", []),
         model_category=d.get("model_category", "checkpoint"),
+        usage_scenario=d.get("usage_scenario", ""),
+        trigger_word=d.get("trigger_word", ""),
+        requires=d.get("requires", []),
+        preview_url=d.get("preview_url", ""),
     )
 
 
@@ -502,6 +572,16 @@ def _save_custom_dirs() -> None:
         logger.warning("Failed to persist custom models dirs: %s", e)
 
 
+def _sync_custom_dirs_to_settings() -> None:
+    if _ctx is None:
+        return
+    try:
+        settings = _ctx.handler.state.app_settings
+        settings.custom_models_dirs = [str(p) for p in _custom_models_dirs]
+    except Exception as e:
+        logger.warning("Failed to sync custom dirs to settings: %s", e)
+
+
 def _get_models_dirs() -> list[Path]:
     dirs: list[Path] = []
     for cd in _load_custom_dirs():
@@ -550,6 +630,9 @@ def _get_default_models_dir() -> Path | None:
 
 
 def _get_models_dir() -> Path | None:
+    default = _get_default_models_dir()
+    if default is not None:
+        return default
     dirs = _get_models_dirs()
     return dirs[0] if dirs else None
 
@@ -591,6 +674,10 @@ def _get_registry_status() -> list[dict[str, Any]]:
             "local_path": local_path,
             "repo_id": entry.repo_id,
             "filename": entry.filename,
+            "usage_scenario": entry.usage_scenario,
+            "trigger_word": entry.trigger_word,
+            "requires": entry.requires,
+            "preview_url": entry.preview_url,
         })
     return results
 
@@ -640,7 +727,37 @@ def _download_model_worker(entry: ModelRegistryEntry, models_dir: Path, use_mirr
 
 _MODEL_SCAN_SUFFIXES = {".safetensors", ".ckpt", ".pt", ".bin", ".pth"}
 _LORA_SCAN_SUFFIXES = {".safetensors", ".ckpt", ".pt", ".bin"}
-_HF_SHARD_RE = __import__("re").compile(r"^(model|diffusion_pytorch_model)-\d{5}-of-\d{5}$")
+_HF_SHARD_RE = __import__("re").compile(r"^(model|diffusion_pytorch_model|pytorch_model)-\d+-of-\d+$")
+_NON_LORA_PATTERNS = __import__("re").compile(
+    r"(?:^|[-_])"
+    r"(?:upscaler|vae|text_encoder|tokenizer|scheduler|unet|transformer|controlnet)"
+    r"(?:[-_]|$)",
+    __import__("re").IGNORECASE,
+)
+
+
+def _is_likely_lora(fn: str, dirpath: str) -> bool:
+    stem = Path(fn).stem
+    if _HF_SHARD_RE.match(stem):
+        return False
+    if stem.startswith(".") or stem.startswith("__"):
+        return False
+    name_lower = fn.lower()
+    dir_lower = dirpath.lower()
+    if "lora" in name_lower or "lora" in dir_lower:
+        return True
+    if _NON_LORA_PATTERNS.search(stem):
+        return False
+    size_indicators = ("22b", "19b", "8b", "7b", "3b", "1b", "2.3", "2-3", "distilled", "checkpoint")
+    if any(ind in name_lower for ind in size_indicators):
+        return False
+    return True
+
+
+def _beautify_model_name(fn: str) -> str:
+    n = Path(fn).stem
+    n = n.replace("-", " ").replace("_", " ").strip()
+    return n or fn
 
 
 def _scan_dir_for_models(root: Path) -> list[dict[str, Any]]:
@@ -660,19 +777,72 @@ def _scan_dir_for_models(root: Path) -> list[dict[str, Any]]:
                         except OSError:
                             size = 0
                         rel = str(full.relative_to(root))
-                        is_lora = "lora" in fn.lower() or "lora" in dirpath.lower()
+                        is_lora = _is_likely_lora(fn, dirpath)
                         model_type = "lora" if is_lora else "checkpoint"
-                        found.append({
-                            "name": fn,
+                        entry: dict[str, Any] = {
+                            "name": _beautify_model_name(fn) if is_lora else fn,
+                            "filename": fn,
                             "path": str(full.resolve()),
                             "relative_path": rel,
                             "size_bytes": size,
                             "model_type": model_type,
-                        })
+                        }
+                        if is_lora and suf == ".safetensors":
+                            meta = _read_safetensors_metadata_lite(full)
+                            if meta:
+                                entry.update(meta)
+                        found.append(entry)
     except OSError:
         pass
     found.sort(key=lambda x: x["name"].lower())
     return found
+
+
+def _read_safetensors_metadata_lite(file_path: Path) -> dict:
+    import json as _json
+    import struct as _struct
+    if not file_path.is_file() or file_path.suffix.lower() != ".safetensors":
+        return {}
+    try:
+        with open(file_path, "rb") as f:
+            header_size_bytes = f.read(8)
+            if len(header_size_bytes) < 8:
+                return {}
+            header_size = _struct.unpack("<Q", header_size_bytes)[0]
+            if header_size <= 0 or header_size > 100 * 1024 * 1024:
+                return {}
+            header_json_bytes = f.read(header_size)
+            if len(header_json_bytes) < header_size:
+                return {}
+            header = _json.loads(header_json_bytes)
+        metadata = header.get("__metadata__", {})
+        if not isinstance(metadata, dict):
+            return {}
+        result: dict = {}
+        desc = (
+            metadata.get("description")
+            or metadata.get("ss_training_comment")
+            or metadata.get("modelspec.description")
+            or ""
+        )
+        if isinstance(desc, str) and desc.strip():
+            result["description"] = desc.strip()
+        triggers = metadata.get("trigger_words") or metadata.get("tags") or ""
+        if isinstance(triggers, str) and triggers.strip():
+            result["trigger_words"] = [t.strip() for t in triggers.split(",") if t.strip()]
+        elif isinstance(triggers, list) and triggers:
+            result["trigger_words"] = [str(t).strip() for t in triggers if str(t).strip()]
+        base = (
+            metadata.get("base_model")
+            or metadata.get("ss_base_model_version")
+            or metadata.get("modelspec.architecture")
+            or ""
+        )
+        if isinstance(base, str) and base.strip():
+            result["base_model"] = base.strip()
+        return result
+    except Exception:
+        return {}
 
 
 def _get_local_models_by_dir() -> list[dict[str, Any]]:
@@ -699,6 +869,9 @@ def _get_local_models_by_dir() -> list[dict[str, Any]]:
 def install(app: FastAPI, ctx: ExtensionContext) -> None:
     global _ctx, _merged_registry
     _ctx = ctx
+
+    _load_custom_dirs()
+    _sync_custom_dirs_to_settings()
 
     cached = _load_cached_registry()
     if cached:
@@ -828,6 +1001,7 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
 
         _custom_models_dirs.append(p)
         _save_custom_dirs()
+        _sync_custom_dirs_to_settings()
         return {"status": "added", "custom_models_dirs": [str(d) for d in _custom_models_dirs]}
 
     @app.delete("/api/models/registry/custom-dir")
@@ -849,6 +1023,7 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
             return JSONResponse(status_code=404, content={"error": "Directory not found in custom list"})
 
         _save_custom_dirs()
+        _sync_custom_dirs_to_settings()
         return {"status": "removed", "custom_models_dirs": [str(d) for d in _custom_models_dirs]}
 
     @app.post("/api/models/local/delete")

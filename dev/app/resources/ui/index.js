@@ -67,21 +67,29 @@
     let player = null;
     let audioPlayer = null;
     const MODEL_CHECKPOINT_STORAGE_KEY = 'ltx_selected_model_path';
+    const VIDEO_SUB_MODES = ['i2v', 'batch', 'motion'];
+    let _videoSubMode = 'i2v';
+    const TTS_SUB_MODES = ['text_only', 'clone', 'ultimate_clone', 'asr'];
+    let _ttsSubMode = 'text_only';
+    const UPSCALE_SUB_MODES = ['upscale_video', 'upscale_image'];
+    let _upscaleSubMode = 'upscale_video';
+    let _upscaleAutoTileSize = 0;
 
     const SETTINGS_KEY = 'yunji_ui_settings';
     const PERSIST_SELECTS = [
         'gpu-selector', 'model-checkpoint-select', 'vid-quality', 'vid-ratio',
-        'vid-fps', 'vid-motion', 'motion-conditioning-type', 'img-res-preset',
-        'batch-quality', 'batch-ratio', 'tts-mode'
+        'vid-motion', 'vid-model-select', 'motion-conditioning-type', 'motion-quality', 'img-res-preset',
+        'batch-quality', 'batch-ratio', 'upscale-engine', 'upscale-scale', 'upscale-model', 'upscale-ratio', 'upscale-quality'
     ];
     const PERSIST_INPUTS = [
         'vram-limit-input', 'lora-dir-input', 'seed-value',
-        'vid-custom-w', 'vid-custom-h', 'vid-duration',
+        'vid-custom-w', 'vid-custom-h', 'vid-duration', 'vid-steps', 'vid-fps',
         'img-w', 'img-h', 'img-steps',
         'batch-custom-w', 'batch-custom-h',
         'tts-cfg', 'tts-steps', 'global-out-dir',
         'start-frame-path', 'end-frame-path', 'uploaded-audio-path',
-        'motion-video-path', 'motion-image-path', 'batch-background-audio-path'
+        'motion-video-path', 'motion-image-path', 'motion-duration', 'motion-fps', 'motion-seed', 'batch-background-audio-path',
+        'upscale-video-path', 'upscale-image-path'
     ];
     const PERSIST_TEXTAREAS = ['prompt', 'tts-text'];
     const PERSIST_CHECKBOXES = ['vid-audio'];
@@ -89,7 +97,7 @@
         { name: 'seed-mode', values: ['random', 'fixed'] },
         { name: 'batch-workflow', values: ['single', 'segments'] }
     ];
-    const PERSIST_RANGES = ['motion-strength'];
+    const PERSIST_RANGES = ['motion-strength', 'motion-attention-strength', 'vid-motion-speed', 'motion-motion-speed', 'batch-motion-speed', 'upscale-denoise'];
 
     function saveAllSettings() {
         const s = {};
@@ -118,13 +126,17 @@
             if (el) s[id] = el.value;
         });
         s._currentMode = currentMode;
+        s._ttsSubMode = _ttsSubMode;
+        s._upscaleSubMode = _upscaleSubMode;
         s._uploadNames = {
             startFrame: pathFileName(s['start-frame-path'] || ''),
             endFrame: pathFileName(s['end-frame-path'] || ''),
             audio: pathFileName(s['uploaded-audio-path'] || ''),
             motionVideo: pathFileName(s['motion-video-path'] || ''),
             motionImage: pathFileName(s['motion-image-path'] || ''),
-            batchAudio: pathFileName(s['batch-background-audio-path'] || '')
+            batchAudio: pathFileName(s['batch-background-audio-path'] || ''),
+            upscaleVideo: pathFileName(s['upscale-video-path'] || ''),
+            upscaleImage: pathFileName(s['upscale-image-path'] || '')
         };
         if (batchImages && batchImages.length > 0) {
             s._batchImages = batchImages.map(img => ({
@@ -185,6 +197,12 @@
             }
         });
         if (s._currentMode && typeof switchMode === 'function') {
+            if (s._ttsSubMode && TTS_SUB_MODES.includes(s._currentMode)) {
+                _ttsSubMode = s._ttsSubMode;
+            }
+            if (s._upscaleSubMode && UPSCALE_SUB_MODES.includes(s._currentMode)) {
+                _upscaleSubMode = s._upscaleSubMode;
+            }
             switchMode(s._currentMode);
         }
         restoreUploadPreviews(s);
@@ -232,10 +250,15 @@
             const statusDiv = document.getElementById('motion-video-status');
             const nameEl = document.getElementById('motion-video-name');
             const clearOverlay = document.getElementById('clear-motion-video-overlay');
+            const preview = document.getElementById('motion-video-preview');
             if (placeholder) placeholder.style.display = 'none';
             if (statusDiv) statusDiv.style.display = 'block';
             if (nameEl) nameEl.textContent = names.motionVideo || pathFileName(motionVideoPath);
             if (clearOverlay) clearOverlay.style.display = 'flex';
+            if (preview) {
+                preview.poster = `${BASE}/api/system/video-thumbnail?path=${encodeURIComponent(motionVideoPath)}&_t=${Date.now()}`;
+                preview.src = mediaUrlForPath(motionVideoPath) + '&_t=' + Date.now();
+            }
         }
 
         const motionImagePath = s['motion-image-path'];
@@ -255,6 +278,32 @@
             const clearOverlay = document.getElementById('clear-batch-audio-overlay');
             if (placeholder) placeholder.style.display = 'none';
             if (statusDiv) { statusDiv.style.display = 'block'; statusDiv.textContent = '✓ ' + (names.batchAudio || pathFileName(batchAudioPath)); }
+            if (clearOverlay) clearOverlay.style.display = 'flex';
+        }
+
+        const upscaleVideoPath = s['upscale-video-path'];
+        if (upscaleVideoPath) {
+            const placeholder = document.getElementById('upscale-video-placeholder');
+            const nameEl = document.getElementById('upscale-video-name');
+            const clearOverlay = document.getElementById('clear-upscale-video-overlay');
+            const preview = document.getElementById('upscale-video-preview');
+            if (placeholder) placeholder.style.display = 'none';
+            if (nameEl) { nameEl.textContent = names.upscaleVideo || pathFileName(upscaleVideoPath); nameEl.style.display = 'block'; }
+            if (clearOverlay) clearOverlay.style.display = 'flex';
+            if (preview) {
+                preview.style.display = 'block';
+                preview.poster = `${BASE}/api/system/video-thumbnail?path=${encodeURIComponent(upscaleVideoPath)}&_t=${Date.now()}`;
+                preview.src = mediaUrlForPath(upscaleVideoPath) + '&_t=' + Date.now();
+            }
+        }
+
+        const upscaleImagePath = s['upscale-image-path'];
+        if (upscaleImagePath) {
+            const preview = document.getElementById('upscale-image-preview');
+            const placeholder = document.getElementById('upscale-image-placeholder');
+            const clearOverlay = document.getElementById('clear-upscale-image-overlay');
+            if (preview) { preview.src = mediaUrlForPath(upscaleImagePath); preview.style.display = 'block'; }
+            if (placeholder) placeholder.style.display = 'none';
             if (clearOverlay) clearOverlay.style.display = 'flex';
         }
 
@@ -313,6 +362,7 @@
         availableLoras = data?.loras || [];
         updateLoraDropdown();
         updateBatchLoraDropdown();
+        updateImageLoraDropdown();
         if (data?.loras_dir) {
             const hintEl = document.getElementById('lora-placement-hint');
             if (hintEl) {
@@ -343,12 +393,20 @@
                 name: m.filename || m.name,
                 path: m.local_path,
                 description: m.description || '',
+                trigger_words: m.trigger_word ? [m.trigger_word] : (m.trigger_words || []),
+                base_model: m.base_model || '',
             }));
             const localDirs = data.local_dirs || [];
             for (const dir of localDirs) {
                 for (const m of (dir.models || [])) {
                     if (m.model_type === 'lora') {
-                        lorasFromRegistry.push({ name: m.name, path: m.path, description: '' });
+                        lorasFromRegistry.push({
+                            name: _beautifyModelName(m.name),
+                            path: m.path,
+                            description: m.description || '',
+                            trigger_words: m.trigger_words || [],
+                            base_model: m.base_model || '',
+                        });
                     }
                 }
             }
@@ -426,7 +484,19 @@
         select.className = 'lora-select';
         select.style.flex = '1';
         select.innerHTML = '<option value="">' + _t('noLora') + '</option>';
-        availableLoras.forEach(lora => {
+        let filteredLoras = availableLoras;
+        if (containerId === 'img-loras-container') {
+            filteredLoras = availableLoras.filter(lora => {
+                const bm = (lora.base_model || '').toLowerCase();
+                return bm.includes('z-image') || bm.includes('z_image') || bm.includes('zimage');
+            });
+        } else {
+            filteredLoras = availableLoras.filter(lora => {
+                const bm = (lora.base_model || '').toLowerCase();
+                return bm.includes('ltx') || bm.includes('lightricks');
+            });
+        }
+        filteredLoras.forEach(lora => {
             const opt = document.createElement('option');
             opt.value = lora.path;
             const desc = lora.description ? lora.description.slice(0, 60) : '';
@@ -459,10 +529,13 @@
         loraInfoBox.style.display = 'none';
         loraInfoBox.style.fontSize = '11px';
         loraInfoBox.style.color = 'var(--text-dim)';
-        loraInfoBox.style.padding = '2px 4px';
-        loraInfoBox.style.lineHeight = '1.4';
-        loraInfoBox.style.maxHeight = '60px';
+        loraInfoBox.style.padding = '4px 6px';
+        loraInfoBox.style.lineHeight = '1.5';
+        loraInfoBox.style.maxHeight = '80px';
         loraInfoBox.style.overflow = 'hidden';
+        loraInfoBox.style.background = 'rgba(255,255,255,0.04)';
+        loraInfoBox.style.borderRadius = '4px';
+        loraInfoBox.style.marginTop = '2px';
 
         const strengthContainer = document.createElement('div');
         strengthContainer.className = 'lora-strength-container';
@@ -517,10 +590,7 @@
                 loraInfoBox.innerHTML = '';
                 return;
             }
-            let html = '';
-            if (lora.description) html += `<div style="margin-bottom:2px">${escapeHtmlAttr(lora.description)}</div>`;
-            if (lora.trigger_words && lora.trigger_words.length > 0) html += `<div>触发词: <span style="color:var(--accent)">${escapeHtmlAttr(lora.trigger_words.join(', '))}</span></div>`;
-            if (lora.base_model) html += `<div>基模: ${escapeHtmlAttr(lora.base_model)}</div>`;
+            const html = _renderLoraInfoHtml(lora);
             loraInfoBox.innerHTML = html;
             loraInfoBox.style.display = html ? 'block' : 'none';
         }
@@ -533,10 +603,98 @@
         container.appendChild(wrapper);
     };
 
-    function _fillLoraSelect(select) {
+    function collectLoras(containerId) {
+        const results = [];
+        document.querySelectorAll(`#${containerId} .lora-entry`).forEach(entry => {
+            const sel = entry.querySelector('.lora-select');
+            const strIn = entry.querySelector('.lora-strength');
+            if (sel && sel.value) {
+                results.push({ path: sel.value, strength: strIn ? parseFloat(strIn.value) : 1.0 });
+            }
+        });
+        return results;
+    }
+
+    function getSelectedImgModelPath() {
+        const select = document.getElementById('img-model-select');
+        return (select?.value || '').trim();
+    }
+
+    function _collectLocalModelsFromRegistry(data) {
+        const allModels = [];
+        const seen = new Set();
+        for (const m of (data.models || [])) {
+            if (m.downloaded && m.local_path && !seen.has(m.local_path)) {
+                seen.add(m.local_path);
+                allModels.push({ name: m.filename || m.name, path: m.local_path, model_type: m.model_category || 'checkpoint' });
+            }
+        }
+        for (const dir of (data.local_dirs || [])) {
+            for (const m of (dir.models || [])) {
+                if (!seen.has(m.path)) {
+                    seen.add(m.path);
+                    allModels.push({ name: m.name, path: m.path, model_type: m.model_type || 'checkpoint' });
+                }
+            }
+        }
+        return allModels;
+    }
+
+    function _isImageModel(m) {
+        const n = (m.name || '').toLowerCase();
+        return n.includes('image') || n.includes('zit') || n.includes('img') || m.model_type === 'image';
+    }
+
+    function _isVideoCheckpoint(m) {
+        const n = (m.name || '').toLowerCase();
+        if (!n.endsWith('.safetensors')) return false;
+        if (!n.includes('ltx')) return false;
+        return !n.includes('ic-lora') && !n.includes('control') && !n.includes('upscaler') && !n.includes('vae') && !n.includes('lora');
+    }
+
+    function _beautifyModelName(name) {
+        let n = name.replace(/\.safetensors$/i, '').replace(/\.ckpt$/i, '').replace(/\.pt$/i, '').replace(/\.bin$/i, '').replace(/\.pth$/i, '');
+        n = n.replace(/[-_]+/g, ' ').replace(/\b(\d+b)\b/gi, ' $1').trim();
+        return n || name;
+    }
+
+    window.loadImgModelList = async function() {
+        const select = document.getElementById('img-model-select');
+        if (!select) return;
+        const currentVal = select.value;
+        try {
+            const r = await fetch(`${BASE}/api/models/registry`);
+            const d = await r.json();
+            const allModels = _collectLocalModelsFromRegistry(d);
+            const imageModels = allModels.filter(_isImageModel);
+            select.innerHTML = '<option value="">' + (_t('imgModelDefault') || '默认 Z-Image-Turbo') + '</option>';
+            imageModels.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.path;
+                opt.textContent = _beautifyModelName(m.name);
+                select.appendChild(opt);
+            });
+            if (currentVal && select.querySelector(`option[value="${CSS.escape(currentVal)}"]`)) {
+                select.value = currentVal;
+            }
+        } catch (_) {}
+    };
+
+    function _fillLoraSelect(select, baseModelKind) {
         const currentVal = select.value;
         select.innerHTML = '<option value="">' + _t('noLora') + '</option>';
-        availableLoras.forEach(lora => {
+        const filtered = availableLoras.filter(lora => {
+            if (!baseModelKind) return true;
+            const bm = (lora.base_model || '').toLowerCase();
+            if (baseModelKind === 'ltx') {
+                return bm.includes('ltx') || bm.includes('lightricks');
+            }
+            if (baseModelKind === 'zimage') {
+                return bm.includes('z-image') || bm.includes('z_image') || bm.includes('zimage');
+            }
+            return true;
+        });
+        filtered.forEach(lora => {
             const opt = document.createElement('option');
             opt.value = lora.path;
             const desc = lora.description ? lora.description.slice(0, 60) : '';
@@ -548,21 +706,34 @@
             }
             select.appendChild(opt);
         });
-        select.value = currentVal;
+        if (currentVal && filtered.some(l => l.path === currentVal)) {
+            select.value = currentVal;
+        }
+    }
+
+    function _renderLoraInfoHtml(lora) {
+        let html = '';
+        if (lora.description) html += `<div style="margin-bottom:3px;color:var(--text-secondary)">${escapeHtmlAttr(lora.description)}</div>`;
+        if (lora.trigger_words && lora.trigger_words.length > 0) {
+            const twHtml = lora.trigger_words.map(tw => `<span style="display:inline-block;background:rgba(255,255,255,0.08);padding:1px 6px;border-radius:3px;margin:1px 3px 1px 0;color:var(--accent);font-size:11px">${escapeHtmlAttr(tw)}</span>`).join('');
+            html += `<div style="margin-bottom:2px">触发词: ${twHtml}</div>`;
+        }
+        if (lora.base_model) html += `<div style="color:var(--text-secondary)">基模: ${escapeHtmlAttr(lora.base_model)}</div>`;
+        return html;
     }
 
     function updateLoraDropdown() {
+        if (document.getElementById('loras-container') && document.getElementById('loras-container').children.length === 0) {
+            window.addLoraSelection('loras-container');
+        }
         const selects = document.querySelectorAll('#loras-container .lora-select');
         selects.forEach(select => {
-            _fillLoraSelect(select);
+            _fillLoraSelect(select, 'ltx');
             const infoBox = select.closest('.lora-entry')?.querySelector('.lora-info-box');
             if (infoBox && select.value) {
                 const lora = availableLoras.find(l => l.path === select.value);
                 if (lora && (lora.description || (lora.trigger_words && lora.trigger_words.length > 0) || lora.base_model)) {
-                    let html = '';
-                    if (lora.description) html += `<div style="margin-bottom:2px">${escapeHtmlAttr(lora.description)}</div>`;
-                    if (lora.trigger_words && lora.trigger_words.length > 0) html += `<div>触发词: <span style="color:var(--accent)">${escapeHtmlAttr(lora.trigger_words.join(', '))}</span></div>`;
-                    if (lora.base_model) html += `<div>基模: ${escapeHtmlAttr(lora.base_model)}</div>`;
+                    const html = _renderLoraInfoHtml(lora);
                     infoBox.innerHTML = html;
                     infoBox.style.display = html ? 'block' : 'none';
                 } else {
@@ -571,25 +742,22 @@
                 }
             }
         });
-        if (document.getElementById('loras-container') && document.getElementById('loras-container').children.length === 0) {
-            window.addLoraSelection('loras-container');
-        }
     }
 
     window.updateLoraStrength = function() {};
 
     function updateBatchLoraDropdown() {
+        if (document.getElementById('batch-loras-container') && document.getElementById('batch-loras-container').children.length === 0) {
+            window.addLoraSelection('batch-loras-container');
+        }
         const selects = document.querySelectorAll('#batch-loras-container .lora-select');
         selects.forEach(select => {
-            _fillLoraSelect(select);
+            _fillLoraSelect(select, 'ltx');
             const infoBox = select.closest('.lora-entry')?.querySelector('.lora-info-box');
             if (infoBox && select.value) {
                 const lora = availableLoras.find(l => l.path === select.value);
                 if (lora && (lora.description || (lora.trigger_words && lora.trigger_words.length > 0) || lora.base_model)) {
-                    let html = '';
-                    if (lora.description) html += `<div style="margin-bottom:2px">${escapeHtmlAttr(lora.description)}</div>`;
-                    if (lora.trigger_words && lora.trigger_words.length > 0) html += `<div>触发词: <span style="color:var(--accent)">${escapeHtmlAttr(lora.trigger_words.join(', '))}</span></div>`;
-                    if (lora.base_model) html += `<div>基模: ${escapeHtmlAttr(lora.base_model)}</div>`;
+                    const html = _renderLoraInfoHtml(lora);
                     infoBox.innerHTML = html;
                     infoBox.style.display = html ? 'block' : 'none';
                 } else {
@@ -598,16 +766,37 @@
                 }
             }
         });
-        if (document.getElementById('batch-loras-container') && document.getElementById('batch-loras-container').children.length === 0) {
-            window.addLoraSelection('batch-loras-container');
-        }
     }
     
     window.updateBatchLoraStrength = function() {};
 
+    function updateImageLoraDropdown() {
+        if (document.getElementById('img-loras-container') && document.getElementById('img-loras-container').children.length === 0) {
+            window.addLoraSelection('img-loras-container');
+        }
+        const selects = document.querySelectorAll('#img-loras-container .lora-select');
+        selects.forEach(select => {
+            _fillLoraSelect(select, 'zimage');
+            const infoBox = select.closest('.lora-entry')?.querySelector('.lora-info-box');
+            if (infoBox && select.value) {
+                const lora = availableLoras.find(l => l.path === select.value);
+                if (lora && (lora.description || (lora.trigger_words && lora.trigger_words.length > 0) || lora.base_model)) {
+                    const html = _renderLoraInfoHtml(lora);
+                    infoBox.innerHTML = html;
+                    infoBox.style.display = html ? 'block' : 'none';
+                } else {
+                    infoBox.style.display = 'none';
+                    infoBox.innerHTML = '';
+                }
+            }
+        });
+    }
+    window.updateImageLoraDropdown = updateImageLoraDropdown;
+
     // 页面加载时更新批量模式的下拉框
     function initBatchDropdowns() {
         updateBatchLoraDropdown();
+        updateImageLoraDropdown();
     }
 
     // 已移除：模型/LoRA 目录自定义与浏览（保持后端默认路径扫描）
@@ -679,26 +868,98 @@
         return map[q] || '540p';
     }
 
+    function isVidModelDev() {
+        const sel = document.getElementById('vid-model-select');
+        if (!sel) return false;
+        const modelName = (sel.value || '').toLowerCase();
+        return modelName.includes('dev') && !modelName.includes('distilled');
+    }
+
+    function updateVidStepsUI() {
+        const stepsDistilled = document.getElementById('vid-steps-distilled');
+        const stepsInput = document.getElementById('vid-steps');
+        if (!stepsDistilled || !stepsInput) return;
+        const isDev = isVidModelDev();
+        stepsDistilled.style.display = isDev ? 'none' : 'block';
+        stepsInput.style.display = isDev ? 'block' : 'none';
+    }
+
+    function onVidModelChange() {
+        const sel = document.getElementById('vid-model-select');
+        const hintEl = document.getElementById('vid-model-hint');
+        if (!sel) return;
+        updateVidStepsUI();
+        const isDev = isVidModelDev();
+        if (hintEl && isDev) {
+            hintEl.textContent = _t('vidModelAutoStandard');
+            setTimeout(() => { hintEl.textContent = _t('vidModelHint'); }, 3000);
+        }
+        const globalSelect = document.getElementById('model-checkpoint-select');
+        if (globalSelect) {
+            globalSelect.value = sel.value;
+            saveSelectedModelCheckpoint();
+        }
+    }
+    window.onVidModelChange = onVidModelChange;
+
+    function syncVidModelFromGlobal() {
+        const globalSelect = document.getElementById('model-checkpoint-select');
+        const vidSelect = document.getElementById('vid-model-select');
+        if (!globalSelect || !vidSelect) return;
+        vidSelect.innerHTML = globalSelect.innerHTML;
+        vidSelect.value = globalSelect.value;
+    }
+    window.syncVidModelFromGlobal = syncVidModelFromGlobal;
+
     function updateResPreview() {
         const vidQuality = document.getElementById('vid-quality');
         if (!vidQuality) return;
         const q = vidQuality.value;
         const size = getGenerationSize('video');
-        const note = size.source === 'ref-missing' ? ` · ${_t('ratioRefMissing')}` : '';
         const recEl = document.getElementById('vid-quality-rec');
         if (recEl && recEl.style.display !== 'none' && recEl.textContent) {
             const base = recEl.textContent.replace(/（\d+×\d+）.*$/, '');
-            recEl.textContent = `${base}（${size.width}×${size.height}）${note}`;
+            recEl.textContent = `${base}（${size.width}×${size.height}）`;
         }
         return resLabelFromQuality(q);
     }
 
+    function _imgSizeForQualityRatio(quality, ratio) {
+        const shortEdge = parseInt(quality) || 720;
+        const [rw, rh] = ratio.split(':').map(Number);
+        let w, h;
+        if (rw >= rh) {
+            h = shortEdge;
+            w = Math.round(shortEdge * rw / rh);
+        } else {
+            w = shortEdge;
+            h = Math.round(shortEdge * rh / rw);
+        }
+        w = Math.round(w / 16) * 16;
+        h = Math.round(h / 16) * 16;
+        return { w, h };
+    }
+
     function updateImgResPreview() {
+        const qualityEl = document.getElementById('img-quality');
+        const ratioEl = document.getElementById('img-ratio');
+        const customRes = document.getElementById('img-custom-res');
+        const preview = document.getElementById('img-res-preview');
         const imgW = document.getElementById('img-w');
         const imgH = document.getElementById('img-h');
-        const imgResPreview = document.getElementById('img-res-preview');
-        if (!imgW || !imgH || !imgResPreview) return;
-        imgResPreview.innerText = `${imgW.value}×${imgH.value}`;
+        if (!qualityEl || !ratioEl || !preview) return;
+
+        const ratio = ratioEl.value;
+        if (ratio === 'custom') {
+            if (customRes) customRes.style.display = 'flex';
+            if (imgW && imgH) preview.innerText = `${imgW.value}×${imgH.value}`;
+            return;
+        }
+        if (customRes) customRes.style.display = 'none';
+        const { w, h } = _imgSizeForQualityRatio(qualityEl.value, ratio);
+        if (imgW) imgW.value = w;
+        if (imgH) imgH.value = h;
+        preview.innerText = `${w}×${h}`;
     }
 
     function updateBatchResPreview() {
@@ -706,14 +967,23 @@
         if (!batchQuality) return;
         const q = batchQuality.value;
         const size = getGenerationSize('batch');
-        const note = size.source === 'ref-missing' ? ` · ${_t('ratioRefMissing')}` : '';
         const recEl = document.getElementById('batch-quality-rec');
         if (recEl && recEl.style.display !== 'none' && recEl.textContent) {
             const base = recEl.textContent.replace(/（\d+×\d+）.*$/, '');
-            recEl.textContent = `${base}（${size.width}×${size.height}）${note}`;
+            recEl.textContent = `${base}（${size.width}×${size.height}）`;
         }
         return resLabelFromQuality(q);
     }
+
+    window.updateMotionResPreview = function() {
+        const qEl = document.getElementById('motion-quality');
+        const preview = document.getElementById('motion-res-preview');
+        if (!qEl || !preview) return;
+        const q = qEl.value;
+        const shortSideMap = { '1080': 1088, '720': 704, '540': 576, '480': 416, '360': 352 };
+        const shortSide = shortSideMap[q] || 704;
+        preview.textContent = `${shortSide}p · ` + (q === '1080' ? 'Full HD' : q === '720' ? 'Standard' : q === '540' ? 'Preview' : q === '480' ? 'Lite' : 'Minimal') + ' · 跟随参考视频比例';
+    };
 
     // 批量模式 LoRA 强度切换
     function updateBatchLoraStrength() {
@@ -721,20 +991,6 @@
         const container = document.getElementById('batch-lora-strength-container');
         if (select && container) {
             container.style.display = select.value ? 'flex' : 'none';
-        }
-    }
-
-    // 切换图片预设分辨率
-    function applyImgPreset(val) {
-        if (val === "custom") {
-            document.getElementById('img-custom-res').style.display = 'flex';
-        } else {
-            const [w, h] = val.split('x');
-            document.getElementById('img-w').value = w;
-            document.getElementById('img-h').value = h;
-            updateImgResPreview();
-            // 隐藏自定义区域或保持显示供微调
-            // document.getElementById('img-custom-res').style.display = 'none';
         }
     }
 
@@ -942,11 +1198,39 @@
         return data.path;
     }
 
+    let _motionVideoUploadGen = 0;
+
     window.handleMotionVideoUpload = async function(file) {
         if (!file) return;
+        const gen = ++_motionVideoUploadGen;
         const label = _t('motionRefVideoName');
         try {
+            const preview = document.getElementById('motion-video-preview');
+            if (preview) {
+                preview.pause();
+                preview.removeAttribute('src');
+                preview.removeAttribute('poster');
+                preview.load();
+            }
+            const videoUrl = URL.createObjectURL(file);
+            if (preview) {
+                preview.src = videoUrl;
+                preview.load();
+                preview.onloadedmetadata = () => {
+                    if (gen !== _motionVideoUploadGen) return;
+                    const dur = preview.duration;
+                    if (dur && isFinite(dur) && dur > 0) {
+                        const durEl = document.getElementById('motion-duration');
+                        if (durEl) {
+                            durEl.value = Math.round(dur * 10) / 10;
+                            if (typeof _updateMotionParamWarnings === 'function') _updateMotionParamWarnings();
+                        }
+                        addLog(_fmt('motionVideoDuration', { duration: dur.toFixed(1) }));
+                    }
+                };
+            }
             const path = await uploadBase64File(file, label);
+            if (gen !== _motionVideoUploadGen) return;
             document.getElementById('motion-video-path').value = path;
             document.getElementById('motion-video-placeholder').style.display = 'none';
             document.getElementById('motion-video-status').style.display = 'block';
@@ -954,14 +1238,20 @@
             document.getElementById('clear-motion-video-overlay').style.display = 'flex';
             addLog(_fmt('motionUploadOk', { label, name: file.name }));
             scheduleSave();
+            document.getElementById('motion-video-input').value = "";
         } catch (e) {
-            addLog(_fmt('motionUploadFail', { label, message: e.message }));
+            if (gen === _motionVideoUploadGen) {
+                addLog(_fmt('motionUploadFail', { label, message: e.message }));
+            }
         }
     };
 
     window.clearMotionVideo = function() {
+        _motionVideoUploadGen++;
         document.getElementById('motion-video-input').value = "";
         document.getElementById('motion-video-path').value = "";
+        const preview = document.getElementById('motion-video-preview');
+        if (preview) { preview.pause(); preview.removeAttribute('src'); preview.removeAttribute('poster'); preview.load(); }
         document.getElementById('motion-video-placeholder').style.display = 'block';
         document.getElementById('motion-video-status').style.display = 'none';
         document.getElementById('motion-video-name').textContent = "";
@@ -970,13 +1260,17 @@
         scheduleSave();
     };
 
+    let _motionImageUploadGen = 0;
+
     window.handleMotionImageUpload = async function(file) {
         if (!file) return;
+        const gen = ++_motionImageUploadGen;
         const preview = document.getElementById('motion-image-preview');
         const placeholder = document.getElementById('motion-image-placeholder');
         const clearOverlay = document.getElementById('clear-motion-image-overlay');
         const reader = new FileReader();
         reader.onload = (e) => {
+            if (gen !== _motionImageUploadGen) return;
             preview.src = e.target.result;
             preview.style.display = 'block';
             placeholder.style.display = 'none';
@@ -986,15 +1280,20 @@
         const label = _t('motionTargetImageName');
         try {
             const path = await uploadBase64File(file, label);
+            if (gen !== _motionImageUploadGen) return;
             document.getElementById('motion-image-path').value = path;
             addLog(_fmt('motionUploadOk', { label, name: file.name }));
             scheduleSave();
+            document.getElementById('motion-image-input').value = "";
         } catch (e) {
-            addLog(_fmt('motionUploadFail', { label, message: e.message }));
+            if (gen === _motionImageUploadGen) {
+                addLog(_fmt('motionUploadFail', { label, message: e.message }));
+            }
         }
     };
 
     window.clearMotionImage = function() {
+        _motionImageUploadGen++;
         document.getElementById('motion-image-input').value = "";
         document.getElementById('motion-image-path').value = "";
         document.getElementById('motion-image-preview').style.display = 'none';
@@ -1014,8 +1313,10 @@
         const motionVideoDropZone = document.getElementById('motion-video-drop-zone');
         const motionImageDropZone = document.getElementById('motion-image-drop-zone');
         const ttsRefDropZone = document.getElementById('tts-ref-drop');
+        const upscaleVideoDropZone = document.getElementById('upscale-video-drop-zone');
+        const upscaleImageDropZone = document.getElementById('upscale-image-drop-zone');
         
-        const zones = [audioDropZone, startFrameDropZone, endFrameDropZone, batchImagesDropZone, motionVideoDropZone, motionImageDropZone, ttsRefDropZone].filter(z => z);
+        const zones = [audioDropZone, startFrameDropZone, endFrameDropZone, batchImagesDropZone, motionVideoDropZone, motionImageDropZone, ttsRefDropZone, upscaleVideoDropZone, upscaleImageDropZone].filter(z => z);
 
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
             zones.forEach(zone => {
@@ -1090,6 +1391,24 @@
                 const file = e.dataTransfer.files[0];
                 if (file && (file.type.startsWith('audio/') || file.name.endsWith('.wav') || file.name.endsWith('.mp3'))) {
                     handleTtsRefUpload(file);
+                }
+            }, false);
+        }
+
+        if (upscaleVideoDropZone) {
+            upscaleVideoDropZone.addEventListener('drop', (e) => {
+                const file = e.dataTransfer.files[0];
+                if (file && (file.type.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi)$/i.test(file.name))) {
+                    handleUpscaleVideoUpload(file);
+                }
+            }, false);
+        }
+
+        if (upscaleImageDropZone) {
+            upscaleImageDropZone.addEventListener('drop', (e) => {
+                const file = e.dataTransfer.files[0];
+                if (file && file.type.startsWith('image/')) {
+                    handleUpscaleImageUpload(file);
                 }
             }, false);
         }
@@ -1686,7 +2005,9 @@
     }
 
     let _isGeneratingFlag = false;
-    let queuePollInterval = null;
+    let _isQueuePaused = false;
+    let _currentQueueTaskId = null;
+    let _awaitingQueueStart = false;
     const queueTaskTerminalSeen = new Set();
     let lastAutoDisplayedQueueTaskId = null;
     let queuePollInFlight = false;
@@ -1703,7 +2024,9 @@
             running: _t('queueRunning'),
             complete: _t('queueComplete'),
             error: _t('queueError'),
-            cancelled: _t('queueCancelled')
+            cancelled: _t('queueCancelled'),
+            cancelling: '取消中...',
+            paused: '已暂停',
         };
         return mapping[task.status] || task.status || '未知';
     }
@@ -1714,7 +2037,9 @@
             video: _t('queueTaskTypeVideo'),
             motion: _t('queueTaskTypeMotion'),
             batch: _t('queueTaskTypeBatch'),
-            image: _t('queueTaskTypeImage')
+            image: _t('queueTaskTypeImage'),
+            tts: _t('queueTaskTypeTts'),
+            upscale: _t('tabUpscale') || '高清放大'
         };
         return mapping[mode] || mode;
     }
@@ -1769,9 +2094,10 @@
                 ? ''
                 : `<div data-qmeta style="font-size:10px;color:var(--text-dim);margin-top:2px;">${queueModeLabel(task)} · ${meta}</div>`;
             const error = task.error ? `<div style="font-size:10px;color:#f87171;line-height:1.35;">${escapeHtmlAttr(task.error)}</div>` : '';
-            const resultPath = task.result?.video_path || task.result?.image_paths?.[0] || '';
+            const resultPath = task.result?.video_path || task.result?.image_paths?.[0] || task.result?.audio_path || '';
+            const isTtsAudio = !task.result?.video_path && !task.result?.image_paths?.length && (task.result?.audio_path || task.result?.audio_url);
             const openBtn = resultPath
-                ? `<button onclick='displayOutput(${JSON.stringify(resultPath)})' style="margin-top:4px;font-size:10px;padding:3px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);color:var(--text-main);cursor:pointer;">${_t('queueViewResult')}</button>`
+                ? `<button onclick='${isTtsAudio ? `playTtsFromQueue(${JSON.stringify(task.result.audio_url || '')})` : `displayOutput(${JSON.stringify(resultPath)})`}' style="margin-top:4px;font-size:10px;padding:3px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);color:var(--text-main);cursor:pointer;">${_t('queueViewResult')}</button>`
                 : '';
             const isRunning = task._current && (task.status === 'running' || task.status === 'queued');
             const progressDesc = task._current
@@ -1784,6 +2110,7 @@
                     </div>
                     <span data-qptext style="flex:1;font-size:10px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${progressDesc}</span>
                     ${isRunning ? `
+                    <button onclick="togglePause()" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid rgba(250,204,21,0.3);background:rgba(250,204,21,0.1);color:#facc15;cursor:pointer;white-space:nowrap;" title="${_isQueuePaused ? '恢复' : '暂停'}">${_isQueuePaused ? '▶' : '⏸'}</button>
                     <button onclick="cancelQueueTask('${task.id}')" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid rgba(248,113,113,0.3);background:rgba(248,113,113,0.1);color:#f87171;cursor:pointer;white-space:nowrap;" title="${_t('queueCancelBtn')}">✕</button>
                     ` : ''}
                 </div>`
@@ -1816,10 +2143,85 @@
             const data = await res.json().catch(() => ({}));
             if (data.status === 'cancelled') {
                 addLog(_fmt('queueCancelLog', { label: taskId }));
+            } else if (data.status === 'cancelling') {
+                addLog('⚠️ 正在取消任务...');
             }
             pollQueueStatus();
         } catch (e) {
             addLog(`❌ ${_t('queueCancelFail')}: ${e.message}`);
+        }
+    }
+
+    window.togglePause = async function() {
+        try {
+            if (_isQueuePaused) {
+                const res = await fetch(`${BASE}/api/queue/resume`, { method: 'POST' });
+                const data = await res.json().catch(() => ({}));
+                if (data.status === 'resumed') {
+                    _isQueuePaused = false;
+                    addLog('▶️ 队列已恢复');
+                }
+            } else {
+                const res = await fetch(`${BASE}/api/queue/pause`, { method: 'POST' });
+                const data = await res.json().catch(() => ({}));
+                if (data.status === 'paused') {
+                    _isQueuePaused = true;
+                    addLog('⏸️ 队列已暂停（当前任务继续执行，后续任务等待恢复）');
+                }
+            }
+            _updateGenButtons();
+        } catch (e) {
+            addLog(`❌ 暂停/恢复失败: ${e.message}`);
+        }
+    };
+
+    window.cancelCurrentTask = async function() {
+        if (!_currentQueueTaskId && !_isGeneratingFlag) return;
+        const taskId = _currentQueueTaskId;
+        if (taskId) {
+            await cancelQueueTask(taskId);
+        } else {
+            try {
+                const res = await fetch(`${BASE}/api/generate/force-cancel`, { method: 'POST' });
+                const data = await res.json().catch(() => ({}));
+                if (data.status === 'cancelling') {
+                    addLog(_t('forceCancelLog'));
+                }
+            } catch (e) {
+                addLog(`❌ ${_t('forceCancelFail')}: ${e.message}`);
+            }
+        }
+    };
+
+    function _updateGenButtons() {
+        const mainBtn = document.getElementById('mainBtn');
+        const ttsTopBtn = document.getElementById('tts-top-btn');
+        const upscaleTopBtn = document.getElementById('upscale-top-btn');
+        const genBtnRow = document.getElementById('gen-btn-row');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const isTtsMode = TTS_SUB_MODES.includes(currentMode);
+        const isUpscaleMode = UPSCALE_SUB_MODES.includes(currentMode);
+
+        if (_isGeneratingFlag) {
+            if (mainBtn) mainBtn.style.display = 'none';
+            if (ttsTopBtn) ttsTopBtn.style.display = 'none';
+            if (upscaleTopBtn) upscaleTopBtn.style.display = 'none';
+            if (genBtnRow) genBtnRow.style.display = 'flex';
+            if (pauseBtn) {
+                pauseBtn.textContent = _isQueuePaused ? '▶ 恢复' : '⏸ 暂停';
+            }
+        } else {
+            if (mainBtn) mainBtn.style.display = (isTtsMode || isUpscaleMode) ? 'none' : '';
+            if (ttsTopBtn) ttsTopBtn.style.display = isTtsMode ? '' : 'none';
+            if (upscaleTopBtn) {
+                upscaleTopBtn.style.display = isUpscaleMode ? '' : 'none';
+                upscaleTopBtn.disabled = false;
+                upscaleTopBtn.textContent = _t('upscaleGenBtn') || '🔍 开始高清放大';
+            }
+            if (mainBtn) mainBtn.disabled = false;
+            if (ttsTopBtn) ttsTopBtn.disabled = false;
+            if (genBtnRow) genBtnRow.style.display = 'none';
+            _isQueuePaused = false;
         }
     }
 
@@ -1832,13 +2234,37 @@
             renderQueueStatus(data);
 
             if (data?.current && data.current.status === 'running') {
-                if (!pollInterval) startProgressPolling();
+                const isQueueManaged = data.current.mode === 'upscale' || data.current.mode === 'tts';
+                if (!pollInterval && !isQueueManaged) startProgressPolling();
+                if (isQueueManaged && pollInterval) stopProgressPolling();
                 _isGeneratingFlag = true;
+                _awaitingQueueStart = false;
+                _currentQueueTaskId = data.current.id;
+                _isQueuePaused = !!data.paused;
+                _updateGenButtons();
             } else if (!data?.current) {
+                if (_awaitingQueueStart) {
+                    const hist = Array.isArray(data?.history) ? data.history : [];
+                    const found = _currentQueueTaskId && hist.some(t => t && t.id === _currentQueueTaskId);
+                    if (!found) {
+                        _isQueuePaused = !!data.paused;
+                        return;
+                    }
+                    _awaitingQueueStart = false;
+                }
                 if (pollInterval) stopProgressPolling();
                 _isGeneratingFlag = false;
-                const mainBtn = document.getElementById('mainBtn');
-                if (mainBtn) mainBtn.disabled = false;
+                _currentQueueTaskId = null;
+                _isQueuePaused = !!data.paused;
+                _updateGenButtons();
+            } else {
+                if (_awaitingQueueStart && data.current.status === 'queued') {
+                    _isQueuePaused = !!data.paused;
+                    return;
+                }
+                _awaitingQueueStart = false;
+                _isQueuePaused = !!data.paused;
+                _updateGenButtons();
             }
 
             const tasks = [];
@@ -1859,11 +2285,37 @@
                         isLoadingHistory = false;
                         if (typeof fetchHistory === 'function') fetchHistory(1);
                     }, 300);
+                    if (task.mode === 'tts' && task.result) {
+                        _handleTtsQueueComplete(task.result);
+                    }
                 } else if (task.status === 'error') {
                     console.error('[QUEUE] Task error:', task.id, task.error);
-                    addLog(_fmt('queueFailLog', { label: task.label || task.id, error: task.error || 'unknown' }));
+                    const errDetail = task.error || 'unknown';
+                    addLog(`❌ 任务失败 [${task.label || task.id}]: ${errDetail}`);
+                    if (task.mode === 'tts') {
+                        _handleTtsQueueError(errDetail);
+                    } else {
+                        const loader = document.getElementById('loading-txt');
+                        if (loader) {
+                            loader.style.display = 'flex';
+                            loader.style.flexDirection = 'column';
+                            loader.style.alignItems = 'center';
+                            loader.style.gap = '8px';
+                            loader.innerHTML = '';
+                            const span = document.createElement('span');
+                            span.style.cssText = 'color:#ff6b6b;font-size:13px;padding:12px;text-align:center;max-width:400px;word-break:break-word;';
+                            span.textContent = `任务失败：${errDetail}`;
+                            loader.appendChild(span);
+                        }
+                        _isGeneratingFlag = false;
+                        _awaitingQueueStart = false;
+                        _updateGenButtons();
+                    }
                 } else if (task.status === 'cancelled') {
                     addLog(_fmt('queueCancelLog', { label: task.label || task.id }));
+                    _isGeneratingFlag = false;
+                    _awaitingQueueStart = false;
+                    _updateGenButtons();
                 }
             }
 
@@ -1882,10 +2334,18 @@
         }
     }
 
+    let _queuePollTimer = null;
     function startQueuePolling() {
-        if (queuePollInterval) return;
-        queuePollInterval = setInterval(pollQueueStatus, 1500);
+        if (_queuePollTimer) return;
+        _scheduleQueuePoll();
         pollQueueStatus();
+    }
+    function _scheduleQueuePoll() {
+        if (_queuePollTimer) clearTimeout(_queuePollTimer);
+        const interval = _isGeneratingFlag ? 1500 : 5000;
+        _queuePollTimer = setTimeout(() => {
+            pollQueueStatus().finally(_scheduleQueuePoll);
+        }, interval);
     }
 
     // 系统状态轮询
@@ -1893,10 +2353,12 @@
         if (statusPollInFlight) return;
         statusPollInFlight = true;
         try {
-            const h = await fetch(`${BASE}/health`).then(r => r.json()).catch(() => ({status: "error"}));
-            const g = await fetch(`${BASE}/api/gpu-info`).then(r => r.json()).catch(() => ({gpu_info: {}}));
-            const p = await fetch(`${BASE}/api/generation/progress`).then(r => r.json()).catch(() => ({progress: 0}));
-            const sysGpus = await fetch(`${BASE}/api/system/list-gpus`).then(r => r.json()).catch(() => ({gpus: []}));
+            const [h, g, p, sysGpus] = await Promise.all([
+                fetch(`${BASE}/health`).then(r => r.json()).catch(() => ({status: "error"})),
+                fetch(`${BASE}/api/gpu-info`).then(r => r.json()).catch(() => ({gpu_info: {}})),
+                fetch(`${BASE}/api/generation/progress`).then(r => r.json()).catch(() => ({progress: 0})),
+                fetch(`${BASE}/api/system/list-gpus`).then(r => r.json()).catch(() => ({gpus: []})),
+            ]);
             
             const activeGpu = (sysGpus.gpus || []).find(x => x.active) || (sysGpus.gpus || [])[0] || {};
             const gpuName = activeGpu.name || g.gpu_info?.name || "GPU";
@@ -1925,11 +2387,26 @@
             const vramText = document.getElementById('vram-text');
             if (vramFill) vramFill.style.width = (vUsedMB / vTotalMB * 100) + "%";
             if (vramText) vramText.innerText = `${vUsedGB.toFixed(1)} / ${vTotalGB.toFixed(0)} GB`;
+
+            if (activeGpu.vram_mb && activeGpu.vram_mb > 0) {
+                if (activeGpu.vram_mb < 6000) _upscaleAutoTileSize = 256;
+                else if (activeGpu.vram_mb < 10000) _upscaleAutoTileSize = 400;
+                else _upscaleAutoTileSize = 512;
+                _updateTileSizeDisplay();
+            }
         } catch(e) { const ss = document.getElementById('sys-status'); if (ss) ss.innerText = _t('sysOffline'); }
         finally { statusPollInFlight = false; }
     }
     try {
-    setInterval(checkStatus, 3000);
+    let _statusPollTimer = null;
+    function _scheduleStatusPoll() {
+        if (_statusPollTimer) clearTimeout(_statusPollTimer);
+        const interval = _isGeneratingFlag ? 3000 : 8000;
+        _statusPollTimer = setTimeout(() => {
+            checkStatus().finally(_scheduleStatusPoll);
+        }, interval);
+    }
+    _scheduleStatusPoll();
     checkStatus();
     startQueuePolling();
     initDragAndDrop();
@@ -1977,8 +2454,11 @@
         if (typeof currentMode !== 'undefined' && currentMode === 'batch') {
             updateBatchSegments();
         }
-        if (typeof currentMode !== 'undefined' && currentMode === 'tts') {
+        if (typeof currentMode !== 'undefined' && TTS_SUB_MODES.includes(currentMode)) {
             checkTtsStatus();
+        }
+        if (typeof currentMode !== 'undefined' && UPSCALE_SUB_MODES.includes(currentMode)) {
+            checkUpscaleStatus();
         }
         updateLoraDropdown();
         updateBatchLoraDropdown();
@@ -2090,7 +2570,19 @@
 
     function getSelectedModelCheckpointPath() {
         const select = document.getElementById('model-checkpoint-select');
-        return (select?.value || localStorage.getItem(MODEL_CHECKPOINT_STORAGE_KEY) || '').trim();
+        const explicit = (select?.value || localStorage.getItem(MODEL_CHECKPOINT_STORAGE_KEY) || '').trim();
+        if (explicit) return explicit;
+        return _resolveDefaultCheckpointPath();
+    }
+
+    function _resolveDefaultCheckpointPath() {
+        const select = document.getElementById('model-checkpoint-select');
+        if (!select) return '';
+        const bf16Opt = Array.from(select.options).find(o => o.value && o.value.includes('distilled') && !o.value.includes('fp8'));
+        if (bf16Opt && bf16Opt.value) return bf16Opt.value;
+        const firstOpt = Array.from(select.options).find(o => o.value);
+        if (firstOpt && firstOpt.value) return firstOpt.value;
+        return '';
     }
 
     window.saveSelectedModelCheckpoint = function() {
@@ -2122,9 +2614,10 @@
                 status.textContent = '...';
                 status.style.color = 'var(--text-dim)';
             }
-            const res = await fetch(`${BASE}/api/models`);
+            const res = await fetch(`${BASE}/api/models/registry`);
             const data = await res.json();
-            const models = (data.models || []).filter(isSwitchableDistilledCheckpoint);
+            const allModels = _collectLocalModelsFromRegistry(data);
+            const models = allModels.filter(_isVideoCheckpoint);
             select.innerHTML = '';
             const defOpt = document.createElement('option');
             defOpt.value = '';
@@ -2133,7 +2626,7 @@
             models.forEach((model) => {
                 const opt = document.createElement('option');
                 opt.value = model.path;
-                opt.textContent = model.name;
+                opt.textContent = _beautifyModelName(model.name);
                 select.appendChild(opt);
             });
             if (saved && models.some((model) => model.path === saved)) {
@@ -2152,6 +2645,7 @@
                 status.style.color = '#f44336';
             }
         }
+        if (typeof syncVidModelFromGlobal === 'function') syncVidModelFromGlobal();
     };
 
     let _coreModelsData = null;
@@ -2460,6 +2954,30 @@
                     info.appendChild(descRow);
                 }
 
+                if (m.usage_scenario) {
+                    const scenarioRow = document.createElement('div');
+                    scenarioRow.style.cssText = 'font-size:8px;color:rgba(33,150,243,0.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                    scenarioRow.textContent = '▸ ' + m.usage_scenario;
+                    scenarioRow.title = m.usage_scenario;
+                    info.appendChild(scenarioRow);
+                }
+
+                if (m.trigger_word) {
+                    const triggerRow = document.createElement('div');
+                    triggerRow.style.cssText = 'font-size:8px;color:rgba(255,152,0,0.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                    triggerRow.textContent = '⚡ ' + m.trigger_word;
+                    triggerRow.title = m.trigger_word;
+                    info.appendChild(triggerRow);
+                }
+
+                if (m.requires && m.requires.length > 0) {
+                    const reqRow = document.createElement('div');
+                    reqRow.style.cssText = 'font-size:8px;color:rgba(255,255,255,0.25);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                    reqRow.textContent = '🔗 ' + m.requires.join(', ');
+                    reqRow.title = m.requires.join(', ');
+                    info.appendChild(reqRow);
+                }
+
                 const sizeRow = document.createElement('div');
                 sizeRow.style.cssText = 'font-size:8px;color:rgba(255,255,255,0.3);white-space:nowrap;';
                 sizeRow.textContent = `${m.size_gb}GB · VRAM: ${m.min_vram_gb}GB+`;
@@ -2562,49 +3080,124 @@
     }
 
     function switchMode(m) {
-        currentMode = m;
+        const isVideoCategory = m === 'video' || VIDEO_SUB_MODES.includes(m);
+        const isTtsCategory = m === 'tts' || TTS_SUB_MODES.includes(m);
+        const isUpscaleCategory = m === 'upscale' || UPSCALE_SUB_MODES.includes(m);
+        if (m === 'video') {
+            m = _videoSubMode || 'i2v';
+            _videoSubMode = m;
+            currentMode = m;
+        } else if (VIDEO_SUB_MODES.includes(m)) {
+            _videoSubMode = m;
+            currentMode = m;
+        } else if (m === 'tts') {
+            m = _ttsSubMode || 'text_only';
+            _ttsSubMode = m;
+            currentMode = m;
+        } else if (TTS_SUB_MODES.includes(m)) {
+            _ttsSubMode = m;
+            currentMode = m;
+        } else if (m === 'upscale') {
+            m = _upscaleSubMode || 'upscale_video';
+            _upscaleSubMode = m;
+            currentMode = m;
+        } else if (UPSCALE_SUB_MODES.includes(m)) {
+            _upscaleSubMode = m;
+            currentMode = m;
+        } else {
+            currentMode = m;
+        }
         scheduleSave();
-        const tabImage = document.getElementById('tab-image');
-        const tabVideo = document.getElementById('tab-video');
-        const tabBatch = document.getElementById('tab-batch');
-        if (tabImage) tabImage.classList.toggle('active', m === 'image');
-        if (tabVideo) tabVideo.classList.toggle('active', m === 'video');
-        if (tabBatch) tabBatch.classList.toggle('active', m === 'batch');
-        const tabMotion = document.getElementById('tab-motion');
-        if (tabMotion) tabMotion.classList.toggle('active', m === 'motion');
-        const tabTts = document.getElementById('tab-tts');
-        if (tabTts) tabTts.classList.toggle('active', m === 'tts');
 
-        const imageOpts = document.getElementById('image-opts');
+        const tabVideo = document.getElementById('tab-video');
+        const tabImage = document.getElementById('tab-image');
+        const tabTts = document.getElementById('tab-tts');
+        const tabUpscale = document.getElementById('tab-upscale');
+        if (tabVideo) tabVideo.classList.toggle('active', isVideoCategory);
+        if (tabImage) tabImage.classList.toggle('active', m === 'image');
+        if (tabTts) tabTts.classList.toggle('active', isTtsCategory);
+        if (tabUpscale) tabUpscale.classList.toggle('active', isUpscaleCategory);
+
+        const subTabs = document.getElementById('video-sub-tabs');
+        if (subTabs) subTabs.style.display = isVideoCategory ? 'block' : 'none';
+
+        const upscaleSubTabs = document.getElementById('upscale-sub-tabs');
+        if (upscaleSubTabs) upscaleSubTabs.style.display = isUpscaleCategory ? 'block' : 'none';
+
+        document.querySelectorAll('.video-sub-tab').forEach(btn => {
+            const subId = btn.id.replace('subtab-', '');
+            btn.classList.toggle('active', subId === _videoSubMode);
+        });
+
+        document.querySelectorAll('.tts-sub-tab').forEach(btn => {
+            const subId = btn.id.replace('tts-subtab-', '');
+            btn.classList.toggle('active', subId === _ttsSubMode);
+        });
+
+        document.querySelectorAll('.upscale-sub-tab').forEach(btn => {
+            const subId = btn.id.replace('upscale-subtab-', '');
+            btn.classList.toggle('active', subId === _upscaleSubMode.replace('upscale_', ''));
+        });
+
         const videoOpts = document.getElementById('video-opts');
         const batchOpts = document.getElementById('batch-opts');
-        if (imageOpts) imageOpts.style.display = m === 'image' ? 'block' : 'none';
-        if (videoOpts) videoOpts.style.display = m === 'video' ? 'block' : 'none';
-        if (batchOpts) batchOpts.style.display = m === 'batch' ? 'block' : 'none';
         const motionOpts = document.getElementById('motion-opts');
-        if (motionOpts) motionOpts.style.display = m === 'motion' ? 'block' : 'none';
+        const imageOpts = document.getElementById('image-opts');
         const ttsOpts = document.getElementById('tts-opts');
-        if (ttsOpts) ttsOpts.style.display = m === 'tts' ? 'block' : 'none';
+        const upscaleOpts = document.getElementById('upscale-opts');
+        if (videoOpts) videoOpts.style.display = (isVideoCategory && _videoSubMode === 'i2v') ? 'block' : 'none';
+        if (batchOpts) batchOpts.style.display = (isVideoCategory && _videoSubMode === 'batch') ? 'block' : 'none';
+        if (motionOpts) motionOpts.style.display = (isVideoCategory && _videoSubMode === 'motion') ? 'block' : 'none';
+        if (imageOpts) imageOpts.style.display = m === 'image' ? 'block' : 'none';
+        if (ttsOpts) ttsOpts.style.display = isTtsCategory ? 'block' : 'none';
+        if (upscaleOpts) upscaleOpts.style.display = isUpscaleCategory ? 'block' : 'none';
 
-        // 主按钮：TTS 模式下隐藏（TTS 有自己的生成按钮）
+        if (isTtsCategory) _updateTtsSubModeUI();
+        if (isUpscaleCategory) _updateUpscaleSubModeUI();
+
         const mainBtn = document.getElementById('mainBtn');
-        if (mainBtn) mainBtn.closest('div').style.display = m === 'tts' ? 'none' : '';
+        const ttsTopBtn = document.getElementById('tts-top-btn');
+        const upscaleTopBtn = document.getElementById('upscale-top-btn');
+        const renderBtnGroup = document.getElementById('render-btn-group');
+        if (isTtsCategory) {
+            if (mainBtn) mainBtn.style.display = 'none';
+            if (ttsTopBtn) ttsTopBtn.style.display = '';
+            if (upscaleTopBtn) upscaleTopBtn.style.display = 'none';
+            if (renderBtnGroup) renderBtnGroup.style.display = '';
+        } else if (isUpscaleCategory) {
+            if (mainBtn) mainBtn.style.display = 'none';
+            if (ttsTopBtn) ttsTopBtn.style.display = 'none';
+            if (upscaleTopBtn) upscaleTopBtn.style.display = '';
+            if (renderBtnGroup) renderBtnGroup.style.display = '';
+        } else {
+            if (mainBtn) mainBtn.style.display = '';
+            if (ttsTopBtn) ttsTopBtn.style.display = 'none';
+            if (upscaleTopBtn) upscaleTopBtn.style.display = 'none';
+            if (renderBtnGroup) renderBtnGroup.style.display = '';
+        }
 
-        // 视觉提示词：TTS 模式下隐藏（因为 TTS 有自己的输入框）
         const pc = document.getElementById('prompt-container');
-        if (pc) pc.style.display = m === 'tts' ? 'none' : '';
+        if (pc) pc.style.display = (isTtsCategory || isUpscaleCategory) ? 'none' : '';
 
-        // 移除 TTS 模式下的上方分割线
+        const seedSettings = document.getElementById('seed-settings');
+        if (seedSettings) seedSettings.style.display = (isTtsCategory || isUpscaleCategory) ? 'none' : '';
+
         const mainTabsSection = document.getElementById('main-tabs-section');
         if (mainTabsSection) {
-            mainTabsSection.style.borderBottom = m === 'tts' ? 'none' : '';
-            mainTabsSection.style.paddingBottom = m === 'tts' ? '0' : '';
+            mainTabsSection.style.borderBottom = (isTtsCategory || isUpscaleCategory) ? 'none' : '';
+            mainTabsSection.style.paddingBottom = (isTtsCategory || isUpscaleCategory) ? '0' : '';
         }
 
         if (m === 'batch') updateBatchSegments();
-        if (m === 'tts') checkTtsStatus();
+        if (isTtsCategory) checkTtsStatus();
+        if (isUpscaleCategory) checkUpscaleStatus();
+        if (m === 'image') { updateImgResPreview(); loadImgModelList(); }
         refreshPromptPlaceholder();
     }
+
+    window.switchVideoSubMode = function(sub) {
+        switchMode(sub);
+    };
 
     window.setVideoTransferMode = function(mode) {
         window._videoTransferMode = mode || 'action';
@@ -2644,23 +3237,563 @@
         activeStyle(repaintBtn, isRepaint);
     };
 
+    window.toggleHelpBubble = function(id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const isVisible = el.style.display !== 'none';
+        document.querySelectorAll('.help-bubble-content').forEach(b => b.style.display = 'none');
+        if (!isVisible) el.style.display = 'block';
+    };
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.help-bubble') && !e.target.closest('.help-bubble-content')) {
+            document.querySelectorAll('.help-bubble-content').forEach(b => b.style.display = 'none');
+        }
+    });
+
     function refreshPromptPlaceholder() {
         const pe = document.getElementById('prompt');
         if (!pe) return;
         pe.placeholder =
-            currentMode === 'tts' ? '切换到 TTS 模式时此框不参与生成' :
+            TTS_SUB_MODES.includes(currentMode) ? '切换到 TTS 语音模式时此框不参与生成' :
             _t('promptPlaceholder');
     }
 
     // ─── TTS 语音合成 ──────────────────────────────────────────────────────────
-    let _ttsRefB64 = null; // 存放参考音频的 base64 内容
+    let _ttsRefB64 = null;
+    let _pendingTtsTaskId = null;
+
+    function _handleTtsQueueComplete(result) {
+        const resultSec = document.getElementById('tts-result-section');
+        const btn = document.getElementById('tts-top-btn');
+
+        if (result && result.audio_url) {
+            const audioUrl = `${BASE}${result.audio_url}`;
+            const player = document.getElementById('tts-audio-player');
+            const dlLink = document.getElementById('tts-download-link');
+
+            if (player) { player.src = audioUrl; player.load(); }
+            if (dlLink) {
+                try {
+                    fetch(audioUrl).then(r => r.blob()).then(blob => {
+                        dlLink.href = URL.createObjectURL(blob);
+                    }).catch(() => {
+                        dlLink.href = audioUrl;
+                    });
+                    dlLink.download = result.audio_path || 'tts_output.wav';
+                } catch (e) {
+                    dlLink.href = audioUrl;
+                    dlLink.download = result.audio_path || 'tts_output.wav';
+                }
+            }
+            if (resultSec) resultSec.style.display = 'block';
+            addLog(`✅ TTS: ${result.audio_path} (${result.sample_rate || 0} Hz)`);
+        }
+
+        if (btn) { btn.disabled = false; btn.textContent = _t('ttsGenBtn'); }
+        _pendingTtsTaskId = null;
+    }
+
+    function _handleTtsQueueError(errDetail) {
+        const btn = document.getElementById('tts-top-btn');
+        addLog(`❌ TTS 任务失败: ${errDetail}`);
+
+        if (btn) { btn.disabled = false; btn.textContent = _t('ttsGenBtn'); }
+        _pendingTtsTaskId = null;
+    }
 
     window.onTtsModeChange = function() {
-        const mode = document.getElementById('tts-mode').value;
-        const refSec = document.getElementById('tts-ref-section');
+        _updateTtsSubModeUI();
+    };
+
+    window.switchTtsSubMode = function(sub) {
+        switchMode(sub);
+    };
+
+    window.switchUpscaleSubMode = function(sub) {
+        const modeMap = { 'video': 'upscale_video', 'image': 'upscale_image' };
+        switchMode(modeMap[sub] || sub);
+    };
+
+    function _updateUpscaleSubModeUI() {
+        const isVideo = _upscaleSubMode === 'upscale_video';
+        const videoSec = document.getElementById('upscale-video-section');
+        const imageSec = document.getElementById('upscale-image-section');
+        const fpsSec = document.getElementById('upscale-fps-section');
+        if (videoSec) videoSec.style.display = isVideo ? 'block' : 'none';
+        if (imageSec) imageSec.style.display = isVideo ? 'none' : 'block';
+        if (fpsSec) fpsSec.style.display = isVideo ? 'block' : 'none';
+    }
+
+    let _upscaleStatus = null;
+
+    async function checkUpscaleStatus() {
+        const bar = document.getElementById('upscale-status-bar');
+        if (!bar) return;
+        try {
+            const res = await fetch(`${BASE}/api/upscale/status`);
+            _upscaleStatus = await res.json();
+            const re = _upscaleStatus.realesrgan;
+            const ltx = _upscaleStatus.ltx_upscaler;
+            const gpu = _upscaleStatus.gpu;
+            const parts = [];
+            let realesrganAvailable = false;
+            if (re) { parts.push('✅ Real-ESRGAN 可用'); realesrganAvailable = true; }
+            else parts.push('❌ Real-ESRGAN 未安装');
+            if (ltx) parts.push('✅ LTX 快速放大可用');
+            else parts.push('⚠️ LTX 快速放大不可用');
+            if (gpu) {
+                if (gpu.device === 'cuda') {
+                    parts.push(`🚀 GPU: ${gpu.name} (${gpu.vram_mb}MB)`);
+                } else if (gpu.device === 'cpu') {
+                    parts.push('⚠️ 仅 CPU 模式（未检测到CUDA）');
+                }
+            }
+
+            bar.textContent = '';
+            bar.appendChild(document.createTextNode(parts.join('  |  ')));
+
+            if (!realesrganAvailable) {
+                const installBtn = document.createElement('button');
+                installBtn.style.cssText = 'margin-left:8px;font-size:10px;padding:2px 8px;border-radius:4px;cursor:pointer;font-weight:600;border:1px solid rgba(25,118,210,0.5);background:rgba(21,101,192,0.2);color:#42A5F5;white-space:nowrap;';
+                installBtn.textContent = _t('envInstall');
+                installBtn.onclick = async () => {
+                    installBtn.textContent = _t('envFixing');
+                    installBtn.disabled = true;
+                    installBtn.style.opacity = '0.6';
+                    try {
+                        const fixRes = await fetch(`${BASE}/api/system/env-fix`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ component: 'realesrgan' }),
+                        });
+                        const data = await fixRes.json();
+                        if (data.status === 'success') {
+                            installBtn.textContent = _t('envFixDone');
+                            installBtn.style.color = '#4CAF50';
+                            installBtn.style.borderColor = 'rgba(76,175,80,0.5)';
+                            installBtn.style.background = 'rgba(76,175,80,0.2)';
+                            setTimeout(() => checkUpscaleStatus(), 1000);
+                        } else {
+                            installBtn.textContent = _t('envFixFailed');
+                            installBtn.style.color = '#f44336';
+                            addLog((_t('upscaleInstallFailed') || '安装失败') + ': ' + (data.error || 'unknown'));
+                        }
+                    } catch (e) {
+                        installBtn.textContent = _t('envFixFailed');
+                        installBtn.style.color = '#f44336';
+                    }
+                };
+                bar.appendChild(installBtn);
+            }
+
+            onUpscaleEngineChange();
+            if (gpu) {
+                if (gpu.device === 'cuda' && gpu.vram_mb) {
+                    if (gpu.vram_mb < 6000) _upscaleAutoTileSize = 256;
+                    else if (gpu.vram_mb < 10000) _upscaleAutoTileSize = 400;
+                    else _upscaleAutoTileSize = 512;
+                } else {
+                    _upscaleAutoTileSize = 0;
+                }
+            }
+            _updateTileSizeDisplay();
+        } catch (e) {
+            bar.textContent = '❌ 无法检测放大引擎状态';
+        }
+        onUpscaleRatioChange();
+    }
+
+    function _updateTileSizeDisplay() {
+        const slider = document.getElementById('upscale-tile-size');
+        const valEl = document.getElementById('upscale-tile-val');
+        const hintEl = document.getElementById('upscale-tile-hint');
+        if (!slider || !valEl) return;
+        const v = parseInt(slider.value) || 0;
+        if (v === 0) {
+            if (_upscaleAutoTileSize > 0) {
+                valEl.textContent = _fmt('upscaleTileAuto', { val: _upscaleAutoTileSize });
+            } else {
+                valEl.textContent = _t('upscaleTileAutoCpu');
+            }
+        } else {
+            valEl.textContent = v;
+        }
+    }
+
+    function onUpscaleEngineChange() {
+        const engineEl = document.getElementById('upscale-engine');
+        const modelSec = document.getElementById('upscale-model-section');
+        const denoiseSec = document.getElementById('upscale-denoise-section');
+        const tileSec = document.getElementById('upscale-tile-section');
+        const fpsSec = document.getElementById('upscale-fps-section');
+        const engine = engineEl ? engineEl.value : 'realesrgan';
+        if (modelSec) modelSec.style.display = engine === 'realesrgan' ? 'block' : 'none';
+        if (denoiseSec) denoiseSec.style.display = engine === 'realesrgan' ? 'block' : 'none';
+        if (tileSec) tileSec.style.display = engine === 'realesrgan' ? 'block' : 'none';
+        const typeEl = document.getElementById('upscale-type');
+        const isVideo = typeEl ? typeEl.value === 'video' : true;
+        if (fpsSec) fpsSec.style.display = isVideo ? 'block' : 'none';
+    }
+
+    function onUpscaleFpsChange() {
+        const fpsEl = document.getElementById('upscale-fps');
+        const customEl = document.getElementById('upscale-fps-custom');
+        if (!fpsEl || !customEl) return;
+        customEl.style.display = fpsEl.value === 'custom' ? 'block' : 'none';
+    }
+
+    const UPSCALE_RATIO_PRESETS = {
+        '16:9': { rw: 16, rh: 9 },
+        '9:16': { rw: 9, rh: 16 },
+        '21:9': { rw: 21, rh: 9 },
+        '3:2': { rw: 3, rh: 2 },
+        '4:3': { rw: 4, rh: 3 },
+        '1:1': { rw: 1, rh: 1 },
+    };
+
+    const UPSCALE_QUALITY_PRESETS = {
+        '720p': { shortSide: 720 },
+        '1080p': { shortSide: 1080 },
+        '2k': { shortSide: 1440 },
+        '4k': { shortSide: 2160 },
+    };
+
+    function _computeResolutionForRatio(ratio, quality) {
+        const r = UPSCALE_RATIO_PRESETS[ratio];
+        const q = UPSCALE_QUALITY_PRESETS[quality];
+        if (!r || !q) return null;
+        const { rw, rh } = r;
+        const shortSide = q.shortSide;
+        if (rw >= rh) {
+            const w = Math.round(shortSide * rw / rh);
+            return { w, h: shortSide };
+        } else {
+            const h = Math.round(shortSide * rh / rw);
+            return { w: shortSide, h };
+        }
+    }
+
+    window.onUpscaleRatioChange = function() {
+        const ratio = document.getElementById('upscale-ratio')?.value || 'original';
+        const qualitySec = document.getElementById('upscale-quality-section');
+        const scaleSec = document.getElementById('upscale-scale-section');
+        const customSec = document.getElementById('upscale-custom-size-section');
+        const resizeModeSec = document.getElementById('upscale-resize-mode-section');
+        if (qualitySec) qualitySec.style.display = 'none';
+        if (scaleSec) scaleSec.style.display = 'none';
+        if (customSec) customSec.style.display = 'none';
+        if (resizeModeSec) resizeModeSec.style.display = 'none';
+        if (ratio === 'original') {
+            if (qualitySec) qualitySec.style.display = 'block';
+            onUpscaleQualityChange();
+        } else if (UPSCALE_RATIO_PRESETS[ratio]) {
+            if (qualitySec) qualitySec.style.display = 'block';
+            if (resizeModeSec) resizeModeSec.style.display = 'block';
+            onUpscaleQualityChange();
+            onUpscaleResizeModeChange();
+        } else if (ratio === 'scale') {
+            if (scaleSec) scaleSec.style.display = 'flex';
+        } else if (ratio === 'custom') {
+            if (customSec) customSec.style.display = 'block';
+            if (resizeModeSec) resizeModeSec.style.display = 'block';
+            onUpscaleResizeModeChange();
+        }
+    };
+
+    window.onUpscaleQualityChange = function() {
+        const ratio = document.getElementById('upscale-ratio')?.value || 'original';
+        const quality = document.getElementById('upscale-quality')?.value || '1080p';
+        const preview = document.getElementById('upscale-resolution-preview');
+        if (!preview) return;
+        if (ratio === 'original') {
+            preview.textContent = _fmt('upscaleOriginalQualityHint', { quality });
+        } else {
+            const res = _computeResolutionForRatio(ratio, quality);
+            if (res) {
+                preview.textContent = `${res.w} × ${res.h}`;
+            } else {
+                preview.textContent = '';
+            }
+        }
+    };
+
+    window.onUpscaleResizeModeChange = function() {
+        const preview = document.getElementById('upscale-resize-preview');
+        if (!preview) return;
+        const mode = document.getElementById('upscale-resize-mode')?.value || 'fit';
+        const modeDesc = {
+            'fit': '📐 适应：保持原始比例，缩放到目标尺寸内，可能留黑边后缩放到目标',
+            'crop': '✂️ 裁剪：保持原始比例，放大后从中心裁剪到目标尺寸',
+            'stretch': '↔️ 拉伸：不保持比例，直接拉伸到目标宽高',
+        };
+        preview.textContent = modeDesc[mode] || '';
+    };
+
+    async function handleUpscaleVideoUpload(file) {
+        if (!file) return;
+        try {
+            const b64Data = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = () => reject(new Error(_t('fileReadFail')));
+                reader.readAsDataURL(file);
+            });
+            addLog(_fmt('uploadFileStart', { label: _t('upscaleVideo') || '高清视频', name: file.name }));
+            const res = await fetch(`${BASE}/api/system/upload-image`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: b64Data, filename: file.name })
+            });
+            const data = await res.json();
+            if (res.ok && data.path) {
+                document.getElementById('upscale-video-path').value = data.path;
+                const preview = document.getElementById('upscale-video-preview');
+                const nameEl = document.getElementById('upscale-video-name');
+                const placeholder = document.getElementById('upscale-video-placeholder');
+                const clearOverlay = document.getElementById('clear-upscale-video-overlay');
+                if (preview) { preview.src = `${BASE}/api/system/file?path=${encodeURIComponent(data.path)}`; preview.style.display = 'block'; preview.load(); }
+                if (nameEl) { nameEl.textContent = file.name; nameEl.style.display = 'block'; }
+                if (placeholder) placeholder.style.display = 'none';
+                if (clearOverlay) clearOverlay.style.display = 'flex';
+                addLog('✅ ' + (_t('upscaleVideo') || '高清视频') + ' ' + file.name);
+                scheduleSave();
+            } else {
+                throw new Error(data.error || '上传失败');
+            }
+        } catch (e) {
+            addLog('上传视频失败: ' + e.message);
+        }
+    }
+
+    async function handleUpscaleImageUpload(file) {
+        if (!file) return;
+        try {
+            const b64Data = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = () => reject(new Error(_t('fileReadFail')));
+                reader.readAsDataURL(file);
+            });
+            addLog(_fmt('uploadFileStart', { label: _t('upscaleImage') || '高清图片', name: file.name }));
+            const res = await fetch(`${BASE}/api/system/upload-image`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: b64Data, filename: file.name })
+            });
+            const data = await res.json();
+            if (res.ok && data.path) {
+                document.getElementById('upscale-image-path').value = data.path;
+                const preview = document.getElementById('upscale-image-preview');
+                const placeholder = document.getElementById('upscale-image-placeholder');
+                const clearOverlay = document.getElementById('clear-upscale-image-overlay');
+                if (preview) { preview.src = `${BASE}/api/system/file?path=${encodeURIComponent(data.path)}`; preview.style.display = 'block'; }
+                if (placeholder) placeholder.style.display = 'none';
+                if (clearOverlay) clearOverlay.style.display = 'flex';
+                addLog('✅ ' + (_t('upscaleImage') || '高清图片') + ' ' + file.name);
+                scheduleSave();
+            } else {
+                throw new Error(data.error || '上传失败');
+            }
+        } catch (e) {
+            addLog('上传图片失败: ' + e.message);
+        }
+    }
+
+    function clearUpscaleVideo() {
+        document.getElementById('upscale-video-path').value = '';
+        const preview = document.getElementById('upscale-video-preview');
+        const nameEl = document.getElementById('upscale-video-name');
+        const placeholder = document.getElementById('upscale-video-placeholder');
+        const clearOverlay = document.getElementById('clear-upscale-video-overlay');
+        if (preview) { preview.removeAttribute('src'); preview.style.display = 'none'; preview.load(); }
+        if (nameEl) { nameEl.textContent = ''; nameEl.style.display = 'none'; }
+        if (placeholder) placeholder.style.display = 'flex';
+        if (clearOverlay) clearOverlay.style.display = 'none';
+        scheduleSave();
+    }
+
+    function clearUpscaleImage() {
+        document.getElementById('upscale-image-path').value = '';
+        const preview = document.getElementById('upscale-image-preview');
+        const placeholder = document.getElementById('upscale-image-placeholder');
+        const clearOverlay = document.getElementById('clear-upscale-image-overlay');
+        if (preview) { preview.removeAttribute('src'); preview.style.display = 'none'; }
+        if (placeholder) placeholder.style.display = 'flex';
+        if (clearOverlay) clearOverlay.style.display = 'none';
+        scheduleSave();
+    }
+
+    let _isUpscaling = false;
+
+    async function runUpscale() {
+        if (_isUpscaling) return;
+        const isVideo = _upscaleSubMode === 'upscale_video';
+        const inputPathEl = isVideo ? document.getElementById('upscale-video-path') : document.getElementById('upscale-image-path');
+        const inputPath = inputPathEl ? inputPathEl.value.trim() : '';
+        if (!inputPath) {
+            addLog(isVideo ? _t('upscaleWarnNoVideo') : _t('upscaleWarnNoImage'));
+            return;
+        }
+        const engine = document.getElementById('upscale-engine')?.value || 'realesrgan';
+        const scale = parseInt(document.getElementById('upscale-scale')?.value || '2');
+        const model = document.getElementById('upscale-model')?.value || 'realesrgan-x4plus';
+        const denoise = parseFloat(document.getElementById('upscale-denoise')?.value || '0.5');
+        const ratio = document.getElementById('upscale-ratio')?.value || 'original';
+        const quality = document.getElementById('upscale-quality')?.value || '1080p';
+        const resizeMode = document.getElementById('upscale-resize-mode')?.value || 'fit';
+        const tileSize = parseInt(document.getElementById('upscale-tile-size')?.value || '0');
+        let targetWidth = null;
+        let targetHeight = null;
+        let useResizeMode = false;
+
+        let targetFps = null;
+        if (isVideo) {
+            const fpsEl = document.getElementById('upscale-fps');
+            const fpsVal = fpsEl ? fpsEl.value : '0';
+            if (fpsVal === 'custom') {
+                const customFps = parseInt(document.getElementById('upscale-fps-custom')?.value || '0');
+                if (customFps > 0) targetFps = customFps;
+            } else if (fpsVal !== '0') {
+                targetFps = parseInt(fpsVal);
+            }
+        }
+
+        if (ratio === 'original') {
+            targetWidth = null;
+            targetHeight = parseInt(quality.replace('k', '')) > 0
+                ? UPSCALE_QUALITY_PRESETS[quality]?.shortSide || 1080
+                : 1080;
+            useResizeMode = true;
+        } else if (UPSCALE_RATIO_PRESETS[ratio]) {
+            const res = _computeResolutionForRatio(ratio, quality);
+            if (res) {
+                targetWidth = res.w;
+                targetHeight = res.h;
+            }
+            useResizeMode = true;
+        } else if (ratio === 'custom') {
+            targetWidth = parseInt(document.getElementById('upscale-target-width')?.value) || null;
+            targetHeight = parseInt(document.getElementById('upscale-target-height')?.value) || null;
+            useResizeMode = true;
+        }
+
+        const btn = document.getElementById('upscale-top-btn');
+        _isUpscaling = true;
+        if (btn) { btn.disabled = true; btn.textContent = _t('upscaleGenRunning') || '放大中...'; }
+
+        try {
+            const endpoint = isVideo ? '/api/upscale/video' : '/api/upscale/image';
+            const payload = { inputPath, engine, scale, model, denoise };
+            if (targetWidth !== null) payload.targetWidth = targetWidth;
+            if (targetHeight !== null) payload.targetHeight = targetHeight;
+            if (useResizeMode) payload.resizeMode = resizeMode;
+            if (ratio === 'original') payload.keepOriginalRatio = true;
+            if (tileSize > 0) payload.tileSize = tileSize;
+            if (targetFps !== null) payload.targetFps = targetFps;
+
+            const typeLabel = isVideo ? (_t('tabVideo') || '视频') : (_t('tabImage') || '图片');
+            const ratioLabel = ratio === 'scale' ? `${scale}x` : (ratio === 'original' ? quality : `${targetWidth||'?'}x${targetHeight||'?'}`);
+            const label = `高清放大: ${typeLabel} ${ratioLabel}`;
+
+            const queueInfo = await submitQueuedTask('upscale', endpoint, payload, label);
+            addLog(_fmt('queueSubmitLog', { id: queueInfo.task_id, n: Math.max(0, (queueInfo.position || 1) - 1) }));
+            if (queueInfo.task_id) {
+                _currentQueueTaskId = queueInfo.task_id;
+            }
+            _awaitingQueueStart = true;
+            _isGeneratingFlag = true;
+            _updateGenButtons();
+        } catch (e) {
+            addLog((_t('upscaleFailed') || '放大失败') + ': ' + e.message);
+        } finally {
+            _isUpscaling = false;
+            if (btn && !_isGeneratingFlag) { btn.disabled = false; btn.textContent = _t('upscaleGenBtn') || '🔍 开始高清放大'; }
+        }
+    }
+
+    function _updateTtsSubModeUI() {
+        const mode = _ttsSubMode;
+        const hasRef = !!_ttsRefB64;
+        const isTtsGen = mode !== 'asr';
+
+        const textSec = document.getElementById('tts-text-section');
+        const audioSec = document.getElementById('tts-audio-section');
         const ultSec = document.getElementById('tts-ultimate-section');
-        if (refSec) refSec.style.display = (mode === 'clone' || mode === 'ultimate_clone') ? 'block' : 'none';
+        const asrResultSec = document.getElementById('tts-asr-result-section');
+        const paramsSec = document.getElementById('tts-params-section');
+        const resultSec = document.getElementById('tts-result-section');
+        const audioLabel = document.getElementById('tts-audio-label');
+        const genBtn = document.getElementById('tts-top-btn');
+
+        if (textSec) textSec.style.display = isTtsGen ? 'block' : 'none';
+        if (audioSec) audioSec.style.display = (mode === 'clone' || mode === 'ultimate_clone' || mode === 'asr') ? 'block' : 'none';
         if (ultSec) ultSec.style.display = mode === 'ultimate_clone' ? 'block' : 'none';
+        if (asrResultSec) asrResultSec.style.display = mode === 'asr' ? 'block' : 'none';
+        if (paramsSec) paramsSec.style.display = isTtsGen ? 'block' : 'none';
+        if (resultSec) resultSec.style.display = (isTtsGen && resultSec.style.display === 'block') ? 'block' : 'none';
+
+        if (audioLabel) {
+            if (mode === 'asr') {
+                audioLabel.textContent = _t('asrUploadTitle') || '上传音频 / Upload Audio';
+            } else {
+                audioLabel.textContent = _t('ttsRefLabel') || '📎 参考音频（Reference）';
+            }
+        }
+
+        if (genBtn) {
+            if (mode === 'asr') {
+                genBtn.textContent = _t('asrRunBtn') || '🔍 开始识别';
+                genBtn.onclick = runAsr;
+            } else {
+                genBtn.textContent = _t('ttsGenBtn') || '🎙️ 开始生成语音';
+                genBtn.onclick = runTts;
+            }
+        }
+
+        const cloneBtn = document.getElementById('tts-clone-transcribe-btn');
+        const ultBtn = document.getElementById('tts-ultimate-transcribe-btn');
+        if (cloneBtn) cloneBtn.style.display = (hasRef && (mode === 'clone' || mode === 'ultimate_clone')) ? 'block' : 'none';
+        if (ultBtn) ultBtn.style.display = (hasRef && mode === 'ultimate_clone') ? 'inline-block' : 'none';
+
+        document.querySelectorAll('.tts-sub-tab').forEach(btn => {
+            const subId = btn.id.replace('tts-subtab-', '');
+            btn.classList.toggle('active', subId === _ttsSubMode);
+        });
+    }
+
+    window.transcribeTtsRef = async function(target) {
+        if (!_ttsRefB64) { addLog('❌ 请先上传参考音频'); return; }
+        const cloneBtn = document.getElementById('tts-clone-transcribe-btn');
+        const ultBtn = document.getElementById('tts-ultimate-transcribe-btn');
+        const activeBtn = target === 'ultimate' ? ultBtn : cloneBtn;
+        if (activeBtn) { activeBtn.disabled = true; activeBtn.textContent = _t('ttsTranscribing') || '⏳ 识别中...'; }
+        try {
+            const res = await fetch(`${BASE}/api/tts/transcribe`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ audio: _ttsRefB64 })
+            });
+            const data = await res.json();
+            if (data.error) {
+                addLog(`❌ ${_t('ttsTranscribeFail')}: ${data.error}`);
+                return;
+            }
+            const text = data.text || '';
+            if (!text) { addLog('⚠️ ' + (_t('ttsTranscribeEmpty') || '识别结果为空')); return; }
+            if (target === 'ultimate') {
+                const el = document.getElementById('tts-prompt-text');
+                if (el) el.value = text;
+            } else {
+                const el = document.getElementById('tts-text');
+                if (el) el.value = text;
+            }
+            const langInfo = data.language ? ` (${data.language})` : '';
+            addLog(`✅ ${_t('ttsTranscribeOk')}${langInfo}: ${text.slice(0, 80)}${text.length > 80 ? '...' : ''}`);
+        } catch (e) {
+            addLog(`❌ ${_t('ttsTranscribeFail')}: ${e.message}`);
+        } finally {
+            if (activeBtn) { activeBtn.disabled = false; activeBtn.textContent = _t('ttsTranscribeBtn') || '🔍 识别为文字'; }
+        }
     };
 
     window.handleTtsRefUpload = async function(file) {
@@ -2676,6 +3809,7 @@
             if (placeholder) placeholder.style.display = 'none';
             if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = '✅ ' + file.name; }
             if (clearBtn) clearBtn.style.display = 'flex';
+            _updateTtsSubModeUI();
             addLog(`✅ 参考音频已加载: ${file.name}`);
         };
         reader.readAsDataURL(file);
@@ -2691,28 +3825,132 @@
         if (placeholder) placeholder.style.display = 'block';
         if (statusEl) { statusEl.style.display = 'none'; statusEl.textContent = ''; }
         if (clearBtn) clearBtn.style.display = 'none';
+        _updateTtsSubModeUI();
         addLog('🧹 已清除参考音频');
+    };
+
+    let _asrLastResult = '';
+
+    window.runAsr = async function() {
+        if (!_ttsRefB64) { addLog('❌ 请先上传音频文件'); return; }
+        const btn = document.getElementById('tts-top-btn');
+        const resultEl = document.getElementById('asr-result');
+        const copyBtn = document.getElementById('asr-copy-btn');
+        if (btn) { btn.disabled = true; btn.textContent = _t('asrRunBusy') || '⏳ 识别中...'; }
+        if (resultEl) resultEl.textContent = _t('asrRunBusy') || '⏳ 识别中...';
+        try {
+            const res = await fetch(`${BASE}/api/tts/transcribe`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ audio: _ttsRefB64 })
+            });
+            const data = await res.json();
+            if (data.error) {
+                if (resultEl) resultEl.textContent = '❌ ' + data.error;
+                addLog(`❌ ${_t('asrRunFail')}: ${data.error}`);
+                return;
+            }
+            const text = data.text || '';
+            _asrLastResult = text;
+            const langInfo = data.language ? ` [${data.language}]` : '';
+            if (resultEl) resultEl.textContent = text || (_t('asrResultEmpty') || '（识别结果为空）');
+            if (copyBtn) copyBtn.style.display = text ? 'inline-block' : 'none';
+            addLog(`✅ ${_t('asrRunOk')}${langInfo}: ${text.slice(0, 80)}${text.length > 80 ? '...' : ''}`);
+        } catch (e) {
+            if (resultEl) resultEl.textContent = '❌ ' + e.message;
+            addLog(`❌ ${_t('asrRunFail')}: ${e.message}`);
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = _t('asrRunBtn') || '🔍 开始识别'; }
+        }
+    };
+
+    window.copyAsrResult = function() {
+        if (!_asrLastResult) return;
+        navigator.clipboard.writeText(_asrLastResult).then(() => {
+            addLog('✅ 已复制到剪贴板');
+        }).catch(() => {
+            addLog('❌ 复制失败');
+        });
+    };
+
+    window.runTtsOrAsr = function() {
+        if (_ttsSubMode === 'asr') {
+            runAsr();
+        } else {
+            runTts();
+        }
     };
 
     async function checkTtsStatus() {
         const bar = document.getElementById('tts-status-bar');
         if (!bar) return;
         try {
-            const res = await fetch(`${BASE}/api/tts/status`);
-            const data = await res.json();
-            if (data.available) {
+            const [ttsRes, asrRes] = await Promise.all([
+                fetch(`${BASE}/api/tts/status`).then(r => r.json()).catch(() => null),
+                fetch(`${BASE}/api/tts/asr-status`).then(r => r.json()).catch(() => null)
+            ]);
+            const parts = [];
+            let asrAvailable = false;
+            if (ttsRes) {
+                if (ttsRes.available) {
+                    parts.push('✅ VoxCPM2');
+                } else {
+                    parts.push('❌ VoxCPM2 ' + (!ttsRes.voxcpm_installed ? _t('ttsStatusNoPkq') : _t('ttsStatusNoDir') + (ttsRes.expected_model_dir || '')));
+                }
+            }
+            if (asrRes) {
+                if (asrRes.available) {
+                    parts.push('✅ faster-whisper');
+                    asrAvailable = true;
+                } else {
+                    parts.push('⚠️ faster-whisper 未安装');
+                }
+            }
+            if (parts.length === 0) {
+                bar.style.color = '#f87171';
+                bar.textContent = _t('ttsStatusConnErr') + '无法连接';
+            } else if (parts.some(p => p.startsWith('✅'))) {
                 bar.style.color = 'var(--accent)';
                 bar.style.borderColor = 'var(--accent)';
-                bar.textContent = _t('ttsStatusReady') + data.model_dir;
-            } else if (!data.voxcpm_installed) {
-                bar.style.color = '#f87171';
-                bar.textContent = _t('ttsStatusNoPkq');
-            } else if (!data.model_dir_exists) {
-                bar.style.color = '#f87171';
-                bar.textContent = _t('ttsStatusNoDir') + (data.expected_model_dir || data.model_dir || 'models\\VoxCPM2');
+                bar.textContent = parts.join('  |  ');
             } else {
-                bar.style.color = 'var(--text-dim)';
-                bar.textContent = _t('ttsStatusNotAvail');
+                bar.style.color = '#f87171';
+                bar.textContent = parts.join('  |  ');
+            }
+            if (!asrAvailable) {
+                const installBtn = document.createElement('button');
+                installBtn.style.cssText = 'margin-left:8px;font-size:10px;padding:2px 8px;border-radius:4px;cursor:pointer;font-weight:600;border:1px solid rgba(25,118,210,0.5);background:rgba(21,101,192,0.2);color:#42A5F5;white-space:nowrap;';
+                installBtn.textContent = _t('envInstall');
+                installBtn.onclick = async () => {
+                    installBtn.textContent = _t('envFixing');
+                    installBtn.disabled = true;
+                    installBtn.style.opacity = '0.6';
+                    try {
+                        const res = await fetch(`${BASE}/api/system/env-fix`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ component: 'faster_whisper' }),
+                        });
+                        const data = await res.json();
+                        if (data.status === 'success') {
+                            installBtn.textContent = _t('envFixDone');
+                            installBtn.style.color = '#4CAF50';
+                            installBtn.style.borderColor = 'rgba(76,175,80,0.5)';
+                            installBtn.style.background = 'rgba(76,175,80,0.2)';
+                            setTimeout(() => checkTtsStatus(), 1000);
+                        } else {
+                            installBtn.textContent = _t('envFixFailed');
+                            installBtn.style.color = '#f44336';
+                            addLog((_t('upscaleInstallFailed') || '安装失败') + ': ' + (data.error || 'unknown'));
+                        }
+                    } catch (e) {
+                        installBtn.textContent = _t('envFixFailed');
+                        installBtn.style.color = '#f44336';
+                    }
+                };
+                bar.textContent = '';
+                bar.appendChild(document.createTextNode(parts.join('  |  ')));
+                bar.appendChild(installBtn);
             }
         } catch (e) {
             bar.style.color = '#f87171';
@@ -2720,11 +3958,25 @@
         }
     }
 
+    window.playTtsFromQueue = function(audioUrl) {
+        if (!audioUrl) return;
+        const fullUrl = audioUrl.startsWith('http') ? audioUrl : `${BASE}${audioUrl}`;
+        const player = document.getElementById('tts-audio-player');
+        const dlLink = document.getElementById('tts-download-link');
+        const resultSec = document.getElementById('tts-result-section');
+        if (player) { player.src = fullUrl; player.load(); player.play().catch(() => {}); }
+        if (dlLink) {
+            dlLink.href = fullUrl;
+            dlLink.download = 'tts_output.wav';
+        }
+        if (resultSec) resultSec.style.display = 'block';
+    };
+
     window.runTts = async function() {
         const text = (document.getElementById('tts-text')?.value || '').trim();
         if (!text) { addLog(_t('ttsErrNoText')); return; }
 
-        const mode = document.getElementById('tts-mode')?.value || 'text_only';
+        const mode = _ttsSubMode;
         const cfg = parseFloat(document.getElementById('tts-cfg')?.value || 2.0);
         const steps = parseInt(document.getElementById('tts-steps')?.value || 10);
         const promptText = document.getElementById('tts-prompt-text')?.value || '';
@@ -2734,7 +3986,7 @@
             return;
         }
 
-        const btn = document.getElementById('tts-gen-btn');
+        const btn = document.getElementById('tts-top-btn');
         if (btn) { btn.disabled = true; btn.textContent = _t('ttsGenBusy'); }
         const resultSec = document.getElementById('tts-result-section');
         if (resultSec) resultSec.style.display = 'none';
@@ -2752,50 +4004,18 @@
                 prompt_text: promptText || null,
             };
 
-            const res = await fetch(`${BASE}/api/tts/generate`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const data = await res.json();
+            const label = text.length > 40 ? text.slice(0, 40) + '...' : text;
+            const queueRes = await submitQueuedTask('tts', '/api/tts/generate', payload, `🎙️ ${label}`);
 
-            if (!res.ok || data.status !== 'complete') {
-                throw new Error(data.error || 'Generation failed');
-            }
-
-            const audioUrl = `${BASE}${data.audio_url}`;
-            const player = document.getElementById('tts-audio-player');
-            const dlLink = document.getElementById('tts-download-link');
-
-            // 播放音频
-            if (player) { player.src = audioUrl; player.load(); }
-            // 直接下载音频，不跳转页面
-            if (dlLink) {
-                try {
-                    const resp = await fetch(audioUrl);
-                    const blob = await resp.blob();
-                    const blobUrl = URL.createObjectURL(blob);
-                    dlLink.href = blobUrl;
-                    dlLink.download = data.audio_path || 'tts_output.wav';
-                    // 不再自动触发点击下载
-                    // dlLink.click();
-                } catch (e) {
-                    // 若下载失败，回退到直接链接方式
-                    dlLink.href = audioUrl;
-                    dlLink.download = data.audio_path || 'tts_output.wav';
-                }
-            }
-            if (resultSec) resultSec.style.display = 'block';
-
-            addLog(`✅ TTS: ${data.audio_path} (${data.sample_rate} Hz)`);
-
-            // 刷新历史记录
-            setTimeout(() => { isLoadingHistory = false; if (typeof fetchHistory === 'function') fetchHistory(1); }, 500);
+            _pendingTtsTaskId = queueRes.task_id;
+            _isGeneratingFlag = true;
+            _awaitingQueueStart = true;
+            _updateGenButtons();
 
         } catch (e) {
             addLog(`❌ TTS Error: ${e.message}`);
-        } finally {
             if (btn) { btn.disabled = false; btn.textContent = _t('ttsGenBtn'); }
+            _pendingTtsTaskId = null;
         }
     };
     // ──────────────────────────────────────────────────────────────────────────
@@ -2810,7 +4030,6 @@
         if (audioWrapper) audioWrapper.style.display = "none";
         if (player) {
             try { player.pause(); } catch(_) {}
-            try { player.source = { type: 'video', sources: [] }; } catch(_) {}
         } else {
             const vid = document.getElementById('res-video');
             if (vid) { vid.pause(); vid.removeAttribute('src'); vid.load(); }
@@ -2923,7 +4142,8 @@
     function makeReplayRecord(source) {
         const payload = source?.payload || {};
         const endpoint = source?.endpoint || (source?.mode === 'image' ? '/api/generate-image' : '/api/generate');
-        let mode = source?.mode || 'video';
+        let mode = source?.mode || 'i2v';
+        if (mode === 'video') mode = 'i2v';
         if (endpoint === '/api/generate-image') mode = 'image';
         else if (endpoint === '/api/ic-lora/generate') mode = 'motion';
         else if (endpoint === '/api/generate-batch') mode = 'batch';
@@ -3079,7 +4299,7 @@
             const stepsVal = document.getElementById('stepsVal');
             if (stepsVal && payload.numSteps) stepsVal.innerText = payload.numSteps;
             updateImgResPreview();
-        } else if (record.mode === 'video') {
+        } else if (record.mode === 'i2v' || record.mode === 'video') {
             const q = String(payload.resolution || '').replace('p', '');
             if (q) setElValue('vid-quality', q);
             setElValue('vid-ratio', (payload.aspectRatio === 'ref' && payload.customWidth && payload.customHeight) ? 'custom' : payload.aspectRatio);
@@ -3101,14 +4321,26 @@
                 : 'action';
             window.setVideoTransferMode(mode);
             setNamedUpload(payload.video_path, 'motion-video-path', 'motion-video-placeholder', 'motion-video-status', 'motion-video-name', 'clear-motion-video-overlay');
+            const motionVidPreview = document.getElementById('motion-video-preview');
+            if (motionVidPreview && payload.video_path) {
+                motionVidPreview.poster = `${BASE}/api/system/video-thumbnail?path=${encodeURIComponent(payload.video_path)}&_t=${Date.now()}`;
+                motionVidPreview.src = mediaUrlForPath(payload.video_path) + '&_t=' + Date.now();
+            }
             const imgPath = Array.isArray(payload.images) && payload.images[0] ? payload.images[0].path : '';
             setMotionImagePath(imgPath);
             setElValue('motion-conditioning-type', payload.conditioning_type);
             setElValue('motion-fps', payload.fps);
             setElValue('motion-duration', payload.duration);
             setElValue('motion-strength', payload.conditioning_strength);
+            setElValue('motion-quality', payload.quality || '720');
+            updateMotionResPreview();
+            applyLoraReplay('motion-loras-container', payload.loraPaths || [], payload.loraStrengths || []);
+            setElValue('motion-seed', payload.seed || '');
             const strengthVal = document.getElementById('motion-strength-val');
             if (strengthVal && payload.conditioning_strength !== undefined) strengthVal.textContent = String(payload.conditioning_strength);
+            setElValue('motion-attention-strength', payload.attention_strength ?? 1.0);
+            const attentionVal = document.getElementById('motion-attention-val');
+            if (attentionVal && payload.attention_strength !== undefined) attentionVal.textContent = String(payload.attention_strength);
         } else if (record.mode === 'batch') {
             const q = String(payload.resolution || '').replace('p', '');
             if (q) setElValue('batch-quality', q);
@@ -3203,8 +4435,8 @@
     window.applyReplayPayloadById = applyReplayPayloadById;
 
     async function run() {
-        const useQueue = ['video', 'motion', 'batch', 'image'].includes(currentMode);
-        // 防止重复点击（_isGeneratingFlag 比 btn.disabled 更可靠）
+        console.log('[RUN] run() called, currentMode=', currentMode, '_isGeneratingFlag=', _isGeneratingFlag);
+        const useQueue = ['i2v', 'motion', 'batch', 'image'].includes(currentMode);
         if (_isGeneratingFlag) {
             addLog(_t('warnGenerating'));
             return;
@@ -3243,7 +4475,8 @@
 
         // 先设置标志 + 禁用按钮，然后用顶层 try/finally 保证一定能解锁
         _isGeneratingFlag = true;
-        btn.disabled = true;
+        let _queueSubmitOk = false;
+        _updateGenButtons();
 
         try {
             if (!useQueue) {
@@ -3266,8 +4499,8 @@
                 if (videoWrapper) videoWrapper.style.display = "none";
                 const audioWrapper = document.getElementById('audio-wrapper');
                 if (audioWrapper) audioWrapper.style.display = "none";
-                if (player) { try { player.pause(); } catch(_) {} try { player.source = { type: 'video', sources: [] }; } catch(_) {} }
-                else if (resVideo) { resVideo.pause?.(); resVideo.removeAttribute?.('src'); }
+                if (player) { try { player.pause(); } catch(_) {} }
+                else if (resVideo) { resVideo.pause?.(); resVideo.removeAttribute?.('src'); resVideo.load?.(); }
                 if (audioPlayer) { try { audioPlayer.stop(); } catch(_) {} }
 
                 checkStatus();
@@ -3299,11 +4532,17 @@
                 payload = {
                     prompt, width: w, height: h,
                     numSteps: parseInt(document.getElementById('img-steps').value),
-                    numImages: 1
+                    numImages: 1,
+                    modelPath: getSelectedImgModelPath() || null,
                 };
+                const imgLoras = collectLoras('img-loras-container');
+                if (imgLoras.length > 0) {
+                    payload.loraPaths = imgLoras.map(l => l.path);
+                    payload.loraStrengths = imgLoras.map(l => l.strength);
+                }
                 addLog(`正在发起图像渲染: ${w}x${h}, Steps: ${payload.numSteps}`);
 
-            } else if (currentMode === 'video') {
+            } else if (currentMode === 'i2v') {
                 const res = updateResPreview();
                 const genSize = getGenerationSize('video');
                 const durEl = document.getElementById('vid-duration');
@@ -3320,7 +4559,8 @@
                 const startFramePathValue = startFrameEl ? startFrameEl.value : '';
                 const endFrameEl = document.getElementById('end-frame-path');
                 const endFramePathValue = endFrameEl ? endFrameEl.value : '';
-                const modelPath = getSelectedModelCheckpointPath();
+                const vidModelSelect = document.getElementById('vid-model-select');
+                const modelPath = vidModelSelect ? vidModelSelect.value : getSelectedModelCheckpointPath();
 
                 let finalImagePath = null, finalStartFramePath = null, finalEndFramePath = null;
                 if (startFramePathValue && endFramePathValue) {
@@ -3347,6 +4587,11 @@
                 const loraPath = effectiveLoraPaths[0] || null;
                 const loraStrength = effectiveLoraStrengths[0] || 1.0;
 
+                const isDistilled = !isVidModelDev();
+                const vidStepsEl = document.getElementById('vid-steps');
+                const vidSteps = vidStepsEl ? parseInt(vidStepsEl.value, 10) : 30;
+
+                const vidMotionSpeed = parseFloat(document.getElementById('vid-motion-speed')?.value) || 1.0;
                 payload = {
                     prompt, resolution: res, model: "ltx-2",
                     cameraMotion: document.getElementById('vid-motion')?.value || 'none',
@@ -3364,13 +4609,16 @@
                     loraPaths: effectiveLoraPaths.length > 0 ? effectiveLoraPaths : null,
                     loraStrengths: effectiveLoraStrengths.length > 0 ? effectiveLoraStrengths : null,
                     modelPath: modelPath || null,
+                    distilled: isDistilled,
+                    numInferenceSteps: isDistilled ? null : vidSteps,
+                    motionSpeed: vidMotionSpeed,
                 };
                 
                 let loraLog = _t('loraNoneLabel');
                 if (effectiveLoraPaths.length > 0) {
                     loraLog = effectiveLoraPaths.map(p => p.split(/[/\\]/).pop()).join(', ');
                 }
-                addLog(`正在发起视频渲染: ${res}, 时长: ${dur}s, FPS: ${fps}, LoRA: ${loraLog}`);
+                addLog(`正在发起视频渲染: ${res}, 时长: ${dur}s, FPS: ${fps}, 运动速度: ${vidMotionSpeed}x, 步数: ${isDistilled ? '8+3(蒸馏)' : `${vidSteps}(标准)`}, LoRA: ${loraLog}`);
 
             } else if (currentMode === 'motion') {
                 const videoPath = document.getElementById('motion-video-path')?.value || '';
@@ -3390,22 +4638,45 @@
                 let strength = parseFloat(document.getElementById('motion-strength')?.value || '0.5');
                 if (!Number.isFinite(strength)) strength = 1.0;
                 strength = Math.max(0, Math.min(2.0, strength));
+                let attentionStrength = parseFloat(document.getElementById('motion-attention-strength')?.value || '1.0');
+                if (!Number.isFinite(attentionStrength)) attentionStrength = 1.0;
+                attentionStrength = Math.max(0, Math.min(1.0, attentionStrength));
                 const motionPrompt = prompt || 'A high quality video of the target subject following the reference motion, coherent movement, stable identity, clean details';
+                const motionQuality = document.getElementById('motion-quality')?.value || '720';
+                const motionLoraPaths = [];
+                const motionLoraStrengths = [];
+                document.querySelectorAll('#motion-loras-container .lora-entry').forEach(entry => {
+                    const sel = entry.querySelector('.lora-select');
+                    const sld = entry.querySelector('.lora-strength');
+                    if (sel && sel.value) {
+                        motionLoraPaths.push(sel.value);
+                        motionLoraStrengths.push(parseFloat(sld?.value || '1.0'));
+                    }
+                });
+                const motionSeedRaw = document.getElementById('motion-seed')?.value;
+                const motionSeed = motionSeedRaw ? parseInt(motionSeedRaw, 10) : null;
+                const motionMotionSpeed = parseFloat(document.getElementById('motion-motion-speed')?.value) || 1.0;
                 endpoint = '/api/ic-lora/generate';
                 payload = {
                     video_path: videoPath,
                     conditioning_type: conditioningType,
                     prompt: motionPrompt,
                     conditioning_strength: strength,
+                    attention_strength: attentionStrength,
                     fps: motionFps,
                     duration: motionDuration,
-                    num_inference_steps: 30,
                     cfg_guidance_scale: 1.0,
                     negative_prompt: "low quality, blurry, noisy, static noise, distorted",
-                    images: transferMode === 'repaint' ? [] : [{ path: imagePath, frame: 0, strength: 1.0 }]
+                    images: transferMode === 'repaint' ? [] : [{ path: imagePath, frame: 0, strength: 1.0 }],
+                    modelPath: getSelectedModelCheckpointPath() || null,
+                    quality: motionQuality,
+                    seed: motionSeed,
+                    loraPaths: motionLoraPaths.length > 0 ? motionLoraPaths : undefined,
+                    loraStrengths: motionLoraStrengths.length > 0 ? motionLoraStrengths : undefined,
+                    motionSpeed: motionMotionSpeed,
                 };
                 if (!prompt) addLog(_t('motionDefaultPromptNotice'));
-                addLog(`${_fmt('motionStartLog', { type: conditioningType, strength })}, ${_fmt('motionStartMeta', { fps: motionFps || 'auto', duration: motionDuration || 'auto' })}`);
+                addLog(`${_fmt('motionStartLog', { type: conditioningType, strength })}, ${_fmt('motionStartMeta', { fps: motionFps || 'auto', duration: motionDuration || 'auto' })}, 运动速度: ${motionMotionSpeed}x`);
 
             } else if (currentMode === 'batch') {
                 const res = updateBatchResPreview();
@@ -3466,6 +4737,7 @@
                         strengths.push(sv);
                     }
                     endpoint = '/api/generate';
+                    const batchMotionSpeed = parseFloat(document.getElementById('batch-motion-speed')?.value) || 1.0;
                     payload = {
                         prompt: combinedPrompt,
                         resolution: res,
@@ -3490,9 +4762,10 @@
                         loraPaths: effectiveLoraPaths.length > 0 ? effectiveLoraPaths : null,
                         loraStrengths: effectiveLoraStrengths.length > 0 ? effectiveLoraStrengths : null,
                         modelPath: modelPath || null,
+                        motionSpeed: batchMotionSpeed,
                     };
                     addLog(
-                        `单次多关键帧: ${nKf} 帧时长合计 ${sumSec.toFixed(1)}s → 请求时长 ${dur}s, ${res}, FPS ${fps}`
+                        `单次多关键帧: ${nKf} 帧时长合计 ${sumSec.toFixed(1)}s → 请求时长 ${dur}s, ${res}, FPS ${fps}, 运动速度: ${batchMotionSpeed}x`
                     );
                 } else {
                     const segments = [];
@@ -3512,6 +4785,7 @@
                     endpoint = '/api/generate-batch';
                     const bgAudioEl = document.getElementById('batch-background-audio-path');
                     const backgroundAudioPath = (bgAudioEl && bgAudioEl.value) ? bgAudioEl.value.trim() : null;
+                    const batchSegMotionSpeed = parseFloat(document.getElementById('batch-motion-speed')?.value) || 1.0;
                     payload = {
                         segments: segments,
                         resolution: res,
@@ -3525,13 +4799,15 @@
                         loraStrengths: effectiveLoraStrengths.length > 0 ? effectiveLoraStrengths : null,
                         negativePrompt: "low quality, blurry, noisy, static noise, distorted",
                         backgroundAudioPath: backgroundAudioPath || null,
-                        modelPath: modelPath || null
+                        modelPath: modelPath || null,
+                        motionSpeed: batchSegMotionSpeed,
                     };
-                    addLog(`分段拼接: ${segments.length} 段, ${res}${backgroundAudioPath ? '，含统一配乐' : ''}`);
+                    addLog(`分段拼接: ${segments.length} 段, ${res}, 运动速度: ${batchSegMotionSpeed}x${backgroundAudioPath ? '，含统一配乐' : ''}`);
                 }
             }
 
             if (useQueue) {
+                _awaitingQueueStart = true;
                 if (pendingReplaySeedByMode[currentMode]) {
                     payload.seed = Number(pendingReplaySeedByMode[currentMode]);
                     delete pendingReplaySeedByMode[currentMode];
@@ -3546,6 +4822,10 @@
                 console.log('[RUN] Queue submit result:', queueInfo);
                 addLog(_fmt('queueSubmitLog', { id: queueInfo.task_id, n: Math.max(0, (queueInfo.position || 1) - 1) }));
                 if (getSeedMode() === 'random') refreshRandomSeedValue();
+                if (queueInfo.task_id) {
+                    _currentQueueTaskId = queueInfo.task_id;
+                }
+                _queueSubmitOk = true;
             } else {
                 payload = ensureReplaySeed(payload);
                 const res = await fetch(BASE + endpoint, {
@@ -3594,18 +4874,27 @@
             }
 
         } finally {
-            _isGeneratingFlag = false;
-            if (btn) btn.disabled = false;
-            if (!useQueue) {
-                removeCurrentLoadingCard();
-                stopProgressPolling();
-            }
-            checkStatus();
-            if (!useQueue) {
-                setTimeout(() => { clearGpu(); }, 500);
+            if (useQueue && _queueSubmitOk) {
+                checkStatus();
+            } else {
+                _isGeneratingFlag = false;
+                _awaitingQueueStart = false;
+                _currentQueueTaskId = null;
+                _updateGenButtons();
+                if (!useQueue) {
+                    removeCurrentLoadingCard();
+                    stopProgressPolling();
+                }
+                checkStatus();
+                if (!useQueue) {
+                    setTimeout(() => { clearGpu(); }, 500);
+                }
             }
         }
     }
+
+    window.run = run;
+    window.switchMode = switchMode;
 
     let _feDebugEnabled = false;
     let _feDebugBuffer = [];
@@ -3805,7 +5094,6 @@
                 }
                 offlineCount = 0;
                 const d = await res.json();
-                console.log('[PROGRESS]', JSON.stringify(d));
                 if (d.progress > 0) {
                     const logMsg = d.log_message ?? d.logMessage ?? '';
 
@@ -3918,16 +5206,13 @@
         if (videoWrapper) videoWrapper.style.display = "none";
         if (audioWrapper) audioWrapper.style.display = "none";
         
+        if (player) {
+            try { player.pause(); } catch(_) {}
+        }
         if (vid) {
             vid.pause();
             vid.removeAttribute('src');
             vid.load();
-        }
-        if (player) {
-            try { player.pause(); } catch(_) {}
-            try {
-                player.source = { type: 'video', sources: [] };
-            } catch(_) {}
         }
         if (audio) {
             audio.pause();
@@ -4058,21 +5343,41 @@
                 vid.addEventListener('error', _onVideoError);
                 if (player) {
                     try {
-                        vid.src = videoUrl;
-                        vid.load();
-                    } catch(_) {}
-                    try {
                         player.source = {
                             type: 'video',
                             sources: [{ src: videoUrl, type: 'video/mp4' }]
                         };
-                    } catch(_) {}
-                    setTimeout(() => {
+                    } catch(e) {
+                        console.error("[VIDEO-PROTECT] player.source setter failed:", e);
+                        try { player.destroy(); } catch(_) {}
+                        player = null;
+                        _tryPlayVideoNative(videoUrl);
+                        return;
+                    }
+                    const _onLoaded = () => {
+                        vid.removeEventListener('loadeddata', _onLoaded);
+                        vid.removeEventListener('error', _onLoadError);
                         try {
                             const p = player.play();
                             if (p && typeof p.catch === 'function') p.catch(() => {});
                         } catch(_) {}
-                    }, 150);
+                    };
+                    const _onLoadError = () => {
+                        vid.removeEventListener('loadeddata', _onLoaded);
+                        vid.removeEventListener('error', _onLoadError);
+                    };
+                    vid.addEventListener('loadeddata', _onLoaded);
+                    vid.addEventListener('error', _onLoadError);
+                    setTimeout(() => {
+                        vid.removeEventListener('loadeddata', _onLoaded);
+                        vid.removeEventListener('error', _onLoadError);
+                        if (vid.readyState >= 2) {
+                            try {
+                                const p = player.play();
+                                if (p && typeof p.catch === 'function') p.catch(() => {});
+                            } catch(_) {}
+                        }
+                    }, 3000);
                 } else {
                     _tryPlayVideoNative(videoUrl);
                 }
@@ -4199,6 +5504,20 @@
                 loras: gi.loras || [],
                 lora_details: gi.lora_details || [],
                 elapsed: gi.elapsed || '',
+                upscale_scale: gi.upscale_scale || '',
+                upscale_actual_scale: gi.upscale_actual_scale || '',
+                upscale_model: gi.upscale_model || '',
+                upscale_engine: gi.upscale_engine || '',
+                upscale_resize_mode: gi.upscale_resize_mode || '',
+                upscale_original_size: gi.upscale_original_size || '',
+                upscale_output_size: gi.upscale_output_size || '',
+                upscale_mode: gi.upscale_mode || '',
+                upscale_keep_ratio: gi.upscale_keep_ratio || false,
+                upscale_frames: gi.upscale_frames || '',
+                upscale_elapsed: gi.upscale_elapsed || '',
+                upscale_original_fps: gi.upscale_original_fps || '',
+                upscale_output_fps: gi.upscale_output_fps || '',
+                upscale_duration: gi.upscale_duration || '',
             };
         }
         const replay = item.replay;
@@ -4290,6 +5609,17 @@
         const replayId = item.replay_available && item.replay ? storeReplayRecord(item.replay) : '';
         const typeBadge = item.type === 'video' ? '🎬 VID' : item.type === 'audio' ? '♪ AUD' : '🎨 IMG';
         const info = extractReplayInfo(item);
+        const isUpscale = info.gen_method === '高清放大';
+        const upscaleScaleText = isUpscale
+            ? (info.upscale_actual_scale
+                ? (info.upscale_actual_scale + 'x')
+                : (info.upscale_scale ? info.upscale_scale + 'x' : '—'))
+            : '';
+        const upscaleModeText = isUpscale
+            ? (info.upscale_mode
+                ? (info.upscale_mode === '原始比例' ? '原始比例' : info.upscale_mode === '目标分辨率' ? '目标分辨率' : '按倍数')
+                : (info.upscale_keep_ratio ? '原始比例' : info.upscale_output_size ? '目标分辨率' : '按倍数'))
+            : '';
 
         if (_historyLayout === 'list') {
             const media = item.type === 'audio'
@@ -4339,16 +5669,56 @@
             const codec = info.codec || '';
             const bitrate = info.bitrate || '';
 
+            const dateTime = formatDateTime(item.mtime);
+
+            const upscaleScaleText = info.upscale_actual_scale
+                ? (info.upscale_actual_scale + 'x')
+                : (info.upscale_scale ? info.upscale_scale + 'x' : '—');
+            const upscaleModeText = info.upscale_mode
+                ? (info.upscale_mode === '原始比例' ? '原始比例' : info.upscale_mode === '目标分辨率' ? '目标分辨率' : '按倍数')
+                : (info.upscale_keep_ratio ? '原始比例' : info.upscale_output_size ? '目标分辨率' : '按倍数');
+
+            const _fpsDisplay = info.upscale_original_fps
+                ? (info.upscale_output_fps && info.upscale_output_fps !== info.upscale_original_fps
+                    ? `${info.upscale_original_fps}→${info.upscale_output_fps}fps`
+                    : `${info.upscale_original_fps}fps`)
+                : (fps || '—');
+            const _durDisplay = info.upscale_duration
+                ? (info.upscale_duration >= 60
+                    ? `${Math.floor(info.upscale_duration/60)}m${Math.round(info.upscale_duration%60)}s`
+                    : `${info.upscale_duration}s`)
+                : (duration || '—');
+
+            const upscaleLine = isUpscale ? `
+                <div class="list-param-line">
+                    <span class="lpl-key">模式</span><span class="lpl-val">${upscaleModeText}</span>
+                    <span class="lpl-key">放大</span><span class="lpl-val">${upscaleScaleText}</span>
+                    <span class="lpl-key">模型</span><span class="lpl-val">${info.upscale_model || '—'}</span>
+                    <span class="lpl-key">原始</span><span class="lpl-val">${info.upscale_original_size || '—'}</span>
+                    <span class="lpl-key">输出</span><span class="lpl-val">${info.upscale_output_size || resolution || '—'}</span>
+                    <span class="lpl-key">帧率</span><span class="lpl-val">${_fpsDisplay}</span>
+                    <span class="lpl-key">时长</span><span class="lpl-val">${_durDisplay}</span>
+                    <span class="lpl-key">帧数</span><span class="lpl-val">${info.upscale_frames || '—'}</span>
+                    <span class="lpl-key">缩放</span><span class="lpl-val">${info.upscale_resize_mode || '—'}</span>
+                    <span class="lpl-key">日期</span><span class="lpl-val">${dateTime || '—'}</span>
+                </div>
+                <div class="list-param-line">
+                    ${info.upscale_elapsed ? `<span class="lpl-key">耗时</span><span class="lpl-val">${info.upscale_elapsed}s</span>` : `<span class="lpl-key">耗时</span><span class="lpl-val">${elapsed || '—'}</span>`}
+                    <span class="lpl-key">大小</span><span class="lpl-val">${formatFileSize(item.size)}</span>
+                    <span class="lpl-key">文件名</span><span class="lpl-val lpl-filename">${escapeHtmlAttr(item.filename)}</span>
+                </div>` : '';
+
             const paramHtml = `
                 ${promptText ? `<div class="list-param-line lpl-prompt-line" onclick="this.classList.toggle('lpl-expanded')"><span class="lpl-key">提示词</span><span class="lpl-val lpl-prompt">${promptText}</span></div>` : ''}
                 <div class="list-param-line">
                     <span class="lpl-key">方式</span><span class="lpl-val lpl-method">${method || '—'}</span>
                     <span class="lpl-key">分辨率</span><span class="lpl-val">${resolution || '—'}</span>
-                    <span class="lpl-key">帧率</span><span class="lpl-val">${fps || '—'}</span>
-                    <span class="lpl-key">时长</span><span class="lpl-val">${duration || '—'}</span>
-                    <span class="lpl-key">种子</span><span class="lpl-val">${seed || '—'}</span>
+                    ${!isUpscale ? `<span class="lpl-key">帧率</span><span class="lpl-val">${fps || '—'}</span>` : ''}
+                    ${!isUpscale ? `<span class="lpl-key">时长</span><span class="lpl-val">${duration || '—'}</span>` : ''}
+                    ${!isUpscale ? `<span class="lpl-key">种子</span><span class="lpl-val">${seed || '—'}</span>` : ''}
+                    <span class="lpl-key">日期</span><span class="lpl-val">${dateTime || '—'}</span>
                 </div>
-                <div class="list-param-line">
+                ${isUpscale ? upscaleLine : `<div class="list-param-line">
                     <span class="lpl-key">步数</span><span class="lpl-val">${steps || '—'}</span>
                     <span class="lpl-key">CFG</span><span class="lpl-val">${cfg || '—'}</span>
                     <span class="lpl-key">运镜</span><span class="lpl-val">${motion || '—'}</span>
@@ -4356,7 +5726,7 @@
                     <span class="lpl-key">耗时</span><span class="lpl-val">${elapsed || '—'}</span>
                     <span class="lpl-key">大小</span><span class="lpl-val">${formatFileSize(item.size)}</span>
                     <span class="lpl-key">文件名</span><span class="lpl-val lpl-filename">${escapeHtmlAttr(item.filename)}</span>
-                </div>`;
+                </div>`}`;
 
             return `<div class="history-card-list" data-history-key="${key}" data-filename="${safeFilename}" data-type="${item.type}" data-replayid="${replayId}" data-globaldir="${safeGlobalDir}">
                         <div class="list-thumb">
@@ -4377,15 +5747,36 @@
 
         const gridTags = [];
         if (info.gen_method) gridTags.push(`<span class="ptag ptag-method">${info.gen_method}</span>`);
-        if (info.width && info.height) gridTags.push(`<span class="ptag">${info.width}×${info.height}</span>`);
-        if (info.fps) gridTags.push(`<span class="ptag">${info.fps}fps</span>`);
-        if (info.duration) gridTags.push(`<span class="ptag">${info.duration}</span>`);
-        if (info.seed) gridTags.push(`<span class="ptag">Seed:${info.seed}</span>`);
+        if (isUpscale) {
+            if (upscaleModeText) gridTags.push(`<span class="ptag ptag-method">${upscaleModeText}</span>`);
+            if (upscaleScaleText && upscaleScaleText !== '—') gridTags.push(`<span class="ptag">${upscaleScaleText}</span>`);
+            if (info.upscale_original_size && info.upscale_output_size) gridTags.push(`<span class="ptag">${info.upscale_original_size}→${info.upscale_output_size}</span>`);
+            if (info.upscale_model) gridTags.push(`<span class="ptag">${info.upscale_model}</span>`);
+            if (info.upscale_original_fps) {
+                gridTags.push(info.upscale_output_fps && info.upscale_output_fps !== info.upscale_original_fps
+                    ? `<span class="ptag">${info.upscale_original_fps}→${info.upscale_output_fps}fps</span>`
+                    : `<span class="ptag">${info.upscale_original_fps}fps</span>`);
+            }
+            if (info.upscale_duration) {
+                gridTags.push(info.upscale_duration >= 60
+                    ? `<span class="ptag">${Math.floor(info.upscale_duration/60)}m${Math.round(info.upscale_duration%60)}s</span>`
+                    : `<span class="ptag">${info.upscale_duration}s</span>`);
+            }
+            if (info.upscale_frames) gridTags.push(`<span class="ptag">${info.upscale_frames}帧</span>`);
+            if (info.upscale_elapsed) gridTags.push(`<span class="ptag">${info.upscale_elapsed}s</span>`);
+        } else {
+            if (info.width && info.height) gridTags.push(`<span class="ptag">${info.width}×${info.height}</span>`);
+            if (info.fps) gridTags.push(`<span class="ptag">${info.fps}fps</span>`);
+            if (info.duration) gridTags.push(`<span class="ptag">${info.duration}</span>`);
+            if (info.seed) gridTags.push(`<span class="ptag">Seed:${info.seed}</span>`);
+        }
         if (info.loras && info.loras.length > 0) {
             const loraStr = info.loras.map(l => escapeHtmlAttr(l)).join(', ');
             gridTags.push(`<span class="ptag ptag-lora">${loraStr}</span>`);
         }
         if (info.elapsed) gridTags.push(`<span class="ptag ptag-elapsed">⏱${info.elapsed}</span>`);
+        const gridDateTime = formatDateTime(item.mtime);
+        if (gridDateTime && gridDateTime !== '-') gridTags.push(`<span class="ptag ptag-date">📅${gridDateTime}</span>`);
 
         const gridInfoHtml = `<div class="grid-info-bar">
                 ${info.prompt ? `<div class="grid-info-prompt">${escapeHtmlAttr(info.prompt.slice(0, 120))}</div>` : ''}
@@ -4941,7 +6332,7 @@
                 if (hc && hc.offsetParent !== null && !_isGeneratingFlag) {
                     fetchHistory(1, true);
                 }
-            }, 5000);
+            }, 15000);
         }
         startHistoryAutoRefresh();
         } catch(e) { console.error('[INIT] _onDomReady2 error:', e); }
@@ -5051,21 +6442,10 @@ function updateDynamicRecommendation() {
     setBadge('vid-duration-rec', `建议≤${recDuration}s@${fps}fps`);
     setBadge('vid-fps-rec', `推荐${(rec.recommended_fps || [24])[0]}fps`);
     const vidSize = getGenerationSize('video');
-    const vidNote = vidSize.source === 'ref-missing' ? ` · ${_t('ratioRefMissing')}` : '';
-    setBadge('vid-quality-rec', `推荐${_qualityKey(rec.width)}P（${vidSize.width}×${vidSize.height}）${vidNote}`);
+    setBadge('vid-quality-rec', `推荐${_qualityKey(rec.width)}P（${vidSize.width}×${vidSize.height}）`);
     const batchSize = getGenerationSize('batch');
-    const batchNote = batchSize.source === 'ref-missing' ? ` · ${_t('ratioRefMissing')}` : '';
-    setBadge('batch-quality-rec', `推荐${_qualityKey(rec.width)}P（${batchSize.width}×${batchSize.height}）${batchNote}`);
+    setBadge('batch-quality-rec', `推荐${_qualityKey(rec.width)}P（${batchSize.width}×${batchSize.height}）`);
 
-    // 更新时长输入框的 max 属性
-    durationEl.max = String(maxDuration);
-
-    // 如果当前时长超过上限，自动钳位
-    if (currentDuration > maxDuration) {
-        durationEl.value = String(maxDuration);
-    }
-
-    // 更新时长警告提示
     _updateDurationWarning(currentDuration, recDuration, maxDuration, rec);
 
     // 同步批量模式徽章
@@ -5168,23 +6548,36 @@ function renderRecommendationBadges(profile) {
     _markRecommendedOption('batch-quality', recQuality);
     _markRecommendedOption('vid-fps', String(recFps));
 
-    // 自动应用推荐参数到表单
-    applyRecommendation(primaryRec);
+    const hasPersisted = _hasPersistedSettings();
 
-    // 显示自动应用通知
-    _showAutoApplyToast(profile);
+    if (hasPersisted) {
+        updateDynamicRecommendation();
+    } else {
+        applyRecommendation(primaryRec);
+        _showAutoApplyToast(profile);
+        updateDynamicRecommendation();
+    }
+}
 
-    // 初始动态推荐
-    updateDynamicRecommendation();
+function _hasPersistedSettings() {
+    try {
+        const s = JSON.parse(localStorage.getItem(SETTINGS_KEY));
+        if (!s || typeof s !== 'object') return false;
+        return s['vid-quality'] !== undefined || s['vid-fps'] !== undefined || s['vid-duration'] !== undefined;
+    } catch(_) {
+        return false;
+    }
 }
 
 /** 在 <select> 的推荐选项后追加 ⭐ 标记 */
 function _markRecommendedOption(selectId, recValue) {
     const sel = document.getElementById(selectId);
     if (!sel) return;
-    for (const opt of sel.options) {
-        const base = opt.text.replace(/ ⭐$/, '');
-        opt.text = opt.value === recValue ? base + ' ⭐' : base;
+    if (sel.tagName === 'SELECT') {
+        for (const opt of sel.options) {
+            const base = opt.text.replace(/ ⭐$/, '');
+            opt.text = opt.value === recValue ? base + ' ⭐' : base;
+        }
     }
 }
 
@@ -5220,10 +6613,8 @@ function applyRecommendation(r) {
     // 设置时长 (动态计算: duration = recommended_total_frames / fps)
     const currentFps = parseInt(fps.value) || 24;
     const recDuration = Math.max(1, Math.floor(r.recommended_total_frames / currentFps));
-    const maxDuration = Math.max(1, Math.floor(r.max_total_frames / currentFps));
     const dur = document.getElementById('vid-duration');
-    dur.max = String(maxDuration);
-    dur.value = String(Math.min(recDuration, parseInt(dur.value) || recDuration));
+    dur.value = String(recDuration);
 
     // 触发动态推荐更新
     updateDynamicRecommendation();
@@ -5302,6 +6693,15 @@ function _initDynamicRecommendation() {
         durationEl.addEventListener('input', () => updateDynamicRecommendation());
     }
 
+    const motionDurationEl = document.getElementById('motion-duration');
+    if (motionDurationEl) {
+        motionDurationEl.addEventListener('input', () => _updateMotionParamWarnings());
+    }
+    const motionFpsEl = document.getElementById('motion-fps');
+    if (motionFpsEl) {
+        motionFpsEl.addEventListener('change', () => _updateMotionParamWarnings());
+    }
+
     // 批量模式清晰度变化也触发
     const batchQualityEl = document.getElementById('batch-quality');
     if (batchQualityEl) {
@@ -5315,6 +6715,35 @@ function _initDynamicRecommendation() {
             };
             if (bRec) setBadge('batch-quality-rec', `⭐ 帧预算${bRec.recommended_total_frames}帧`);
         };
+    }
+}
+
+function _updateMotionParamWarnings() {
+    const durationEl = document.getElementById('motion-duration');
+    const fpsEl = document.getElementById('motion-fps');
+    if (!durationEl) return;
+
+    const duration = parseInt(durationEl.value) || 5;
+    const fps = parseInt(fpsEl?.value) || 24;
+
+    let warnEl = document.getElementById('motion-param-warn');
+    if (!warnEl) {
+        const container = durationEl.closest('.flex-row') || durationEl.parentElement;
+        warnEl = document.createElement('div');
+        warnEl.id = 'motion-param-warn';
+        warnEl.style.cssText = 'font-size:10px; margin-top:4px; line-height:1.3;';
+        if (container && container.parentElement) container.parentElement.appendChild(warnEl);
+    }
+
+    const totalFrames = duration * fps;
+    const warnings = [];
+    if (duration > 6) warnings.push(`<span style="color:#FF9800;">⚡ 时长${duration}s较长，可能OOM</span>`);
+    if (totalFrames > 161) warnings.push(`<span style="color:#f44336;">⚠ 总帧数${totalFrames}超出上限(161帧)</span>`);
+
+    if (warnings.length > 0) {
+        warnEl.innerHTML = warnings.join('<br>');
+    } else {
+        warnEl.innerHTML = `<span style="color:var(--text-dim);">✓ ${totalFrames}帧 @ 8+3步蒸馏，在安全范围内</span>`;
     }
 }
 

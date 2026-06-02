@@ -41,7 +41,7 @@ def install(app, ctx: ExtensionContext) -> None:
         fps, num_frames, src_w, src_h = _orig_get_meta(video_path)
 
         if is_upscale:
-            print(f">>> 启动超分内核: {src_w}x{src_h} -> {target_w}x{target_h} (强度: {target_strength})")
+            print(f">>> 启动放大内核: {src_w}x{src_h} -> {target_w}x{target_h} (强度: {target_strength})")
 
             def get_meta_patched(path):
                 return fps, num_frames, target_w, target_h

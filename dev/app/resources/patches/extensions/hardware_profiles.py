@@ -67,7 +67,7 @@ PROFILES: dict[str, HardwareProfile] = {
     "ultra": HardwareProfile(
         tier="ultra",
         tier_name="极致性能",
-        vram_range="48GB+ (A6000 / A100 / H100)",
+        vram_range="32GB+ (RTX 5090 / A6000 / A100 / H100)",
         vram_limit_gb=0,
         prefetch_count=None,
         offload_enabled=False,
@@ -83,13 +83,14 @@ PROFILES: dict[str, HardwareProfile] = {
             "您的 GPU 显存充裕，无需任何限制",
             "1080p + 16秒@24fps 长视频可稳定运行",
             "开启 upscaler 可获得更高质量输出",
+            "RTX 5090 支持原生 FP8 + SageAttention，推理速度极快",
         ],
     ),
 
     "high": HardwareProfile(
         tier="high",
         tier_name="高性能",
-        vram_range="20-24GB (RTX 3090 / 4090 / A5000)",
+        vram_range="20-31GB (RTX 3090 / 4090 / A5000)",
         vram_limit_gb=22,
         prefetch_count=19,
         offload_enabled=True,
@@ -227,7 +228,8 @@ def detect_gpu_compute_capability() -> tuple[float | None, str]:
         arch_name: 如 "Ampere", "Ada Lovelace", "Hopper"
     """
     ARCH_MAP = [
-        (9.0, "Hopper/Blackwell"),
+        (10.0, "Blackwell"),
+        (9.0, "Hopper"),
         (8.9, "Ada Lovelace"),
         (8.6, "Ampere"),
         (8.0, "Ampere"),
@@ -309,7 +311,7 @@ def classify_gpu(vram_gb: float | None) -> str:
     if vram_gb is None:
         return "high"  # 检测失败默认给 high（让用户自行调整）
 
-    if vram_gb >= 40:
+    if vram_gb >= 32:
         return "ultra"
     if vram_gb >= 20:
         return "high"

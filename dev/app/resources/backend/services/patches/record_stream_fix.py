@@ -9,6 +9,11 @@ explicit Python reference holding + per-layer CUDA events, achieving the
 same protection (prevent allocator reuse while compute reads a tensor)
 without touching allocator metadata.
 
+IMPORTANT: This patch is only applied on GPUs known to have the
+record_stream bug (RTX 5090 series). On other GPUs (RTX 3090, 4090,
+etc.) the original record_stream mechanism is used, as it is more
+efficient and well-tested.
+
 Remove this patch once the upstream ltx-core package includes the fix.
 
 Usage:
@@ -19,12 +24,28 @@ from __future__ import annotations
 
 import functools
 import itertools
+import logging
 from typing import Any
 
 import torch
 from torch import nn
 
 from ltx_core.layer_streaming import LayerStreamingWrapper
+
+logger = logging.getLogger(__name__)
+
+
+def _needs_record_stream_fix() -> bool:
+    try:
+        if not torch.cuda.is_available():
+            return False
+        name = torch.cuda.get_device_name(0).upper()
+        for pattern in ("RTX 5090", "RTX 5080", "RTX 5070", "GB20", "GB21", "GB202", "GB203", "GB205"):
+            if pattern in name:
+                return True
+        return False
+    except Exception:
+        return False
 
 
 def _patched_register_hooks(self: LayerStreamingWrapper) -> None:
@@ -86,7 +107,6 @@ _original_teardown = LayerStreamingWrapper.teardown
 
 
 def _patched_teardown(self: LayerStreamingWrapper) -> None:
-    # Clear held GPU references before the original teardown evicts layers.
     if hasattr(self, "_gpu_refs"):
         torch.cuda.synchronize(device=self._target_device)
         self._gpu_refs.clear()
@@ -94,6 +114,15 @@ def _patched_teardown(self: LayerStreamingWrapper) -> None:
     _original_teardown(self)
 
 
-# Apply patches.
-LayerStreamingWrapper._register_hooks = _patched_register_hooks  # type: ignore[assignment]
-LayerStreamingWrapper.teardown = _patched_teardown  # type: ignore[assignment]
+if _needs_record_stream_fix():
+    LayerStreamingWrapper._register_hooks = _patched_register_hooks  # type: ignore[assignment]
+    LayerStreamingWrapper.teardown = _patched_teardown  # type: ignore[assignment]
+    logger.info("record_stream_fix: GPU requires record_stream workaround, patches applied")
+else:
+    gpu_name = "unknown"
+    try:
+        if torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(0)
+    except Exception:
+        pass
+    logger.info("record_stream_fix: GPU %s does not need record_stream workaround, using official code", gpu_name)

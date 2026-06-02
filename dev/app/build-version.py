@@ -38,6 +38,7 @@ DEV_DIR = ROOT_DIR.parent                        # dev/
 PROJECT_ROOT = ROOT_DIR.parent.parent             # 项目根目录
 BUILD_DIR = PROJECT_ROOT / "build"               # 项目根/build/
 VERSION_HISTORY_FILE = ROOT_DIR / "version_history.json"
+REMOTE_VERSION_FILE = PROJECT_ROOT / "ver" / "version.json"
 APP_NAME = "云集智能视频创意站"
 
 
@@ -160,6 +161,44 @@ def update_versions_json(version, changes, exe_name):
 
     except Exception as e:
         print(f"  ✗ 更新 versions.json 失败: {e}")
+        return False
+
+
+def update_remote_version_json(version, changes):
+    try:
+        ver_dir = REMOTE_VERSION_FILE.parent
+        ver_dir.mkdir(parents=True, exist_ok=True)
+
+        data = {}
+        if REMOTE_VERSION_FILE.exists():
+            with open(REMOTE_VERSION_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+        data["latest"] = version
+        data["release_date"] = datetime.now().strftime("%Y-%m-%d")
+        data["download_url"] = f"https://github.com/yunjii-cn/vi/releases/tag/v{version}"
+        data["gitee_download_url"] = f"https://gitee.com/yunjii/vi/releases/tag/v{version}"
+        data["changes"] = changes
+
+        existing_versions = data.get("versions", [])
+        seen = {v.get("version") for v in existing_versions}
+        if version not in seen:
+            existing_versions.insert(0, {
+                "version": version,
+                "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "changes": changes,
+                "filename": f"{APP_NAME}-v{version}.exe",
+            })
+        data["versions"] = existing_versions
+
+        with open(REMOTE_VERSION_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        print(f"  ✓ ver/version.json 已更新 (v{version})")
+        return True
+
+    except Exception as e:
+        print(f"  ✗ 更新 ver/version.json 失败: {e}")
         return False
 
 
@@ -709,6 +748,8 @@ def main():
         print("  ✓ 版本历史已更新")
 
         update_versions_json(VERSION, changes, f"{version_name}.exe")
+
+        update_remote_version_json(VERSION, changes)
         print()
 
         # Step 6: 部署到 dev/

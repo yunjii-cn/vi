@@ -146,27 +146,50 @@ class RetakeHandler(StateHandlerBase):
         regenerate_video, regenerate_audio = self._resolve_retake_mode(mode)
 
         try:
-            pipeline_state = self._pipelines.load_retake_pipeline(distilled=True)
+            selected_checkpoint_name = Path(str(self.resolve_model("checkpoint"))).name.lower()
+            is_dev = "dev" in selected_checkpoint_name and "distilled" not in selected_checkpoint_name
+            distilled = not is_dev
+            num_inference_steps = None if distilled else 30
+            print(f"[retake] 推理模式: {'蒸馏(8步)' if distilled else f'标准({num_inference_steps}步)'}, model={selected_checkpoint_name}")
+
+            video_guider_params = None
+            audio_guider_params = None
+            if not distilled:
+                from ltx_core.components.guiders import MultiModalGuiderParams
+                video_guider_params = MultiModalGuiderParams(
+                    cfg_scale=3.0, stg_scale=1.0, rescale_scale=0.7,
+                    modality_scale=3.0, stg_blocks=[28],
+                )
+                audio_guider_params = MultiModalGuiderParams(
+                    cfg_scale=7.0, stg_scale=1.0, rescale_scale=0.7,
+                    modality_scale=3.0, stg_blocks=[28],
+                )
+
+            pipeline_state = self._pipelines.load_retake_pipeline(distilled=distilled)
             self._generation.start_generation(generation_id)
             self._generation.update_progress("loading_model", 5, 0, 1)
             self._generation.update_progress("inference", 15, 0, 1)
 
-            pipeline_state.pipeline.generate(
-                video_path=str(video_file),
-                prompt=prompt,
-                start_time=start_time,
-                end_time=end_time,
-                seed=seed,
-                output_path=str(output_path),
-                negative_prompt=self.config.default_negative_prompt,
-                num_inference_steps=40,
-                video_guider_params=None,
-                audio_guider_params=None,
-                regenerate_video=regenerate_video,
-                regenerate_audio=regenerate_audio,
-                enhance_prompt=False,
-                distilled=True,
-            )
+            self._generation.set_denoising_cancel_active()
+            try:
+                pipeline_state.pipeline.generate(
+                    video_path=str(video_file),
+                    prompt=prompt,
+                    start_time=start_time,
+                    end_time=end_time,
+                    seed=seed,
+                    output_path=str(output_path),
+                    negative_prompt=self.config.default_negative_prompt,
+                    num_inference_steps=num_inference_steps or 40,
+                    video_guider_params=video_guider_params,
+                    audio_guider_params=audio_guider_params,
+                    regenerate_video=regenerate_video,
+                    regenerate_audio=regenerate_audio,
+                    enhance_prompt=False,
+                    distilled=distilled,
+                )
+            finally:
+                self._generation.clear_denoising_cancel_active()
 
             if self._generation.is_generation_cancelled():
                 output_path.unlink(missing_ok=True)

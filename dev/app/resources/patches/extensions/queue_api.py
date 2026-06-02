@@ -39,6 +39,7 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
     queue_history = qs["history"]
     queue_wake = qs["wake"]
     queue_shutdown = qs["shutdown"]
+    queue_paused = qs["paused"]
 
     def _queue_task_view(task: dict) -> dict:
         return {
@@ -54,6 +55,8 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
 
     def _snapshot_queue() -> dict:
         gp = handler.generation.get_generation_progress()
+        tts_state = getattr(ctx, "_tts_progress_state", None)
+        upscale_state = getattr(ctx, "_upscale_progress_state", None)
         with queue_lock:
             pending_ids = [task["id"] for task in queue_pending if task.get("status") == "queued"]
             current_task = None
@@ -69,15 +72,33 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
             if running_ids:
                 task = queue_items[running_ids[0]]
                 task["position"] = 0
-                task["phase"] = gp.phase
-                task["progress"] = gp.progress
-                task["current_step"] = getattr(gp, "currentStep", None)
-                task["total_steps"] = getattr(gp, "totalSteps", None)
+                is_tts_task = task.get("endpoint") == "/api/tts/generate"
+                is_upscale_task = task.get("endpoint") in ("/api/upscale/image", "/api/upscale/video")
+                if is_tts_task and tts_state:
+                    phase_map = {"loading_model": "加载模型", "inference": "推理生成", "complete": "完成"}
+                    raw_phase = str(tts_state.get("phase") or "")
+                    task["phase"] = phase_map.get(raw_phase, raw_phase) or raw_phase
+                    task["progress"] = int(tts_state.get("progress") or 0)
+                    task["current_step"] = None
+                    task["total_steps"] = None
+                elif is_upscale_task and upscale_state:
+                    phase_map = {"loading_model": "加载模型", "upscaling": "高清处理", "complete": "完成"}
+                    raw_phase = str(upscale_state.get("phase") or "")
+                    task["phase"] = phase_map.get(raw_phase, raw_phase) or raw_phase
+                    task["progress"] = int(upscale_state.get("progress") or 0)
+                    task["current_step"] = upscale_state.get("current_step")
+                    task["total_steps"] = upscale_state.get("total_steps")
+                else:
+                    task["phase"] = gp.phase
+                    task["progress"] = gp.progress
+                    task["current_step"] = getattr(gp, "currentStep", None)
+                    task["total_steps"] = getattr(gp, "totalSteps", None)
                 current_task = _queue_task_view(task)
             history_items = [_queue_task_view(queue_items[task_id]) for task_id in history_ids if task_id in queue_items]
             return {
                 "current": current_task, "pending": items, "history": history_items,
                 "stats": {"queued": len(items), "running": 1 if current_task else 0, "history": len(history_items)},
+                "paused": queue_paused,
             }
 
     def _normalize_queue_result(result) -> dict:
@@ -178,6 +199,16 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
             return _normalize_queue_result(handler.ic_lora.generate(req))
         if endpoint == "/api/generate-batch":
             return _normalize_queue_result(_run_generate_batch_payload(payload))
+        if endpoint == "/api/tts/generate":
+            tts_fn = getattr(ctx, "_execute_tts_from_queue", None)
+            if tts_fn is None:
+                raise HTTPError(400, "TTS module not loaded")
+            return _normalize_queue_result(tts_fn(payload))
+        if endpoint in ("/api/upscale/image", "/api/upscale/video"):
+            upscale_fn = getattr(ctx, "_execute_upscale_from_queue", None)
+            if upscale_fn is None:
+                raise HTTPError(400, "Upscale module not loaded")
+            return _normalize_queue_result(upscale_fn(endpoint, payload))
         raise HTTPError(400, f"Unsupported queue endpoint: {endpoint}")
 
     def _run_generate_batch_payload(payload: dict) -> dict:
@@ -192,6 +223,9 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
             queue_wake.clear()
             if queue_shutdown.is_set():
                 return
+            with queue_lock:
+                if queue_paused:
+                    continue
             task = None
             with queue_lock:
                 while queue_pending:
@@ -209,6 +243,10 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
                         queue_items[task_id]["position"] = idx
             if task is None:
                 continue
+            task_id = task.get("id", "?")
+            task_label = task.get("label", "")[:60]
+            task_endpoint = task.get("endpoint", "?")
+            print(f"[queue] ▶ 开始执行任务 {task_id} [{task_endpoint}] {task_label}")
             try:
                 result = _execute_queue_task(task)
                 with queue_lock:
@@ -220,13 +258,27 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
                     task["phase"] = task["status"]
                     queue_history.appendleft(task["id"])
                     _write_replay_sidecars(task)
+                print(f"[queue] √ 任务 {task_id} 完成 ({task['status']})")
+                if task_endpoint in ("/api/upscale/image", "/api/upscale/video"):
+                    try:
+                        ctx._upscale_progress_state.update({"phase": "", "progress": 0, "current_step": None, "total_steps": None})
+                    except Exception:
+                        pass
             except Exception as exc:
+                import traceback
+                print(f"[queue] × 任务 {task_id} 失败: {exc}")
+                traceback.print_exc()
                 with queue_lock:
                     task["status"] = "error"
                     task["finished_at"] = time.time()
                     task["error"] = str(exc)
                     task["phase"] = "error"
                     queue_history.appendleft(task["id"])
+                if task_endpoint in ("/api/upscale/image", "/api/upscale/video"):
+                    try:
+                        ctx._upscale_progress_state.update({"phase": "", "progress": 0, "current_step": None, "total_steps": None})
+                    except Exception:
+                        pass
 
     def _ensure_queue_worker() -> None:
         with queue_lock:
@@ -278,12 +330,31 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
             task = queue_items.get(task_id)
             if task is None:
                 return JSONResponse(status_code=404, content={"error": "Task not found"})
-            gp = handler.generation.get_generation_progress()
             if task.get("status") == "running":
-                task["phase"] = gp.phase
-                task["progress"] = gp.progress
-                task["current_step"] = getattr(gp, "currentStep", None)
-                task["total_steps"] = getattr(gp, "totalSteps", None)
+                is_tts_task = task.get("endpoint") == "/api/tts/generate"
+                is_upscale_task = task.get("endpoint") in ("/api/upscale/image", "/api/upscale/video")
+                tts_state = getattr(ctx, "_tts_progress_state", None)
+                upscale_state = getattr(ctx, "_upscale_progress_state", None)
+                if is_tts_task and tts_state:
+                    phase_map = {"loading_model": "加载模型", "inference": "推理生成", "complete": "完成"}
+                    raw_phase = str(tts_state.get("phase") or "")
+                    task["phase"] = phase_map.get(raw_phase, raw_phase) or raw_phase
+                    task["progress"] = int(tts_state.get("progress") or 0)
+                    task["current_step"] = None
+                    task["total_steps"] = None
+                elif is_upscale_task and upscale_state:
+                    phase_map = {"loading_model": "加载模型", "upscaling": "高清处理", "complete": "完成"}
+                    raw_phase = str(upscale_state.get("phase") or "")
+                    task["phase"] = phase_map.get(raw_phase, raw_phase) or raw_phase
+                    task["progress"] = int(upscale_state.get("progress") or 0)
+                    task["current_step"] = upscale_state.get("current_step")
+                    task["total_steps"] = upscale_state.get("total_steps")
+                else:
+                    gp = handler.generation.get_generation_progress()
+                    task["phase"] = gp.phase
+                    task["progress"] = gp.progress
+                    task["current_step"] = getattr(gp, "currentStep", None)
+                    task["total_steps"] = getattr(gp, "totalSteps", None)
             return _queue_task_view(task)
 
     @app.post("/api/queue/cancel/{task_id}")
@@ -301,8 +372,27 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
                     return {"status": "cancelled", "task_id": task_id}
                 is_running = task.get("status") == "running"
             if is_running:
-                result = handler.generation.cancel_generation()
+                result = handler.generation.force_cancel_generation()
                 return {"status": result.status, "task_id": task_id}
             return {"status": task.get("status"), "task_id": task_id}
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    @app.post("/api/queue/pause")
+    async def route_queue_pause():
+        try:
+            with queue_lock:
+                queue_paused = True
+            return {"status": "paused"}
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    @app.post("/api/queue/resume")
+    async def route_queue_resume():
+        try:
+            with queue_lock:
+                queue_paused = False
+            queue_wake.set()
+            return {"status": "resumed"}
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})

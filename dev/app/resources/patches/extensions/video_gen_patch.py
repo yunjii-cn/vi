@@ -125,6 +125,11 @@ def install(app, ctx: ExtensionContext) -> None:
         resolution = req.resolution
         duration = int(float(req.duration))
         fps = int(float(req.fps))
+        motion_speed = float(getattr(req, "motionSpeed", 1.0) or 1.0)
+        if motion_speed < 0.25:
+            motion_speed = 0.25
+        if motion_speed > 3.0:
+            motion_speed = 3.0
 
         RESOLUTION_MAP = {
             "360p": (640, 352),
@@ -195,6 +200,9 @@ def install(app, ctx: ExtensionContext) -> None:
             self._end_frame_path = end_frame_path
             image_path_for_video = image_path
 
+        generation_id = self._make_generation_id()
+        self._generation.start_generation(generation_id)
+
         try:
             req_seed = getattr(req, "seed", None)
             try:
@@ -224,14 +232,29 @@ def install(app, ctx: ExtensionContext) -> None:
                     keyframe_strengths_list if use_multi_keyframes else None
                 ),
                 keyframe_times=(keyframe_times_list if use_multi_keyframes else None),
+                distilled=getattr(req, "distilled", True),
+                num_inference_steps=getattr(req, "numInferenceSteps", None),
+                motion_speed=motion_speed,
             )
+            if result is None:
+                print(f"[PATCH][patched_generate] <== 推理已取消")
+                return type("Response", (), {"status": "cancelled"})()
             print(f"[PATCH][patched_generate] <== 完成, 返回状态: complete")
             return type("Response", (), {"status": "complete", "video_path": result})()
         except RuntimeError as e:
             import traceback
             err_msg = str(e)
+            if "cancel" in err_msg.lower():
+                print(f"[PATCH][patched_generate] 推理已被用户取消")
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except Exception:
+                    pass
+                return type("Response", (), {"status": "cancelled"})()
+            self._generation.fail_generation(err_msg)
             if "out of memory" in err_msg.lower() or "CUDA" in err_msg:
-                # CUDA OOM — 清理显存并返回友好错误
                 print(f"[PATCH][patched_generate] CUDA OOM: {e}")
                 traceback.print_exc()
                 try:
@@ -252,6 +275,7 @@ def install(app, ctx: ExtensionContext) -> None:
             import traceback
             print(f"[PATCH][patched_generate] 错误: {e}")
             traceback.print_exc()
+            self._generation.fail_generation(str(e))
             raise
 
     def patched_generate_video(
@@ -275,6 +299,9 @@ def install(app, ctx: ExtensionContext) -> None:
         keyframe_strengths: list[float] | None = None,
         keyframe_times: list[float] | None = None,
         model_path: str | None = None,
+        distilled: bool = True,
+        num_inference_steps: int | None = None,
+        motion_speed: float = 1.0,
     ):
         gen = self._generation
         is_running = (
@@ -289,6 +316,9 @@ def install(app, ctx: ExtensionContext) -> None:
         print(f"  _generation_id          = {gen_id}")
         print(f"  _is_generating          = {is_gen}")
         print(f"  resolution              = {width}x{height}, frames={num_frames}, fps={fps}")
+        print(f"  motion_speed            = {motion_speed}")
+        inference_frame_rate = max(1.0, float(fps) / motion_speed)
+        print(f"  inference_frame_rate    = {inference_frame_rate} (fps={fps} / motion_speed={motion_speed})")
         print(f"  image param             = {type(image)}, {image is not None}")
         print(f"  image_path              = {image_path}")
         from ltx_pipelines.utils.args import (
@@ -502,6 +532,7 @@ def install(app, ctx: ExtensionContext) -> None:
                 )
             )
             selected_checkpoint_path = default_checkpoint_path
+            model_path_source = "default(specs)"
             if model_path and str(model_path).strip():
                 selected_path = Path(str(model_path).strip()).expanduser()
                 try:
@@ -511,6 +542,31 @@ def install(app, ctx: ExtensionContext) -> None:
                 if not selected_path.is_file():
                     raise RuntimeError(f"选择的模型文件不存在: {selected_path}")
                 selected_checkpoint_path = str(selected_path)
+                model_path_source = "user"
+            else:
+                bf16_default = Path(default_checkpoint_path)
+                if bf16_default.is_file():
+                    selected_checkpoint_path = str(bf16_default)
+                    model_path_source = "default(bf16)"
+                else:
+                    for d in self._pipelines.models_dirs:
+                        for fn in ("ltx-2.3-22b-distilled-1.1.safetensors", "ltx-2.3-22b-distilled.safetensors"):
+                            candidate = d / fn
+                            if candidate.is_file():
+                                selected_checkpoint_path = str(candidate)
+                                model_path_source = f"fallback({fn})"
+                                break
+                        if model_path_source != "default(specs)":
+                            break
+                    if model_path_source == "default(specs)":
+                        fp8_path = str(
+                            resolve_model_path(
+                                self._pipelines.models_dir, self._pipelines.config.model_download_specs, "checkpoint_fp8",
+                            )
+                        )
+                        if Path(fp8_path).is_file():
+                            selected_checkpoint_path = fp8_path
+                            model_path_source = "fallback(fp8)"
 
             using_custom_checkpoint = selected_checkpoint_path != default_checkpoint_path
             selected_checkpoint_name = Path(selected_checkpoint_path).name.lower()
@@ -520,7 +576,7 @@ def install(app, ctx: ExtensionContext) -> None:
             is_prequant_fp8_checkpoint = (
                 using_custom_checkpoint and not is_dev_checkpoint and "fp8" in selected_checkpoint_name
             )
-            print(f"[PATCH] Fast checkpoint = {selected_checkpoint_path}")
+            print(f"[PATCH] Fast checkpoint = {selected_checkpoint_path} (source={model_path_source})")
             if is_dev_checkpoint:
                 print("[PATCH] 检测到 dev checkpoint，将使用 TI2V two-stage dev pipeline")
             elif is_prequant_fp8_checkpoint:
@@ -643,15 +699,21 @@ def install(app, ctx: ExtensionContext) -> None:
                     try_sequential_offload_on_pipeline_state(pipeline_state, force=True)
 
             self._pipelines._pipeline_signature = desired_sig
-            num_inference_steps = None
+            if not distilled and num_inference_steps is None:
+                num_inference_steps = 30
+            elif distilled:
+                num_inference_steps = None
+            print(f"[PATCH] 推理模式: {'蒸馏(8+3步)' if distilled else f'标准({num_inference_steps}步)'}")
             extra_loras_for_hook = tuple(loras) if loras else None
 
         from lora_build_hook import install_lora_build_hook, pending_loras_token, reset_pending_loras
         install_lora_build_hook()
         _lora_hook_tok = pending_loras_token(extra_loras_for_hook)
         try:
-            self._generation.start_generation(generation_id)
-            self._generation.update_progress("preparing", 1, 0, 8, log_message="初始化...")
+            if not self._generation.is_generation_running():
+                self._generation.start_generation(generation_id)
+            _total_steps = 8 if distilled else (num_inference_steps or 30)
+            self._generation.update_progress("preparing", 1, 0, _total_steps, log_message="初始化...")
             neg_prompt = negative_prompt if negative_prompt else self.config.default_negative_prompt
             enhanced_prompt = prompt + self.config.camera_motion_prompts.get(camera_motion, "")
 
@@ -660,12 +722,12 @@ def install(app, ctx: ExtensionContext) -> None:
             output_path = dyn_dir / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{width}x{height}_{fps}fps_{_dur}s_LTX2.3.mp4"
 
             try:
-                self._generation.update_progress("encoding_text", 3, 0, 8, log_message="编码文本...")
+                self._generation.update_progress("encoding_text", 3, 0, _total_steps, log_message="编码文本...")
                 self._text.prepare_text_encoding(enhanced_prompt, enhance_prompt=False)
                 height = max(64, round(height / 64) * 64)
                 width = max(64, round(width / 64) * 64)
 
-                self._generation.update_progress("loading_model", 5, 0, 8, log_message="加载模型...")
+                self._generation.update_progress("loading_model", 5, 0, _total_steps, log_message="加载模型...")
 
                 _tqdm_pattern = re.compile(r'(\d+)%\|.*?\|\s*(\d+)/(\d+)')
                 _tqdm_time_pattern = re.compile(r'\[([0-9:.]+)<')
@@ -699,7 +761,7 @@ def install(app, ctx: ExtensionContext) -> None:
                             phase_label = "warming_up"
                             log_msg = "预热引擎"
                         try:
-                            _gen_ref.update_progress(phase_label, pct, 0, 8, log_message=log_msg)
+                            _gen_ref.update_progress(phase_label, pct, 0, _total_steps, log_message=log_msg)
                         except Exception:
                             pass
                 _estimator_thread = threading.Thread(target=_estimator_loop, name="progress-estimator", daemon=True)
@@ -758,7 +820,7 @@ def install(app, ctx: ExtensionContext) -> None:
                     gen_kwargs = {
                         "prompt": enhanced_prompt, "negative_prompt": neg_prompt,
                         "seed": seed, "height": height, "width": width,
-                        "num_frames": num_frames, "frame_rate": fps,
+                        "num_frames": num_frames, "frame_rate": inference_frame_rate,
                         "num_inference_steps": num_inference_steps,
                         "images": images_inputs, "audio_path": audio_path,
                         "audio_start_time": 0.0, "audio_max_duration": None,
@@ -768,14 +830,43 @@ def install(app, ctx: ExtensionContext) -> None:
                     gen_kwargs = {
                         "prompt": enhanced_prompt, "seed": seed,
                         "height": height, "width": width,
-                        "num_frames": num_frames, "frame_rate": fps,
+                        "num_frames": num_frames, "frame_rate": inference_frame_rate,
                         "images": images_inputs, "output_path": str(output_path),
+                        "distilled": distilled,
+                        "num_inference_steps": num_inference_steps,
+                        "negative_prompt": neg_prompt,
                     }
+                if motion_speed != 1.0:
+                    gen_kwargs["output_fps"] = int(fps)
 
                 try:
-                    pipeline_state.pipeline.generate(**gen_kwargs)
+                    _cancel_fn = lambda: self._generation.is_generation_cancelled()
+                    try:
+                        from ltx_core.layer_streaming import LayerStreamingWrapper
+                        LayerStreamingWrapper._cancel_check_fn = _cancel_fn
+                        print("[PATCH] LayerStreaming cancel check installed")
+                    except Exception as _e:
+                        print(f"[PATCH] Failed to install LayerStreaming cancel check: {_e}")
+                    try:
+                        pipeline_state.pipeline.generate(**gen_kwargs)
+                    finally:
+                        try:
+                            from ltx_core.layer_streaming import LayerStreamingWrapper
+                            if hasattr(LayerStreamingWrapper, "_cancel_check_fn"):
+                                delattr(LayerStreamingWrapper, "_cancel_check_fn")
+                        except Exception:
+                            pass
                 except RuntimeError as e:
                     err_msg = str(e)
+                    if "cancel" in err_msg.lower():
+                        print(f"[PATCH] 推理已被用户取消")
+                        try:
+                            import torch
+                            if torch.cuda.is_available():
+                                torch.cuda.empty_cache()
+                        except Exception:
+                            pass
+                        return None
                     if "out of memory" in err_msg.lower() or "CUDA" in err_msg:
                         print(f"[PATCH] ⚠ CUDA OOM during generation: {e}")
                         try:
@@ -795,7 +886,7 @@ def install(app, ctx: ExtensionContext) -> None:
                 finally:
                     _estimator_stop.set()
                     sys.stderr = _orig_stderr
-                self._generation.update_progress("complete", 100, 8, 8)
+                self._generation.update_progress("complete", 100, _total_steps, _total_steps)
                 self._generation.complete_generation(str(output_path))
                 return str(output_path)
             finally:

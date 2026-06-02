@@ -703,17 +703,34 @@ class ServiceMonitor(QObject):
         self.check_interval = check_interval
         self._status_cache = {}
         self._timer = QTimer(self)
-        self._timer.timeout.connect(self._check_all)
+        self._timer.timeout.connect(self._check_all_async)
 
     def start(self):
         self._timer.start(self.check_interval * 1000)
 
-    def _check_all(self):
-        for sid, svc in SERVICES.items():
-            alive = self._check_port(svc["port"])
-            if self._status_cache.get(sid) != alive:
-                self._status_cache[sid] = alive
-                self.status_changed.emit(sid, alive)
+    def _check_all_async(self):
+        import threading
+        results = {}
+        done = threading.Event()
+
+        def _worker():
+            for sid, svc in SERVICES.items():
+                results[sid] = self._check_port(svc["port"])
+            done.set()
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
+        def _emit_results():
+            if not done.is_set():
+                QTimer.singleShot(50, _emit_results)
+                return
+            for sid, alive in results.items():
+                if self._status_cache.get(sid) != alive:
+                    self._status_cache[sid] = alive
+                    self.status_changed.emit(sid, alive)
+
+        _emit_results()
 
     def _check_port(self, port):
         try:
@@ -798,22 +815,35 @@ if os.path.exists(_gitee_token_path):
     except Exception:
         pass
 
+_GITEE_TOKEN_PARAM = f"&access_token={GITEE_TOKEN}" if GITEE_TOKEN else ""
+
 UPDATE_SOURCES = {
-    "gitee": {
-        "name": "Gitee",
-        "version_url": f"https://gitee.com/api/v5/repos/yunjii/vi/contents/ver/version.json?ref=main&access_token={GITEE_TOKEN}",
-        "commits_url": f"https://gitee.com/api/v5/repos/yunjii/vi/commits?access_token={GITEE_TOKEN}&per_page=20",
-        "download_url_tpl": "https://gitee.com/yunjii/vi/raw/main/ver/{filename}?access_token={GITEE_TOKEN}",
-        "resources_url": f"https://gitee.com/yunjii/vi/repository/archive/main.zip?access_token={GITEE_TOKEN}",
-        "is_api": True,
+    "github_mirror": {
+        "name": "GitHub镜像",
+        "version_url": "https://ghgo.xyz/https://raw.githubusercontent.com/yunjii-cn/vi/main/ver/version.json",
+        "commits_url": "https://ghgo.xyz/https://api.github.com/repos/yunjii-cn/vi/commits?per_page=20",
+        "download_url_tpl": "https://github.com/yunjii-cn/vi/releases/download/v{version}/{filename}",
+        "releases_url": "https://ghgo.xyz/https://api.github.com/repos/yunjii-cn/vi/releases",
+        "resources_url": "https://github.com/yunjii-cn/vi/releases/latest/download/resources.zip",
+        "is_api": False,
     },
     "github": {
         "name": "GitHub",
         "version_url": "https://raw.githubusercontent.com/yunjii-cn/vi/main/ver/version.json",
         "commits_url": "https://api.github.com/repos/yunjii-cn/vi/commits?per_page=20",
         "download_url_tpl": "https://github.com/yunjii-cn/vi/releases/download/v{version}/{filename}",
+        "releases_url": "https://api.github.com/repos/yunjii-cn/vi/releases",
         "resources_url": "https://github.com/yunjii-cn/vi/releases/latest/download/resources.zip",
         "is_api": False,
+    },
+    "gitee": {
+        "name": "Gitee",
+        "version_url": f"https://gitee.com/api/v5/repos/yunjii/vi/contents/ver/version.json?ref=main{_GITEE_TOKEN_PARAM}",
+        "commits_url": f"https://gitee.com/api/v5/repos/yunjii/vi/commits?per_page=20{_GITEE_TOKEN_PARAM}",
+        "download_url_tpl": f"https://gitee.com/yunjii/vi/releases/download/v{{version}}/{{filename}}{_GITEE_TOKEN_PARAM}",
+        "releases_url": f"https://gitee.com/api/v5/repos/yunjii/vi/releases?per_page=10{_GITEE_TOKEN_PARAM}",
+        "resources_url": f"https://gitee.com/yunjii/vi/repository/archive/main.zip{_GITEE_TOKEN_PARAM}",
+        "is_api": True,
     },
 }
 
@@ -992,7 +1022,7 @@ LTX_MODELS = {
         "size_bytes": 995743504,
         "required": True,
         "desc": "LTX-2.3 空间超分辨率 x2",
-        "category": "超分辨率",
+        "category": "高清放大",
         "modelscope_id": "Lightricks/LTX-2.3",
     },
     "ltx-2.3-temporal-upscaler": {
@@ -1001,7 +1031,7 @@ LTX_MODELS = {
         "size_bytes": 261944000,
         "required": False,
         "desc": "LTX-2.3 时间超分辨率 x2",
-        "category": "超分辨率",
+        "category": "高清放大",
         "modelscope_id": "Lightricks/LTX-2.3",
     },
     "ltx-2.3-ic-lora-union": {
@@ -1012,6 +1042,330 @@ LTX_MODELS = {
         "desc": "IC-LoRA 联合控制 (动作迁移/深度/边缘)",
         "category": "控制模型",
         "modelscope_id": "Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control",
+    },
+    "z-image-turbo": {
+        "repo": "ByteDance/Z-Image-Turbo",
+        "file": "Z-Image-Turbo-BF16.safetensors",
+        "size_bytes": 13589545564,
+        "required": False,
+        "desc": "Z-Image-Turbo BF16 (图像生成基础模型，8步高质量生成)",
+        "category": "图像模型",
+        "modelscope_id": "ByteDance/Z-Image-Turbo",
+    },
+    "90sAnimationStyle": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "90sAnimationStyle.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "90年代经典动画风格 (复古赛璐璐质感)",
+        "category": "LTX视频LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "Cinematic_sci-fi-cyberpunk": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "Cinematic_sci-fi-cyberpunk.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "科幻赛博朋克电影风格 (霓虹灯光，未来都市)",
+        "category": "LTX视频LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "Claymation": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "Claymation.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "黏土动画风格 (定格动画黏土质感)",
+        "category": "LTX视频LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "CozyFelt": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "CozyFelt.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "温暖毛毡风格 (手工毛毡布艺纹理)",
+        "category": "LTX视频LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "FantasyPuppetStyle": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "FantasyPuppetStyle.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "奇幻木偶风格 (提线木偶质感与动态)",
+        "category": "LTX视频LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "Fantasy_Anime": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "Fantasy_Anime.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "奇幻动漫风格 (日式动画精致画面)",
+        "category": "LTX视频LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "Fantasy_Painterly": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "Fantasy_Painterly.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "奇幻绘画风格 (油画/水彩手绘笔触)",
+        "category": "LTX视频LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "Fantasy_Realism": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "Fantasy_Realism.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "奇幻写实风格 (写实基础+奇幻元素)",
+        "category": "LTX视频LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "LTX2.3_Crisp_Enhance": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "LTX2.3_Crisp_Enhance.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "清晰增强 (提升画面锐度和细节)",
+        "category": "LTX视频LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "LTX2.3_Soft_Enhance": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "LTX2.3_Soft_Enhance.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "柔和增强 (柔光滤镜，梦幻氛围)",
+        "category": "LTX视频LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "Luxe_Sensual": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "Luxe_Sensual.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "奢华感官风格 (高端质感柔光金属反光)",
+        "category": "LTX视频LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "PaperCutOutStyle": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "PaperCutOutStyle.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "纸雕剪纸风格 (层叠剪纸立体效果)",
+        "category": "LTX视频LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "Pixar_Toon": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "Pixar_Toon.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "皮克斯卡通风格 (3D卡通渲染质感)",
+        "category": "LTX视频LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "Post_Apocalyptic": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "Post_Apocalyptic.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "末世废土风格 (荒芜废墟，灰暗色调)",
+        "category": "LTX视频LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "Wild_West": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "Wild_West.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "西部荒野风格 (牛仔荒漠小镇，夕阳旷野)",
+        "category": "LTX视频LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "Z-Iamge-人像美学": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "Z-Iamge-人像美学.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "Z-Image人像美学增强 (优化人像肤色光影)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "Z-Image-Fun-Lora-Distill-8-Steps-2603-ComfyUI": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "Z-Image-Fun-Lora-Distill-8-Steps-2603-ComfyUI.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "Z-Image蒸馏加速LoRA (仅需8步生成)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "Z-Image-轻柔东方审美": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "Z-Image｜轻柔东方审美人像摄影写真风格_v1.0.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "轻柔东方审美人像摄影 (东方美学柔和光影)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "Z-image-眼睛细节增强": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "Z-image-眼睛细节增强-DetailedEyes-LoRA_V2.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "眼睛细节增强V2 (提升眼部细节和眼神)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "Z-image-高清人像": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "Z-image-高清人像.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "Z-Image高清人像增强 (提升清晰度和细节)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "ZIB-电影光Chiaroscuro": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "ZIB-电影光Chiaroscuro and Cinematic Lighting Style.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "电影光效明暗对比风格 (Chiaroscuro戏剧性)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "ZIT-伦勃朗光线": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "ZIT-伦勃朗光线rembrandt_ZIT_tyler_x_harris.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "伦勃朗光线风格 (经典三角光人像布光)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "ZIT-影棚摄影": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "ZIT-影棚摄影photolab_v2.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "影棚摄影风格V2 (专业影棚布光效果)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "ZIT-电影光Cinematic": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "ZIT-电影光Cinematic Chiaroscuro Lighting.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "电影级明暗对比光效 (好莱坞式电影布光)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "ZIT-电影黑暗": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "ZIT-电影黑暗MschCine26_V1.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "电影暗调风格 (低调照明，悬疑氛围)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "ZiB-female解剖学": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "ZiB-female解剖学_anatomy.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "女性人体解剖学增强 (优化人体结构比例)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "hina_zImageTurbo_asianMix": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "hina_zImageTurbo_asianMix_v4.59C-bf16.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "亚洲面孔混合模型V4.59C (优化亚洲人面孔)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "redcraftRedzimageUpdated": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "redcraftRedzimageUpdatedDEC03_redzimage15AIO-lora.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "RedCraft Z-Image更新版AIO LoRA (综合增强画质细节)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "woman877-zimage": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "woman877-zimage.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "女性人像增强 (优化女性面部和人像表现)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "z-Image-3D卡通": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "z-Image-3D卡通_V1.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "3D卡通风格V1 (3D卡通渲染效果)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "z-image-极致氛围光影": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "z-image 极致氛围光影LORA_V1.0.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "极致氛围光影V1.0 (强化场景氛围感和光影表现力)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "z-image-女帝": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "z-image-女帝-ben_nd.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "女帝风格 (高贵冷艳女性形象)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "z-image-极致写实": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "z-image-极致写实.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "极致写实增强 (照片级真实感)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "z-image-细节增强v2": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "z-image-细节增强v2.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "细节增强V2 (提升画面细节表现力)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
+    },
+    "z-image_小情绪_v1.1": {
+        "repo": "ByteDance/Z-Image-Loras",
+        "file": "z-image_小情绪_v1.1.safetensors",
+        "size_bytes": 124800000,
+        "required": False,
+        "desc": "小情绪风格V1.1 (捕捉细腻微妙情绪表达)",
+        "category": "图像LoRA",
+        "modelscope_id": "ByteDance/Z-Image-Loras",
     },
     "text-encoder": {
         "repo": "Lightricks/gemma-3-12b-it-qat-q4_0-unquantized",
@@ -1024,6 +1378,51 @@ LTX_MODELS = {
         "modelscope_id": "Lightricks/gemma-3-12b-it-qat-q4_0-unquantized",
     },
 }
+
+_LORA_DESCRIPTIONS: dict[str, str] = {
+    "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors": "视频迁移控制模型（视频迁移功能必需，支持深度/姿态/参考图控制）",
+    "90sAnimationStyle.safetensors": "90年代经典动画风格（复古赛璐璐动画质感，适合怀旧动画、复古卡通视频）",
+    "Cinematic_sci-fi-cyberpunk.safetensors": "科幻赛博朋克电影风格（霓虹灯光、未来都市、暗色调高对比度）",
+    "Claymation.safetensors": "黏土动画风格（定格动画黏土质感，适合趣味短片、儿童内容）",
+    "CozyFelt.safetensors": "温暖毛毡风格（手工毛毡布艺柔软纹理，适合治愈系视频、温馨场景）",
+    "FantasyPuppetStyle.safetensors": "奇幻木偶风格（提线木偶质感与动态，适合奇幻故事、童话改编）",
+    "Fantasy_Anime.safetensors": "奇幻动漫风格（日式动画精致画面与奇幻世界观，适合奇幻冒险、魔法战斗）",
+    "Fantasy_Painterly.safetensors": "奇幻绘画风格（油画/水彩手绘笔触质感，适合艺术风格视频、插画动画）",
+    "Fantasy_Realism.safetensors": "奇幻写实风格（写实基础融入奇幻元素，适合奇幻电影、概念艺术）",
+    "LTX2.3_Crisp_Enhance.safetensors": "清晰增强（提升画面锐度和细节清晰度，适合产品展示、风景视频）",
+    "LTX2.3_Soft_Enhance.safetensors": "柔和增强（柔光滤镜效果，适合人像美化、梦幻氛围、柔焦效果）",
+    "Luxe_Sensual.safetensors": "奢华感官风格（高端质感柔光与金属反光，适合奢侈品广告、时尚大片）",
+    "PaperCutOutStyle.safetensors": "纸雕剪纸风格（层叠剪纸立体效果，适合创意动画、文化宣传）",
+    "Pixar_Toon.safetensors": "皮克斯卡通风格（3D卡通渲染质感，适合动画短片、儿童内容）",
+    "Post_Apocalyptic.safetensors": "末世废土风格（荒芜废墟、破败建筑、灰暗色调，适合末日题材）",
+    "Wild_West.safetensors": "西部荒野风格（牛仔、荒漠小镇、夕阳旷野，适合西部题材）",
+    "Z-Iamge-人像美学.safetensors": "Z-Image人像美学增强（优化人像肤色光影和美感，适合人像写真、美妆展示）",
+    "Z-Image-Fun-Lora-Distill-8-Steps-2603-ComfyUI.safetensors": "Z-Image蒸馏加速LoRA（8步生成高质量图像，适合快速预览、批量生成）",
+    "Z-Image｜轻柔东方审美人像摄影写真风格_v1.0.safetensors": "轻柔东方审美人像摄影（东方美学柔和光影，适合中式写真、古风人像）",
+    "Z-image-眼睛细节增强-DetailedEyes-LoRA_V2.safetensors": "眼睛细节增强V2（提升眼部细节和眼神表现力，适合人像特写）",
+    "Z-image-高清人像.safetensors": "Z-Image高清人像增强（提升人像清晰度和细节，适合高清人像视频）",
+    "ZIB-电影光Chiaroscuro and Cinematic Lighting Style.safetensors": "电影光效明暗对比风格（Chiaroscuro，适合电影感视频、戏剧性场景）",
+    "ZIT-伦勃朗光线rembrandt_ZIT_tyler_x_harris.safetensors": "伦勃朗光线风格（经典三角光人像布光，适合经典人像、艺术摄影）",
+    "ZIT-影棚摄影photolab_v2.safetensors": "影棚摄影风格V2（专业影棚布光效果，适合产品摄影、人像棚拍）",
+    "ZIT-电影光Cinematic Chiaroscuro Lighting.safetensors": "电影级明暗对比光效（好莱坞式电影布光，适合电影感视频、叙事短片）",
+    "ZIT-电影黑暗MschCine26_V1.safetensors": "电影暗调风格（低调照明、暗色系、悬疑氛围，适合悬疑片、暗黑风格）",
+    "ZiB-female解剖学_anatomy.safetensors": "女性人体解剖学增强（优化女性人体结构和比例，适合人物创作、艺术参考）",
+    "hina_zImageTurbo_asianMix_v4.59C-bf16.safetensors": "亚洲面孔混合模型V4.59C（优化亚洲人面孔特征，适合亚洲人像视频）",
+    "redcraftRedzimageUpdatedDEC03_redzimage15AIO-lora.safetensors": "RedCraft Z-Image更新版AIO LoRA（综合增强画质与细节，适合通用画质提升）",
+    "woman877-zimage.safetensors": "女性人像增强（优化女性面部和人像表现，适合女性写真、时尚人像）",
+    "z-Image-3D卡通_V1.safetensors": "3D卡通风格V1（3D卡通渲染效果，适合卡通动画、趣味视频、儿童内容）",
+    "z-image 极致氛围光影LORA_V1.0.safetensors": "极致氛围光影V1.0（强化场景氛围感和光影表现力，适合氛围感视频、情绪短片）",
+    "z-image-女帝-ben_nd.safetensors": "女帝风格（高贵冷艳女性形象，适合女王范人像、时尚大片）",
+    "z-image-极致写实.safetensors": "极致写实增强（照片级真实感，适合超写实人像、产品展示）",
+    "z-image-细节增强v2.safetensors": "细节增强V2（提升画面细节表现力，适合细节优化、画质提升）",
+    "z-image_小情绪_v1.1.safetensors": "小情绪风格V1.1（捕捉细腻微妙情绪表达，适合情绪短片、文艺人像）",
+}
+
+def _get_lora_description(filename: str, is_lora: bool) -> str:
+    desc = _LORA_DESCRIPTIONS.get(filename)
+    if desc:
+        return desc
+    return "LoRA风格模型" if is_lora else "本地模型文件"
 
 TORCH_VERSION_CONSTRAINT = ">=2.5,<3.0"
 
@@ -1054,9 +1453,12 @@ LTX_PIP_DEPS = [
     "scipy>=1.14",
     "av",
     "triton-windows",
-    "voxcpm>=2.0.0",
-    "soundfile",
-    "librosa",
+]
+
+LTX_EXT_DEPS = [
+    ("faster-whisper", "faster_whisper"),
+    ("realesrgan", "realesrgan"),
+    ("basicsr", "basicsr"),
 ]
 
 LTX_PIP_VERSION_LOCKS = {
@@ -1128,7 +1530,8 @@ except:
 deps = ["fastapi","uvicorn","safetensors","accelerate","transformers","tokenizers","diffusers",
         "Pillow","sentencepiece","huggingface_hub","sageattention","pydantic",
         "python-multipart","ftfy","imageio","imageio-ffmpeg","peft","protobuf",
-        "opencv-python-headless","tqdm","pynvml","einops","scipy","av","triton-windows"]
+        "opencv-python-headless","tqdm","pynvml","einops","scipy","av","triton-windows",
+        "voxcpm","soundfile","librosa","faster-whisper","realesrgan","basicsr"]
 locks = {"transformers":(Version("4.57"),Version("4.58")),"tokenizers":(Version("0.22"),Version("0.23")),"diffusers":(Version("0.25"),Version("1.0")),
          "accelerate":(Version("0.24"),Version("2.0")),"safetensors":(Version("0.4"),Version("1.0")),
          "peft":(Version("0.13"),Version("1.0")),"pydantic":(Version("2.7"),Version("3.0")),
@@ -1197,14 +1600,19 @@ for d in deps:
                             self.env_update.emit("nvidia_driver", "× 未检测到", "err", True)
                     elif parts[0] == "DEP" and len(parts) >= 4:
                         status, name, ver = parts[1], parts[2], parts[3]
-                        if name in self._widget_keys:
+                        dep_key_map = {
+                            "faster-whisper": "faster_whisper",
+                            "realesrgan": "real_esrgan",
+                        }
+                        widget_key = dep_key_map.get(name, name)
+                        if widget_key in self._widget_keys:
                             if status == "OK":
-                                self.env_update.emit(name, f"√ {ver}", "ok", False)
+                                self.env_update.emit(widget_key, f"√ {ver}", "ok", False)
                             elif status == "BAD":
-                                lock = LTX_PIP_VERSION_LOCKS.get(name, "")
-                                self.env_update.emit(name, f"△ {ver} (需{lock})", "warn", True)
+                                lock = LTX_PIP_VERSION_LOCKS.get(widget_key, "")
+                                self.env_update.emit(widget_key, f"△ {ver} (需{lock})", "warn", True)
                             else:
-                                self.env_update.emit(name, "× 未安装", "err", True)
+                                self.env_update.emit(widget_key, "× 未安装", "err", True)
         except:
             pass
         self.finished.emit(True)
@@ -1230,6 +1638,7 @@ class DeployWorker(QThread):
             self._data_dir = data_dir
         else:
             self._data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(app_res))), "data")
+        self._models_dir = os.path.join(self._data_dir, "models")
         self._should_stop = False
         self._should_pause = False
         self._step_results = {}
@@ -1250,6 +1659,7 @@ class DeployWorker(QThread):
             "pip_fallback": src["pip_fallback"],
             "uv_urls": src["uv_urls"],
             "ltx_urls": src["ltx_urls"],
+            "ltx2_urls": src.get("ltx2_urls", []),
             "hf_endpoint": src["hf_endpoint"],
         }
 
@@ -1280,6 +1690,13 @@ class DeployWorker(QThread):
     def _uv_exe(self):
         return os.path.join(self.app_res, "uv", "uv.exe")
 
+    def _uv_index_args(self):
+        return [
+            "--default-index", self._resolved_mirrors["pip"],
+            "--index", self._resolved_mirrors["pip_fallback"],
+            "--index-strategy", "first-index",
+        ]
+
     @property
     def _venv_python(self):
         for venv_name in (".venv", "venv"):
@@ -1309,7 +1726,14 @@ class DeployWorker(QThread):
                 proc = hidden_run(cmd, **kwargs)
                 if proc.returncode == 0:
                     return proc
-                last_err = proc.stderr[:300] if hasattr(proc, 'stderr') and proc.stderr else f"返回码 {proc.returncode}"
+                stderr_text = (proc.stderr or "") if hasattr(proc, 'stderr') else ""
+                stdout_text = (proc.stdout or "") if hasattr(proc, 'stdout') else ""
+                err_parts = []
+                if stderr_text.strip():
+                    err_parts.append(stderr_text.strip()[:500])
+                if stdout_text.strip():
+                    err_parts.append(stdout_text.strip()[:300])
+                last_err = " | ".join(err_parts) if err_parts else f"返回码 {proc.returncode}"
                 if attempt < retries:
                     self.log.emit(f"    第{attempt}次 {label} 失败，{2**attempt}秒后重试...", "warn")
                     time.sleep(min(2 ** attempt, 30))
@@ -1382,6 +1806,7 @@ class DeployWorker(QThread):
             (5, "UV 包管理器", self._step_uv, True),
             (15, "Python 环境", self._step_python, True),
             (25, "核心依赖", self._step_deps, True),
+            (35, "扩展组件", self._step_extensions, False),
             (40, "补丁文件", self._step_patches, True),
             (50, "前端界面", self._step_ui, True),
             (60, "后端代码", self._step_backend, True),
@@ -1409,6 +1834,11 @@ class DeployWorker(QThread):
                 ("python-multipart", "↻ 安装中...", "pending"),
                 ("triton-windows", "↻ 安装中...", "pending"),
             ],
+            "扩展组件": [
+                ("voxcpm", "↻ VoxCPM2 安装中...", "pending"),
+                ("faster_whisper", "↻ faster-whisper 安装中...", "pending"),
+                ("real_esrgan", "↻ Real-ESRGAN 安装中...", "pending"),
+            ],
             "补丁文件": [("patches", "↻ 补丁部署中...", "pending")],
             "前端界面": [("ui", "↻ 前端部署中...", "pending")],
             "后端代码": [("backend", "↻ 后端部署中...", "pending"), ("ltx", "↻ 后端部署中...", "pending")],
@@ -1421,6 +1851,11 @@ class DeployWorker(QThread):
             "UV 包管理器": [("python", "√ UV 已安装", "ok")],
             "Python 环境": [("python", "√ Python 已安装", "ok")],
             "核心依赖": [],
+            "扩展组件": [
+                ("voxcpm", "√ VoxCPM2 已安装", "ok"),
+                ("faster_whisper", "√ faster-whisper 已安装", "ok"),
+                ("real_esrgan", "√ Real-ESRGAN 已安装", "ok"),
+            ],
             "补丁文件": [("patches", "√ 整合包内置", "ok")],
             "前端界面": [("ui", "√ 整合包内置", "ok")],
             "后端代码": [("backend", "√ 整合包内置", "ok"), ("ltx", "√ 整合包内置", "ok")],
@@ -1503,16 +1938,31 @@ class DeployWorker(QThread):
 
     def _pre_check_all(self):
         results = {}
-        results["UV 包管理器"] = "ok" if self._check_uv_ok() else "missing"
-        results["Python 环境"] = "ok" if self._check_python_ok() else "missing"
-        results["PyTorch"] = "ok" if self._check_torch_ok() else ("partial" if self._check_python_ok() else "missing")
-        results["核心依赖"] = "ok" if self._check_deps_ok() else ("partial" if self._check_python_ok() else "missing")
-        results["补丁文件"] = "ok" if self._check_patches_ok() else "missing"
-        results["前端界面"] = "ok" if self._check_ui_ok() else "missing"
-        results["后端代码"] = "ok" if self._check_backend_ok() else "missing"
-        results["数据配置"] = "ok" if self._check_data_ok() else "missing"
-        results["ffmpeg"] = "ok" if self._check_ffmpeg_ok() else "missing"
-        results["必需模型"] = "ok" if self._check_models_ok() else "missing"
+        checks = [
+            ("UV 包管理器", self._check_uv_ok),
+            ("Python 环境", self._check_python_ok),
+            ("PyTorch", self._check_torch_ok),
+            ("核心依赖", self._check_deps_ok),
+            ("扩展组件", self._check_extensions_ok),
+            ("补丁文件", self._check_patches_ok),
+            ("前端界面", self._check_ui_ok),
+            ("后端代码", self._check_backend_ok),
+            ("数据配置", self._check_data_ok),
+            ("ffmpeg", self._check_ffmpeg_ok),
+            ("必需模型", self._check_models_ok),
+        ]
+        for name, check_fn in checks:
+            try:
+                ok = check_fn()
+            except Exception as e:
+                self.log.emit(f"  △ {name} 检查异常: {e}", "warn")
+                ok = False
+            if name == "PyTorch":
+                results[name] = "ok" if ok else ("partial" if self._check_python_ok() else "missing")
+            elif name == "核心依赖":
+                results[name] = "ok" if ok else ("partial" if self._check_python_ok() else "missing")
+            else:
+                results[name] = "ok" if ok else "missing"
         return results
 
     def _print_summary(self, failed_steps):
@@ -1554,6 +2004,12 @@ class DeployWorker(QThread):
                 ("安装失败", "请尝试手动安装: uv pip install torch torchvision torchaudio"),
                 ("验证失败", "依赖安装后无法导入，请删除 data/.venv/ 目录后重新部署"),
                 ("voxcpm.*失败", "TTS语音依赖安装失败，不影响视频生成，可稍后手动: uv pip install voxcpm soundfile librosa"),
+            ],
+            "扩展组件": [
+                ("VoxCPM2.*失败", "TTS语音依赖安装失败，可稍后手动: uv pip install voxcpm soundfile librosa"),
+                ("faster-whisper.*失败", "语音识别依赖安装失败，可稍后手动: uv pip install faster-whisper"),
+                ("Real-ESRGAN.*失败", "高清放大依赖安装失败，可稍后手动: uv pip install realesrgan basicsr"),
+                ("安装失败", "扩展组件非核心功能所需，可稍后手动安装，不影响视频生成"),
             ],
             "补丁文件": [
                 ("未找到.*源", "请确保项目参考目录完整，或重新下载整合包"),
@@ -1658,6 +2114,23 @@ class DeployWorker(QThread):
                 return False
         return True
 
+    def _check_extensions_ok(self):
+        python_exe = self._venv_python
+        if not os.path.exists(python_exe):
+            return False
+        ext_deps = ["voxcpm", "soundfile", "librosa", "faster_whisper", "realesrgan", "basicsr"]
+        for dep in ext_deps:
+            try:
+                result = hidden_run(
+                    [python_exe, "-c", f"import importlib.util; spec = importlib.util.find_spec('{dep}'); raise SystemExit(0 if spec else 1)"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode != 0:
+                    return False
+            except:
+                return False
+        return True
+
     def _check_missing_deps(self, python_exe):
         if not os.path.exists(python_exe):
             return list(LTX_PIP_DEPS)
@@ -1666,10 +2139,9 @@ class DeployWorker(QThread):
                 [python_exe, "-c", """
 import importlib.util
 deps = ["fastapi","uvicorn","safetensors","accelerate","transformers","tokenizers","diffusers",
-        "Pillow","sentencepiece","huggingface_hub","sageattention","pydantic",
+        "PIL","sentencepiece","huggingface_hub","sageattention","pydantic",
         "multipart","ftfy","imageio","imageio_ffmpeg","peft","protobuf",
-        "cv2","tqdm","pynvml","einops","scipy","av","triton",
-        "voxcpm","soundfile","librosa"]
+        "cv2","tqdm","pynvml","einops","scipy","av","triton"]
 for d in deps:
     spec = importlib.util.find_spec(d)
     print(f"{'OK' if spec else 'MISS'}|{d}")
@@ -1679,7 +2151,7 @@ for d in deps:
             if result.returncode != 0:
                 return list(LTX_PIP_DEPS)
             import_map = {
-                "Pillow": "Pillow", "multipart": "python-multipart",
+                "PIL": "Pillow", "multipart": "python-multipart",
                 "imageio_ffmpeg": "imageio-ffmpeg", "cv2": "opencv-python-headless",
                 "triton": "triton-windows",
             }
@@ -1846,8 +2318,19 @@ for dep_name, spec in VERSION_LOCKS.items():
                 if info.get("is_folder", False):
                     if not os.path.exists(target) or not os.path.isdir(target):
                         return False
-                    folder_size = sum(f.stat().st_size for f in __import__('pathlib').Path(target).rglob("*") if f.is_file())
-                    if folder_size < expected_bytes * 0.5:
+                    try:
+                        folder_size = 0
+                        for f in Path(target).rglob("*"):
+                            if f.is_file():
+                                try:
+                                    folder_size += f.stat().st_size
+                                except OSError:
+                                    pass
+                                if folder_size >= expected_bytes * 0.5:
+                                    break
+                        if folder_size < expected_bytes * 0.5:
+                            return False
+                    except Exception:
                         return False
                 else:
                     if not os.path.exists(target):
@@ -1966,9 +2449,9 @@ for dep_name, spec in VERSION_LOCKS.items():
         is_repair = torch_ok or deps_ok
 
         env = os.environ.copy()
-        env["UV_INDEX_URL"] = self._resolved_mirrors["pip"]
-        env["UV_EXTRA_INDEX_URL"] = self._resolved_mirrors["pip_fallback"]
-        env.pop("PYTHONHOME", None)
+        for _ek in ("UV_INDEX_URL", "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX", "PYTHONHOME"):
+            env.pop(_ek, None)
+        env["UV_LINK_MODE"] = "copy"
 
         any_installed = False
 
@@ -2072,11 +2555,9 @@ for dep_name, spec in VERSION_LOCKS.items():
                     install_spec = dep
                 self.env_update.emit(dep_name, f"↻ {dep_name} 安装中...", "pending", False)
                 result = self._retry_run(
-                    [uv_exe, "pip", "install", "--python", python_exe, install_spec,
-                     "--index-url", self._resolved_mirrors["pip"],
-                     "--extra-index-url", self._resolved_mirrors["pip_fallback"]],
+                    [uv_exe, "pip", "install", "--python", python_exe, install_spec] + self._uv_index_args(),
                     label=install_spec,
-                    max_retries=2,
+                    max_retries=1,
                     capture_output=True, text=True, timeout=300, env=env
                 )
                 if result is not None and not isinstance(result, str):
@@ -2084,9 +2565,23 @@ for dep_name, spec in VERSION_LOCKS.items():
                     self.env_update.emit(dep_name, f"√ {ver}" if ver else f"√ {dep_name}", "ok", False)
                     self.log.emit(f"  ✓ {dep_name} {ver}" if ver else f"  ✓ {dep_name}", "ok")
                 else:
-                    failed_deps.append(dep)
-                    self.env_update.emit(dep_name, f"× {dep_name}", "err", True)
-                    self.log.emit(f"  △ {dep} 安装失败", "warn")
+                    err_hint = result[:150] if isinstance(result, str) else ""
+                    self.log.emit(f"  △ {dep} 镜像安装失败{': ' + err_hint if err_hint else ''}，尝试直连PyPI...", "warn")
+                    result = self._retry_run(
+                        [uv_exe, "pip", "install", "--python", python_exe, install_spec,
+                         "--default-index", "https://pypi.org/simple/"],
+                        label=f"{dep_name}(PyPI直连)",
+                        max_retries=1,
+                        capture_output=True, text=True, timeout=300, env=env
+                    )
+                    if result is not None and not isinstance(result, str):
+                        ver = self._get_dep_version(python_exe, dep_name)
+                        self.env_update.emit(dep_name, f"√ {ver}" if ver else f"√ {dep_name}", "ok", False)
+                        self.log.emit(f"  ✓ {dep_name} {ver}(PyPI)" if ver else f"  ✓ {dep_name}(PyPI)", "ok")
+                    else:
+                        failed_deps.append(dep)
+                        self.env_update.emit(dep_name, f"× {dep_name}", "err", True)
+                        self.log.emit(f"  △ {dep} 安装失败", "warn")
 
             if failed_deps:
                 self.log.emit(f"  △ 以下依赖安装失败: {', '.join(failed_deps)}", "warn")
@@ -2111,11 +2606,9 @@ for dep_name, spec in VERSION_LOCKS.items():
                         install_spec = dep_spec
                     self.env_update.emit(dep_name, f"↻ {dep_name} 修复中...", "pending", False)
                     result = self._retry_run(
-                        [uv_exe, "pip", "install", "--python", python_exe, install_spec,
-                         "--index-url", self._resolved_mirrors["pip"],
-                         "--extra-index-url", self._resolved_mirrors["pip_fallback"]],
+                        [uv_exe, "pip", "install", "--python", python_exe, install_spec] + self._uv_index_args(),
                         label=install_spec,
-                        max_retries=2,
+                        max_retries=1,
                         capture_output=True, text=True, timeout=300, env=env
                     )
                     if result is not None and not isinstance(result, str):
@@ -2123,8 +2616,22 @@ for dep_name, spec in VERSION_LOCKS.items():
                         self.env_update.emit(dep_name, f"√ {ver}" if ver else f"√ {dep_name}", "ok", False)
                         self.log.emit(f"  ✓ {dep_name} {ver}" if ver else f"  ✓ {dep_name}", "ok")
                     else:
-                        self.env_update.emit(dep_name, f"× {dep_name}", "err", True)
-                        self.log.emit(f"  △ {dep_name} 安装失败", "warn")
+                        err_hint = result[:150] if isinstance(result, str) else ""
+                        self.log.emit(f"  △ {dep_name} 镜像安装失败{': ' + err_hint if err_hint else ''}，尝试直连PyPI...", "warn")
+                        result = self._retry_run(
+                            [uv_exe, "pip", "install", "--python", python_exe, install_spec,
+                             "--default-index", "https://pypi.org/simple/"],
+                            label=f"{dep_name}(PyPI直连)",
+                            max_retries=1,
+                            capture_output=True, text=True, timeout=300, env=env
+                        )
+                        if result is not None and not isinstance(result, str):
+                            ver = self._get_dep_version(python_exe, dep_name)
+                            self.env_update.emit(dep_name, f"√ {ver}" if ver else f"√ {dep_name}", "ok", False)
+                            self.log.emit(f"  ✓ {dep_name} {ver}(PyPI)" if ver else f"  ✓ {dep_name}(PyPI)", "ok")
+                        else:
+                            self.env_update.emit(dep_name, f"× {dep_name}", "err", True)
+                            self.log.emit(f"  △ {dep_name} 安装失败", "warn")
                 any_installed = True
             else:
                 self.log.emit("  ✓ 所有依赖已就绪", "ok")
@@ -2135,6 +2642,122 @@ for dep_name, spec in VERSION_LOCKS.items():
 
         if any_installed:
             return self.STEP_STATUS_REPAIRED if is_repair else self.STEP_STATUS_INSTALLED
+        return self.STEP_STATUS_SKIPPED
+
+    def _step_extensions(self):
+        python_exe = self._venv_python
+        if not os.path.exists(python_exe):
+            raise Exception("Python 未安装，无法安装扩展组件")
+
+        uv_exe = self._uv_exe
+        env = os.environ.copy()
+        for _ek in ("UV_INDEX_URL", "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX", "PYTHONHOME"):
+            env.pop(_ek, None)
+        env["UV_LINK_MODE"] = "copy"
+
+        all_ext_deps = [
+            ("voxcpm", "voxcpm", "voxcpm>=2.0.0"),
+            ("soundfile", "soundfile", "soundfile"),
+            ("librosa", "librosa", "librosa"),
+            ("faster_whisper", "faster_whisper", "faster-whisper"),
+            ("realesrgan", "real_esrgan", "realesrgan"),
+            ("basicsr", "basicsr", "basicsr"),
+        ]
+
+        missing = []
+        for imp_name, env_key, pip_spec in all_ext_deps:
+            try:
+                result = hidden_run(
+                    [python_exe, "-c",
+                     f"import importlib.util; spec = importlib.util.find_spec('{imp_name}'); raise SystemExit(0 if spec else 1)"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode != 0:
+                    missing.append((imp_name, env_key, pip_spec))
+            except Exception:
+                missing.append((imp_name, env_key, pip_spec))
+
+        if not missing:
+            self.log.emit("  ✓ 所有扩展组件已就绪", "ok")
+            return self.STEP_STATUS_SKIPPED
+
+        self.log.emit(f"  检测到 {len(missing)} 个扩展组件缺失，开始安装...", "info")
+
+        any_installed = False
+        failed = []
+        for imp_name, env_key, pip_spec in missing:
+            if self._should_stop:
+                return self.STEP_STATUS_FAILED
+
+            import re
+            dep_base = re.split(r'[><=!~\[]', pip_spec)[0].strip()
+            display_name = {
+                "voxcpm": "VoxCPM2",
+                "soundfile": "soundfile",
+                "librosa": "librosa",
+                "faster_whisper": "faster-whisper",
+                "real_esrgan": "Real-ESRGAN",
+                "basicsr": "basicsr",
+            }.get(env_key, dep_base)
+
+            self.env_update.emit(env_key, f"↻ {display_name} 安装中...", "pending", False)
+            self.log.emit(f"  安装 {display_name} ({pip_spec})...", "info")
+
+            result = self._retry_run(
+                [uv_exe, "pip", "install", "--python", python_exe, pip_spec] + self._uv_index_args(),
+                label=display_name,
+                max_retries=1,
+                capture_output=True, text=True, timeout=600, env=env
+            )
+
+            if result is not None and not isinstance(result, str):
+                pass
+            else:
+                err_hint = result[:200] if isinstance(result, str) else ""
+                self.log.emit(f"  △ {display_name} 镜像安装失败{': ' + err_hint if err_hint else ''}，尝试直连PyPI...", "warn")
+                fallback_env = env.copy()
+                result = self._retry_run(
+                    [uv_exe, "pip", "install", "--python", python_exe, pip_spec,
+                     "--default-index", "https://pypi.org/simple/"],
+                    label=f"{display_name}(PyPI直连)",
+                    max_retries=1,
+                    capture_output=True, text=True, timeout=600, env=fallback_env
+                )
+
+            if result is not None and not isinstance(result, str):
+                try:
+                    check = hidden_run(
+                        [python_exe, "-c",
+                         f"import importlib.util; spec = importlib.util.find_spec('{imp_name}'); raise SystemExit(0 if spec else 1)"],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if check.returncode == 0:
+                        ver = self._get_dep_version(python_exe, dep_base)
+                        self.env_update.emit(env_key, f"√ {display_name} {ver}" if ver else f"√ {display_name}", "ok", False)
+                        self.log.emit(f"  ✓ {display_name} {ver}" if ver else f"  ✓ {display_name}", "ok")
+                        any_installed = True
+                    else:
+                        failed.append(display_name)
+                        self.env_update.emit(env_key, f"× {display_name}", "err", True)
+                        self.log.emit(f"  △ {display_name} 安装后验证失败", "warn")
+                except Exception:
+                    failed.append(display_name)
+                    self.env_update.emit(env_key, f"× {display_name}", "err", True)
+                    self.log.emit(f"  △ {display_name} 验证异常", "warn")
+            else:
+                failed.append(display_name)
+                self.env_update.emit(env_key, f"× {display_name}", "err", True)
+                err_detail = result if isinstance(result, str) else ""
+                self.log.emit(f"  △ {display_name} 安装失败{': ' + err_detail[:200] if err_detail else ''}", "warn")
+
+        if failed:
+            self.log.emit(f"  △ 以下扩展组件安装失败: {', '.join(failed)}", "warn")
+            self.log.emit("  这些组件非核心功能所需，可稍后手动安装", "warn")
+
+        if any_installed:
+            return self.STEP_STATUS_REPAIRED
+        if failed:
+            raise Exception(f"扩展组件安装失败: {', '.join(failed)}，可稍后手动安装")
         return self.STEP_STATUS_SKIPPED
 
     def _get_dep_version(self, python_exe, dep_name):
@@ -2300,8 +2923,7 @@ for d in deps:
                         raise Exception(f"未找到 ltx-pipelines 子目录")
                     self.log.emit("  安装 ltx-core...", "info")
                     result = self._retry_run(
-                        [uv_exe, "pip", "install", "--python", python_exe, ltx_core_dir,
-                         "--index-url", self._resolved_mirrors["pip"]],
+                        [uv_exe, "pip", "install", "--python", python_exe, ltx_core_dir] + self._uv_index_args(),
                         label="ltx-core",
                         max_retries=2,
                         capture_output=True, text=True, timeout=600, env=env
@@ -2311,8 +2933,7 @@ for d in deps:
                     self.log.emit("  ✓ ltx-core 安装成功", "ok")
                     self.log.emit("  安装 ltx-pipelines...", "info")
                     result = self._retry_run(
-                        [uv_exe, "pip", "install", "--python", python_exe, ltx_pipelines_dir,
-                         "--index-url", self._resolved_mirrors["pip"]],
+                        [uv_exe, "pip", "install", "--python", python_exe, ltx_pipelines_dir] + self._uv_index_args(),
                         label="ltx-pipelines",
                         max_retries=2,
                         capture_output=True, text=True, timeout=600, env=env
@@ -2404,8 +3025,7 @@ for d in deps:
                 is_url = url.startswith("http://") or url.startswith("https://")
                 cmd = [uv_exe, "pip", "install", "--python", python_exe, url]
                 if not is_url:
-                    cmd += ["--index-url", self._resolved_mirrors["pip"],
-                            "--extra-index-url", self._resolved_mirrors["pip_fallback"]]
+                    cmd += self._uv_index_args()
                 result = self._retry_run(
                     cmd,
                     label=f"SageAttention ({label})",
@@ -2696,12 +3316,11 @@ for d in deps:
         if not has_hf_hub:
             self.log.emit("  安装 huggingface_hub...", "info")
             env = os.environ.copy()
-            env["UV_INDEX_URL"] = self._resolved_mirrors["pip"]
-            env.pop("PYTHONHOME", None)
+            for _ek in ("UV_INDEX_URL", "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX", "PYTHONHOME"):
+                env.pop(_ek, None)
+            env["UV_LINK_MODE"] = "copy"
             self._retry_run(
-                [uv_exe, "pip", "install", "--python", python_exe, "huggingface_hub>=0.30,<1.0",
-                 "--default-index", self._resolved_mirrors["pip"],
-                 "--index-strategy", "first-index"],
+                [uv_exe, "pip", "install", "--python", python_exe, "huggingface_hub>=0.30,<1.0"] + self._uv_index_args(),
                 label="huggingface_hub",
                 capture_output=True, text=True, timeout=120, env=env
             )
@@ -2820,11 +3439,11 @@ for d in deps:
                 self.log.emit("  尝试 ModelScope 镜像...", "info")
                 try:
                     ms_env = os.environ.copy()
-                    ms_env["UV_INDEX_URL"] = self._resolved_mirrors["pip"]
-                    ms_env.pop("PYTHONHOME", None)
+                    for _ek in ("UV_INDEX_URL", "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX", "PYTHONHOME"):
+                        ms_env.pop(_ek, None)
+                    ms_env["UV_LINK_MODE"] = "copy"
                     self._retry_run(
-                        [uv_exe, "pip", "install", "--python", python_exe, "modelscope",
-                         "--index-url", self._resolved_mirrors["pip"]],
+                        [uv_exe, "pip", "install", "--python", python_exe, "modelscope"] + self._uv_index_args(),
                         label="modelscope",
                         capture_output=True, text=True, timeout=120, env=ms_env
                     )
@@ -3314,6 +3933,399 @@ class SplashScreen(QSplashScreen):
         painter.drawText((w - pw) // 2, 300, pct)
 
 
+class UsageGuideDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("使用说明 - 云集智能视频创意站")
+        self.setMinimumSize(800, 600)
+        self.resize(960, 720)
+        self.setStyleSheet("""
+            QDialog { background-color: #0D0D0D; }
+            QTextBrowser {
+                background-color: #111118; color: #E0E0F0; border: none;
+                font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+                font-size: 13px; padding: 24px 32px;
+            }
+            QTextBrowser:hover { border: none; }
+            QPushButton {
+                background-color: #252525; color: #CCCCCC; border: 1px solid #444444;
+                border-radius: 6px; padding: 8px 28px; font-size: 13px;
+            }
+            QPushButton:hover { background-color: #333333; color: #FFFFFF; }
+        """)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(False)
+        browser.setHtml(self._build_html())
+        layout.addWidget(browser)
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(16, 10, 16, 12)
+        btn_row.addStretch()
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(self.close)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+    @staticmethod
+    def _build_html() -> str:
+        BG = "#111118"
+        SURFACE = "#1a1d27"
+        SURFACE2 = "#242836"
+        BORDER = "#2e3347"
+        TEXT = "#e4e6ef"
+        TEXT2 = "#9498ab"
+        ACCENT = "#6c7bf0"
+        ACCENT2 = "#8b5cf6"
+        GREEN = "#34d399"
+        YELLOW = "#fbbf24"
+        RED = "#f87171"
+        BLUE = "#60a5fa"
+        def h2(t):
+            return f'<h2 style="font-size:18px;font-weight:600;color:{TEXT};border-bottom:1px solid {BORDER};padding-bottom:6px;margin-top:28px;margin-bottom:12px;">{t}</h2>'
+        def h3(t):
+            return f'<h3 style="font-size:15px;font-weight:600;color:{TEXT};margin-top:20px;margin-bottom:8px;">{t}</h3>'
+        def h4(t):
+            return f'<h4 style="font-size:13px;font-weight:600;color:{TEXT2};margin-top:14px;margin-bottom:6px;">{t}</h4>'
+        def p(t):
+            return f'<p style="margin:6px 0;font-size:13px;color:{TEXT};">{t}</p>'
+        def note(t):
+            return f'<div style="background:rgba(108,123,240,0.1);border-left:3px solid {ACCENT};padding:10px 14px;margin:10px 0;font-size:12px;color:{TEXT2};">{t}</div>'
+        def warn(t):
+            return f'<div style="background:rgba(251,191,36,0.08);border-left:3px solid {YELLOW};padding:10px 14px;margin:10px 0;font-size:12px;color:{TEXT2};">{t}</div>'
+        def badge(text, color):
+            return f'<span style="background:rgba({_badge_rgb(color)},0.15);color:{color};padding:1px 6px;border-radius:3px;font-size:11px;font-weight:600;">{text}</span>'
+        def _badge_rgb(c):
+            m = {"#34d399":"52,211,153","#fbbf24":"251,191,36","#f87171":"248,113,113","#60a5fa":"96,165,250","#8b5cf6":"139,92,246","#6c7bf0":"108,123,240"}
+            return m.get(c,"128,128,128")
+        def tier(text, color):
+            return f'<span style="background:rgba({_badge_rgb(color)},0.18);color:{color};padding:2px 8px;border-radius:3px;font-size:11px;font-weight:700;">{text}</span>'
+        def table(headers, rows):
+            hd = "".join(f'<th style="background:{SURFACE2};color:{TEXT2};font-size:11px;font-weight:600;padding:8px 10px;text-align:left;border-bottom:1px solid {BORDER};">{h}</th>' for h in headers)
+            body = ""
+            for row in rows:
+                cells = "".join(f'<td style="padding:8px 10px;border-bottom:1px solid {BORDER};font-size:12px;color:{TEXT};">{c}</td>' for c in row)
+                body += f'<tr>{cells}</tr>'
+            return f'<table style="width:100%;border-collapse:collapse;margin:10px 0;"><thead><tr>{hd}</tr></thead><tbody>{body}</tbody></table>'
+        def ul(items):
+            lis = "".join(f'<li style="margin:3px 0;font-size:12px;color:{TEXT};">{i}</li>' for i in items)
+            return f'<ul style="margin:6px 0;padding-left:18px;">{lis}</ul>'
+        def ol(items):
+            lis = "".join(f'<li style="margin:3px 0;font-size:12px;color:{TEXT};">{i}</li>' for i in items)
+            return f'<ol style="margin:6px 0;padding-left:18px;">{lis}</ol>'
+        def card(title, desc):
+            return f'<div style="background:{SURFACE};border:1px solid {BORDER};border-radius:8px;padding:14px;margin:6px 0;"><div style="font-size:13px;font-weight:600;color:{TEXT};margin-bottom:4px;">{title}</div><div style="font-size:12px;color:{TEXT2};">{desc}</div></div>'
+        def faq(q, a_html):
+            return f'<div style="background:{SURFACE};border:1px solid {BORDER};border-radius:6px;margin:6px 0;padding:12px 14px;"><div style="font-weight:600;font-size:13px;color:{TEXT};margin-bottom:6px;">Q: {q}</div><div style="font-size:12px;color:{TEXT2};">{a_html}</div></div>'
+        html = f"""
+        <div style="max-width:880px;margin:0 auto;">
+        <h1 style="font-size:24px;font-weight:700;color:{ACCENT};margin-bottom:4px;">使用说明</h1>
+        <p style="color:{TEXT2};font-size:13px;margin-bottom:24px;">云集智能视频创意站 — AI 视频创作一站式工具</p>
+
+        {h2("一、软件简介")}
+        {p("<strong>云集智能视频创意站</strong>是一款基于 LTX-2.3 视频生成引擎的 AI 创意工具，由武汉市云集智能科技有限公司开发。集成了文生视频、图生视频、智能多帧拼接、视频迁移、图像生成、TTS 语音合成等核心功能。")}
+        {ul([
+            "<strong>核心引擎</strong>：LTX-2.3 22B Distilled（支持 FP8 量化与 BF16 精度，8GB 显存即可启动）",
+            "<strong>技术架构</strong>：PyQt6 桌面客户端 + FastAPI 后端 + Web 前端界面",
+            "<strong>运行环境</strong>：Windows 10/11，NVIDIA GPU（最低 8GB 显存，推荐 24GB）",
+        ])}
+
+        {h2("二、系统要求")}
+        {h3("基础环境")}
+        {table(
+            ["项目", "最低要求", "推荐配置"],
+            [
+                ["操作系统", "Windows 10 64位", "Windows 11"],
+                ["GPU", "NVIDIA 8GB 显存", "NVIDIA 24GB 显存"],
+                ["系统内存", "32 GB", "64 GB"],
+                ["磁盘", "50 GB 可用空间", "100 GB SSD"],
+                ["GPU 驱动", "≥ 560.70", "最新版本"],
+                ["CUDA", "12.8（随 PyTorch 安装）", "12.8"],
+                ["Python", "3.12", "3.12"],
+                ["网络", "需要联网下载模型", "宽带"],
+            ]
+        )}
+        {note("<strong>注意</strong>：系统内存 32GB 是使用 CPU offload（低显存模式）的必要条件，因为模型权重需要暂存到内存中。低于 32GB 可能导致内存不足崩溃。")}
+
+        {h3("GPU 硬件分级")}
+        {p("软件根据 GPU 显存大小自动匹配最优推理参数，分为 5 个等级：")}
+        {table(
+            ["等级", "显存范围", "代表显卡", "推荐分辨率", "速度参考"],
+            [
+                [tier("极致性能", ACCENT2), "32GB+", "RTX 5090 / A6000 / A100", "1080p", "≈10-20秒/25帧"],
+                [tier("高性能", GREEN), "20-31GB", "RTX 3090 / 4090 / A5000", "720p-1080p", "≈30-60秒/25帧"],
+                [tier("均衡模式", BLUE), "14-20GB", "RTX 4080 / 3080 20GB", "720p", "≈30-60秒/25帧"],
+                [tier("节能模式", YELLOW), "10-14GB", "RTX 4070 Ti / 3080 12GB", "540p", "≈40-80秒/25帧"],
+                [tier("极限模式", RED), "&lt;10GB", "RTX 4060 / 3060 / GTX 1080 Ti", "480p", "≈60-120秒/25帧"],
+            ]
+        )}
+
+        {h3("GPU 架构与加速特性")}
+        {table(
+            ["GPU 架构", "代表型号", "BF16 加速", "原生 FP8 加速", "SageAttention"],
+            [
+                ["<strong>Blackwell</strong>", "RTX 5090 / 5080 / 5070", badge("✅ 硬件加速", GREEN), badge("✅ 硬件加速", GREEN), badge("✅ 支持", GREEN)],
+                ["<strong>Ada Lovelace</strong>", "RTX 4090 / 4080 / 4070", badge("✅ 硬件加速", GREEN), badge("✅ 硬件加速", GREEN), badge("✅ 支持", GREEN)],
+                ["<strong>Ampere</strong>", "RTX 3090 / 3080 / A5000", badge("✅ 硬件加速", GREEN), badge("❌ 软件模拟", YELLOW), badge("❌ 不支持", RED)],
+                ["<strong>Turing</strong>", "RTX 2080 Ti / 2080", badge("❌ 软件模拟", YELLOW), badge("❌ 软件模拟", YELLOW), badge("❌ 不支持", RED)],
+                ["<strong>Pascal</strong>", "GTX 1080 Ti / 1080", badge("❌ 不支持", RED), badge("❌ 不支持", RED), badge("❌ 不支持", RED)],
+            ]
+        )}
+        {note('BF16 和 FP8 的\u201c软件模拟\u201d指 PyTorch 会自动将低精度运算转换为 FP32/FP16 执行，功能正常但无硬件加速收益。Pascal 架构不支持 BF16，会回退到 FP32 计算。')}
+
+        {h3("模型选择建议")}
+        {card(f'BF16 蒸馏模型 {badge("~44GB", BLUE)}', "原始精度，无损画质。适用于 24GB+ 显存，需配合 Layer Streaming 分段加载。")}
+        {card(f'FP8 蒸馏模型 {badge("~22GB", GREEN)}', "权重量化，轻微损失。显存占用减半，8GB+ 显存即可运行，推荐大多数用户。")}
+        {note("<strong>Layer Streaming（分段加载）</strong>：当模型权重无法全部放入显存时，软件自动启用分段加载策略——将 Transformer 层保存在 CPU 内存中，按需异步传输到 GPU 计算，计算完毕立即释放。这使得 44GB 的 BF16 模型也能在 24GB 显卡上运行，代价是推理速度会因 CPU↔GPU 数据搬运而降低。")}
+
+        {h2("三、首次启动与部署")}
+        {p("首次启动时，软件将自动完成以下部署步骤：")}
+        {ol([
+            "<strong>下载 UV 包管理器</strong>（国内镜像加速）",
+            "<strong>安装 Python 3.12</strong> 并创建虚拟环境（<code>data/.venv/</code>）",
+            "<strong>安装 PyTorch + CUDA 12.8</strong> 及项目依赖",
+            "<strong>部署补丁文件和前端界面</strong>",
+            "<strong>下载 LTX Desktop 后端代码</strong>",
+            "<strong>下载 AI 模型</strong>（HF-Mirror 国内镜像加速）",
+        ])}
+        {note("整个部署过程约需 15-30 分钟（取决于网速），请耐心等待。")}
+
+        {h3("目录结构")}
+        <div style="background:{SURFACE};border:1px solid {BORDER};border-radius:8px;padding:14px;margin:8px 0;font-family:Consolas,monospace;font-size:12px;line-height:1.8;color:{TEXT2};">
+        app/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;← 应用程序（只读）<br>
+        app/resources/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;← 后端、补丁、前端等资源<br>
+        data/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;← 用户数据（可写，需备份）<br>
+        data/.venv/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;← Python 虚拟环境<br>
+        data/outputs/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;← 生成的视频/图像/音频<br>
+        data/uploads/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;← 上传的参考图片<br>
+        data/models/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;← AI 模型文件<br>
+        data/settings.json &nbsp;← 用户设置<br>
+        temp/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;← 临时文件（可删除）<br>
+        temp/logs/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;← 日志文件
+        </div>
+
+        {h2("四、界面概览")}
+        {p("软件采用<strong>左侧控制面板 + 右侧预览区</strong>的经典布局。")}
+        {h3("左侧面板")}
+        {table(
+            ["区域", "功能"],
+            [
+                ["顶栏", "软件名称、版本号、环境检测、系统设置按钮"],
+                ["GPU 状态栏", "显卡状态、显存占用进度条"],
+                ["系统设置", "GPU 选择、显存上限设置、硬件配置"],
+                ["视频模型", "选择模型 Checkpoint"],
+                ["模型仓库", "查看已安装/可下载的模型"],
+                ["LoRA 路径", "设置 LoRA 文件夹路径"],
+                ["开始渲染", "启动生成任务"],
+                ["任务队列", "查看当前排队中的任务"],
+                ["模式标签页", "视频生成 / 智能多帧 / 视频迁移 / 图像生成 / TTS 语音 / 高清放大"],
+                ["参数面板", "根据当前模式显示对应参数"],
+                ["底部导航", "软件更新、模型管理"],
+            ]
+        )}
+        {h3("右侧预览区")}
+        {ul([
+            "<strong>视频/图像预览</strong>：实时显示生成结果",
+            "<strong>载入种子/参数</strong>：一键复用历史生成参数",
+            "<strong>下载按钮</strong>：保存当前预览内容",
+        ])}
+
+        {h2("五、功能模块")}
+        {h3("5.1 标准生成")}
+        {p("核心功能，支持文生视频和图生视频。不上传图片即为文生视频，上传首帧图片即为图生视频。")}
+        {h4("基础画面设置")}
+        {table(
+            ["参数", "说明", "可选值"],
+            [
+                ["清晰度级别", "输出分辨率档位", "1080P / 720P / 540P"],
+                ["画幅比例", "视频宽高比", "16:9、9:16、1:1、4:3、3:4、21:9、9:21、自定义"],
+                ["帧率 (FPS)", "每秒帧数", "24 / 25 / 30 / 48 / 60"],
+                ["时长", "视频秒数", "1-30 秒"],
+                ["运动速度", "动态强度/运动快慢", "0.25x-3.0x，默认1.0x"],
+                ["镜头运动", "摄像机运动方式", "静止、推近、拉远、向左、向右、升臂、降臂、焦点偏移"],
+            ]
+        )}
+        {h4("生成媒介")}
+        {table(
+            ["输入", "效果"],
+            [
+                ["仅文字描述", "文生视频（Text-to-Video）"],
+                ["上传首帧图片", "图生视频（Image-to-Video）"],
+                ["上传首帧 + 尾帧", "首尾插帧（Frame Interpolation）"],
+                ["上传首帧 + 参考音频", "音频驱动视频（Audio-to-Video）"],
+            ]
+        )}
+        {h4("LoRA 增强")}
+        {ul([
+            "点击 <strong>+</strong> 按钮添加多个 LoRA",
+            "每个 LoRA 可独立设置权重（0-2）",
+            "LoRA 文件需放置在模型目录下的 <code>loras</code> 文件夹中",
+        ])}
+        {h4("AI 环境音")}
+        {p("勾选「生成 AI 环境音」后，视频生成完毕将自动添加匹配场景的 AI 音效。")}
+
+        {h3("5.2 智能多帧")}
+        {p("将多张图片智能编排为连续视频，支持两种工作流：")}
+        {card("单次多关键帧", "所有图片作为一条视频的关键帧锚点，一次生成完整视频。")}
+        {card("分段拼接", "每两张图片生成一段视频，再通过 ffmpeg 拼接为完整成片。")}
+        {p("操作步骤：上传图片 → 拖拽排序 → 选择模式 → 可选上传 BGM → 开始渲染")}
+        {note("分段拼接模式需要系统安装 ffmpeg。可通过环境变量 <code>LTX_FFMPEG_PATH</code> 指定路径。")}
+
+        {h3("5.3 视频迁移")}
+        {p("将参考视频中的动作/运镜/风格迁移到新主体上。")}
+        {table(
+            ["迁移类型", "说明"],
+            [
+                ["动作迁移", "提取参考视频中的姿态/轮廓/深度，驱动目标图片"],
+                ["运镜迁移", "复制参考视频的镜头运动轨迹"],
+                ["视频重绘", "保持原视频结构，重新生成画面风格"],
+            ]
+        )}
+        {h4("控制类型（动作迁移）")}
+        {table(
+            ["类型", "说明"],
+            [
+                ["Pose 姿态", "提取人体骨骼姿态"],
+                ["Canny 轮廓", "提取边缘轮廓"],
+                ["Depth 深度", "提取深度图"],
+            ]
+        )}
+        {p("控制强度范围 0-2，默认 1。值越大参考视频控制力越强，值越小 AI 创作自由度越高。")}
+
+        {h3("5.4 图像生成")}
+        {p("基于 LTX-2.3 引擎生成静态图像。")}
+        {table(
+            ["参数", "说明"],
+            [
+                ["预设分辨率", "1:1 (1024×1024)、16:9 (1280×720)、9:16 (720×1280)、自定义"],
+                ["采样步数", "1-50，默认 28。步数越多细节越丰富，但耗时更长"],
+            ]
+        )}
+
+        {h3("5.5 TTS 语音")}
+        {p("TTS 语音功能包含四个子模式：文字转语音、语音转文字、声音克隆、终极克隆，通过子标签页切换，参数共享。")}
+        {card("文字转语音", "输入文本，AI 自动设计声音风格。")}
+        {card("语音转文字", "上传音频文件，自动识别为文字，支持中英文。识别结果可一键复制。")}
+        {card("声音克隆", "上传参考音频，模仿其音色合成新文本。点击「识别为文字」可自动将参考音频转为文本。")}
+        {card("终极克隆", "上传参考音频 + 对应文本转录，最高还原度。点击「识别为文字」可自动填充文本转录。")}
+        {p('在文本开头加英文括号描述声音特征，例如：<code>(年轻女声，温柔甜美)</code> 你好，欢迎来到...')}
+
+        {h3("5.6 高清放大")}
+        {p("高清放大功能支持对图片和视频进行高分辨率增强，通过子标签页切换视频放大和图片放大。")}
+        {table(
+            ["参数", "说明", "可选值"],
+            [
+                ["放大引擎", "选择放大算法", "Real-ESRGAN（高保真）/ LTX 快速放大"],
+                ["放大倍数", "输出分辨率相对输入的倍数", "2x / 4x"],
+                ["放大模型", "Real-ESRGAN 模型变体", "通用 x4plus / 动漫 x4plus-anime / 通用 x2plus"],
+                ["降噪强度", "控制降噪程度", "0-1，0=保留原始细节，1=强力降噪"],
+            ]
+        )}
+        {card("Real-ESRGAN（高保真）", "基于深度学习的超分辨率算法，支持通用和动漫模型，适合对画质要求高的场景。需要安装 realesrgan 和 basicsr 依赖。")}
+        {card("LTX 快速放大", "基于 LTX 内置空间上采样器的快速放大，速度极快但非保真增强，适合快速预览。")}
+
+        {h2("六、系统设置")}
+        {h3("6.1 环境检测")}
+        {p("点击顶栏「环境检测」按钮，自动检测：Python 环境、CUDA/cuDNN 版本、GPU 型号与驱动、模型文件完整性、ffmpeg 可用性、推荐预设等级。")}
+        {h3("6.2 系统高级设置")}
+        {table(
+            ["设置项", "说明"],
+            [
+                ["工作设备选择", "多 GPU 时选择使用哪块显卡"],
+                ["显存上限", "限制可用显存（GB），0 表示不限制"],
+            ]
+        )}
+        {h3("6.3 显存管理")}
+        {ul([
+            "顶栏实时显示 GPU 显存占用进度条",
+            "点击「释放显存」可手动清理 GPU 缓存",
+        ])}
+
+        {h2("七、模型管理")}
+        {p("点击底部「模型管理」按钮打开模型管理弹窗。")}
+        {ul([
+            "<strong>系统模型目录</strong> — 软件默认的模型存放路径，文件不可删除",
+            "<strong>自定义目录</strong> — 用户添加的额外模型目录，文件可删除",
+            "支持的格式：<code>.safetensors</code>、<code>.ckpt</code>、<code>.pt</code>、<code>.bin</code>、<code>.pth</code>",
+            "LoRA 文件放到模型目录下的 <code>loras</code> 子文件夹中",
+        ])}
+
+        {h2("八、任务队列与种子")}
+        {ul([
+            "点击「开始渲染」后，任务自动进入队列",
+            "<strong>随机模式</strong>：每次生成使用随机种子，结果不可复现",
+            "<strong>固定模式</strong>：使用指定种子，相同参数可复现相同结果",
+            "预览区可点击「载入种子」一键复用历史参数",
+        ])}
+
+        {h2("九、常见问题")}
+        {faq("首次启动部署失败？", ul([
+            "检查网络连接，确保能访问国内镜像源",
+            "关闭杀毒软件/防火墙后重试",
+            "查看 <code>temp/logs/</code> 目录下的日志文件",
+        ]))}
+        {faq("生成时显存不足？", ul([
+            "在系统设置中设置显存上限（建议设为实际显存的 90%）",
+            "使用 FP8 量化模型（仅需约 22GB 显存，8GB 显卡即可运行）",
+            "降低清晰度级别（540P 代替 1080P）",
+            "缩短视频时长（减少总帧数）",
+            "点击「释放显存」清理缓存",
+            "确保系统内存 ≥ 32GB",
+        ]))}
+        {faq("BF16 模型和 FP8 模型怎么选？", ul([
+            "<strong>24GB+ 显存</strong>：推荐 BF16 模型，画质最佳，软件自动启用 Layer Streaming",
+            "<strong>8-24GB 显存</strong>：推荐 FP8 模型，显存占用减半，稳定性更好",
+            "两种模型的<strong>计算精度相同</strong>（均为 BF16），区别仅在于权重存储精度",
+        ]))}
+        {faq("推理速度很慢怎么办？", ul([
+            "<strong>使用 FP8 模型</strong>：显存占用减半，Layer Streaming 搬运量减半，速度显著提升",
+            "<strong>降低分辨率</strong>：540P 比 1080P 快 3-5 倍",
+            "<strong>减少帧数</strong>：帧数是影响推理时间的最直接因素",
+            "<strong>确保系统内存充足</strong>：64GB 内存时 offload 性能开销较小",
+            "<strong>升级显卡</strong>：RTX 40/50 系列支持原生 FP8 硬件加速",
+        ]))}
+        {faq("视频无法播放？", ul([
+            "确保后端服务正在运行（核心引擎状态为绿色）",
+            "刷新浏览器页面",
+            "检查 <code>temp/logs/</code> 目录下的错误日志",
+        ]))}
+        {faq("模型列表为空？", ul([
+            "点击模型仓库旁的「刷新」按钮",
+            "确认模型文件已正确放置在 <code>data/models/</code> 目录下",
+        ]))}
+        {faq("分段拼接失败？", ul([
+            "确认系统已安装 ffmpeg",
+            "可通过环境变量 <code>LTX_FFMPEG_PATH</code> 指定 ffmpeg 路径",
+        ]))}
+        {faq("软件自动退出？", ul([
+            "查看 <code>temp/logs/crash.log</code> 和 <code>temp/logs/qt_exception.log</code>",
+            "如果是 0xC0000005 错误，软件会自动重试（最多 2 次）",
+            "确保显卡驱动为最新版本",
+            "尝试降低显存使用量",
+        ]))}
+
+        {h2("十、快捷操作")}
+        {table(
+            ["操作", "说明"],
+            [
+                ["Esc", "最小化窗口到系统托盘"],
+                ["系统托盘图标", "双击恢复窗口，右键显示菜单"],
+                ["拖拽上传", "支持拖拽图片/视频/音频到上传区域"],
+                ["缩略图排序", "在智能多帧模式中拖拽缩略图调整顺序"],
+            ]
+        )}
+
+        <div style="margin-top:40px;padding-top:16px;border-top:1px solid {BORDER};font-size:11px;color:{TEXT2};text-align:center;">
+        <p><strong>云集智能视频创意站</strong></p>
+        <p>著作权人：一释寻（熊艺杰）&nbsp;|&nbsp;著作权归属：武汉市云集智能科技有限公司</p>
+        <p>本软件基于 LTX-2 视频生成引擎构建，部分功能依赖开源组件。未经著作权人书面授权，任何单位或个人不得以任何形式复制、修改、传播、出租本软件。</p>
+        </div>
+        </div>
+        """
+        return html
+
+
 class MainWindow(QMainWindow):
     log_signal = pyqtSignal(str, str)
     enable_buttons_signal = pyqtSignal()
@@ -3385,8 +4397,8 @@ class MainWindow(QMainWindow):
         self._version_data_ready.connect(self._on_version_data_ready)
 
         self._setup_ui()
-        self._setup_tray()
 
+        QTimer.singleShot(500, self._setup_tray)
         QTimer.singleShot(0, self._deferred_init)
 
     def _resolve_base_dir(self):
@@ -3595,6 +4607,19 @@ class MainWindow(QMainWindow):
 
         browser_layout.addStretch()
 
+        self.btn_usage_guide = QPushButton("📖 使用说明")
+        self.btn_usage_guide.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_usage_guide.setStyleSheet("""
+            QPushButton {
+                background-color: transparent; color: #90CAF9;
+                border: 1px solid #3949AB; border-radius: 6px;
+                padding: 5px 14px; font-size: 12px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #1A237E; color: #E8EAF6; border-color: #5C6BC0; }
+        """)
+        self.btn_usage_guide.clicked.connect(self._open_usage_guide)
+        browser_layout.addWidget(self.btn_usage_guide)
+
         layout.addWidget(browser_panel)
 
         cards_row = QHBoxLayout()
@@ -3643,6 +4668,18 @@ class MainWindow(QMainWindow):
         clear_btn.clicked.connect(lambda: self.log_text.clear())
         log_header.addWidget(clear_btn)
 
+        copy_log_btn = QPushButton("⎘ 复制")
+        copy_log_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2A2A2A; color: #888888;
+                border: 1px solid #3A3A3A; border-radius: 4px;
+                padding: 4px 10px; font-size: 11px;
+            }
+            QPushButton:hover { background-color: #3A3A3A; color: #CCCCCC; }
+        """)
+        copy_log_btn.clicked.connect(lambda: self._copy_log(self.log_text))
+        log_header.addWidget(copy_log_btn)
+
         save_log_btn = QPushButton("▼ 保存")
         save_log_btn.setStyleSheet("""
             QPushButton {
@@ -3659,6 +4696,7 @@ class MainWindow(QMainWindow):
 
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
+        self.log_text.document().setMaximumBlockCount(2000)
         self.log_text.setStyleSheet("""
             QTextEdit {
                 background-color: #0A0A0A; color: #BBBBBB;
@@ -3962,6 +5000,11 @@ class MainWindow(QMainWindow):
                 ("models", "模型目录", "AI模型文件存储目录"),
                 ("project", "项目根目录", "项目根路径"),
             ]),
+            ("extensions", "🧩 扩展组件", [
+                ("voxcpm", "VoxCPM2", "TTS语音合成，要求 >=2.0.0"),
+                ("faster_whisper", "faster-whisper", "语音识别/字幕生成"),
+                ("real_esrgan", "Real-ESRGAN", "视频/图片高清放大"),
+            ]),
         ]
 
         for cat_key, cat_title, cat_items in self._env_check_categories:
@@ -4183,6 +5226,7 @@ class MainWindow(QMainWindow):
 
         self.deploy_log_text = QTextEdit()
         self.deploy_log_text.setReadOnly(True)
+        self.deploy_log_text.document().setMaximumBlockCount(2000)
         self.deploy_log_text.setStyleSheet("""
             QTextEdit {
                 background-color: #0A0A0A; color: #BBBBBB;
@@ -4354,7 +5398,7 @@ class MainWindow(QMainWindow):
         if "lora" in fname:
             return "LoRA"
         if "upscaler" in fname:
-            return "超分辨率"
+            return "高清放大"
         if "text-encoder" in model_id or "gemma" in fname:
             return "文本编码器"
         if "distilled" in fname or "dev" in fname:
@@ -4371,11 +5415,11 @@ class MainWindow(QMainWindow):
                 if 'lora' in first_file:
                     return "LoRA"
                 if 'upscaler' in first_file:
-                    return "超分辨率"
+                    return "高清放大"
                 if 'control' in first_file or 'ic-lora' in first_file:
                     return "Control"
         tag_map = {
-            "lora": "LoRA", "control": "Control", "upscaler": "超分辨率",
+            "lora": "LoRA", "control": "Control", "upscaler": "高清放大",
             "text-encoder": "文本编码器", "text_encoder": "文本编码器",
             "vae": "VAE", "unet": "UNet", "style": "风格LoRA",
             "character": "人物LoRA", "人物": "人物LoRA", "风格": "风格LoRA",
@@ -4419,7 +5463,7 @@ class MainWindow(QMainWindow):
             seen_filenames.add(fname)
 
             category = "基础模型" if "distilled" in fname or "dev" in fname else \
-                       "超分辨率" if "upscaler" in fname else \
+                       "高清放大" if "upscaler" in fname else \
                        "文本编码器" if "gemma" in fname or "text-encoder" in rm.get("model_id", "") else \
                        "控制模型" if "ic-lora" in fname else "其他"
 
@@ -4458,7 +5502,7 @@ class MainWindow(QMainWindow):
             cat_text = "LoRA" if model_type == "lora" else "基础模型"
             size_bytes = lm.get("size_bytes", 0)
             size_gb = size_bytes / 1024 / 1024 / 1024 if size_bytes else 0
-            desc = "LoRA风格模型" if model_type == "lora" else "本地模型文件"
+            desc = _get_lora_description(fname, model_type == "lora")
 
             self._model_rows.append({
                 "name": fname,
@@ -4544,7 +5588,7 @@ class MainWindow(QMainWindow):
             })
 
         scan_suffixes = {".safetensors", ".ckpt", ".pt", ".bin", ".pth"}
-        hf_shard_pattern = __import__('re').compile(r'^model-\d{5}-of-\d{5}$')
+        hf_shard_pattern = __import__('re').compile(r'^(model|diffusion_pytorch_model|pytorch_model)-\d+-of-\d+$')
         scan_dirs = [self._models_dir]
         dirs_config = self.config.get("model_dirs", [])
         for d in dirs_config:
@@ -4574,7 +5618,7 @@ class MainWindow(QMainWindow):
                     is_lora = "lora" in fn.lower() or "lora" in dirpath.lower()
                     cat_text = "LoRA" if is_lora else "基础模型"
                     size_gb = fsize / 1024 / 1024 / 1024 if fsize else 0
-                    desc = "LoRA风格模型" if is_lora else "本地模型文件"
+                    desc = _get_lora_description(fn, is_lora)
 
                     self._model_rows.append({
                         "name": fn,
@@ -5088,8 +6132,33 @@ class MainWindow(QMainWindow):
         cc_ver.setStyleSheet("font-size: 11pt; font-weight: bold; color: #4CAF50; border: none;")
         cc_top.addWidget(cc_ver)
         cc_top.addStretch()
-        btn_check_remote = QPushButton("🔄 检查更新")
-        btn_check_remote.setFixedSize(110, 30)
+
+        self._ver_source_combo = QComboBox()
+        self._ver_source_combo.setFixedWidth(110)
+        self._ver_source_combo.setStyleSheet(
+            "QComboBox { background-color: #1a2a1a; color: #8aaa8a; border: 1px solid #2a4a2a; border-radius: 4px; font-size: 8pt; padding: 2px 6px; }"
+            "QComboBox::drop-down { border: none; }"
+            "QComboBox QAbstractItemView { background-color: #1a2a1a; color: #8aaa8a; selection-background-color: #2a4a2a; }"
+        )
+        for key, src in UPDATE_SOURCES.items():
+            self._ver_source_combo.addItem(src["name"], key)
+        self._ver_source_combo.setCurrentText(UPDATE_SOURCES.get(self._active_update_source, {}).get("name", ""))
+        self._ver_source_combo.currentIndexChanged.connect(self._on_update_source_changed)
+        cc_top.addWidget(self._ver_source_combo)
+
+        btn_retry = QPushButton("🔄")
+        btn_retry.setFixedSize(30, 30)
+        btn_retry.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_retry.setToolTip("重试检查更新")
+        btn_retry.setStyleSheet(
+            "QPushButton { background-color: #2a4a2a; color: #8aaa8a; border: none; border-radius: 6px; font-size: 11pt; }"
+            "QPushButton:hover { background-color: #3a5a3a; }"
+        )
+        btn_retry.clicked.connect(self._check_remote_versions)
+        cc_top.addWidget(btn_retry)
+
+        btn_check_remote = QPushButton("检查更新")
+        btn_check_remote.setFixedSize(90, 30)
         btn_check_remote.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_check_remote.setStyleSheet(
             "QPushButton { background-color: #2E7D32; color: #fff; border: none; border-radius: 6px; font-size: 9pt; font-weight: bold; }"
@@ -5185,10 +6254,11 @@ class MainWindow(QMainWindow):
         self._ver_list_page_size = 20
         self._ver_rendered_count = 0
         self._ver_cache_file = os.path.join(self._app_dir, "data", "update_cache.json") if self._app_dir else ""
-        self._active_update_source = "gitee"
+        self._active_update_source = "github_mirror"
         self._ver_race_winner = ""
         self._latest_version = ""
         self._latest_info = None
+        self._ver_race_errors = {}
 
         self._update_current_version_card()
         self._ver_status_label.setText("加载中...")
@@ -5276,6 +6346,18 @@ class MainWindow(QMainWindow):
         info_label.setWordWrap(True)
         info_label.setStyleSheet("font-size: 9pt; color: #888; border: none;")
         info_row.addWidget(info_label, stretch=1)
+
+        has_update = self._latest_version and self._latest_version != VERSION
+        if has_update:
+            dl_btn = QPushButton("📥 下载更新")
+            dl_btn.setFixedSize(90, 24)
+            dl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            dl_btn.setStyleSheet(
+                "QPushButton { background-color: #1565C0; color: #fff; border: none; border-radius: 4px; font-size: 8pt; font-weight: bold; }"
+                "QPushButton:hover { background-color: #1976D2; }"
+            )
+            dl_btn.clicked.connect(self._on_download_update)
+            info_row.addWidget(dl_btn)
 
         if self._ver_race_winner:
             src_name = UPDATE_SOURCES.get(self._ver_race_winner, {}).get("name", self._ver_race_winner)
@@ -5716,10 +6798,20 @@ class MainWindow(QMainWindow):
             self._ver_status_label.setText("正在检查远程更新...")
         self._check_remote_versions_race()
 
+    def _on_update_source_changed(self, index):
+        combo = getattr(self, '_ver_source_combo', None)
+        if not combo:
+            return
+        key = combo.itemData(index)
+        if key and key in UPDATE_SOURCES:
+            self._active_update_source = key
+            self._check_remote_versions()
+
     def _check_remote_versions_race(self):
         self._cancel_race_procs()
         self._ver_race_done = False
         self._ver_race_results = {}
+        self._ver_race_errors = {}
         self._ver_race_procs = {}
         for key in UPDATE_SOURCES:
             source = UPDATE_SOURCES[key]
@@ -5761,10 +6853,15 @@ class MainWindow(QMainWindow):
                 self._cancel_race_procs()
                 self._ver_curl_done(key, data)
                 return
+            except Exception as e:
+                self._ver_race_errors[key] = str(e)[:80]
+        else:
+            stderr = ""
+            try:
+                stderr = bytes(proc.readAllStandardError()).decode("utf-8", errors="replace")[:80]
             except Exception:
                 pass
-        else:
-            self._ver_race_results[key] = None
+            self._ver_race_errors[key] = f"exit={exit_code}" + (f" {stderr}" if stderr else "")
         self._ver_race_procs.pop(key, None)
         try:
             proc.finished.disconnect()
@@ -5803,6 +6900,13 @@ class MainWindow(QMainWindow):
         self._active_update_source = winning_source
         remote_latest = data.get("latest", "")
         remote_versions_list = data.get("versions", [])
+        if not remote_versions_list and remote_latest:
+            remote_versions_list = [{
+                "version": remote_latest,
+                "date": data.get("release_date", ""),
+                "changes": data.get("changes", []),
+                "filename": data.get("filename", f"{APP_NAME}-v{remote_latest}.exe"),
+            }]
         stable_exes = self._list_stable_exes()
         exe_versions = {e["version"]: e for e in stable_exes}
         local_versions = self._get_local_version_history()
@@ -5865,8 +6969,18 @@ class MainWindow(QMainWindow):
         self._ver_current_version = current_version
         has_update = remote_latest and remote_latest != VERSION and remote_latest not in exe_versions
         src_name = UPDATE_SOURCES[winning_source]["name"]
+        combo = getattr(self, '_ver_source_combo', None)
+        if combo:
+            idx = combo.findData(winning_source)
+            if idx >= 0:
+                combo.blockSignals(True)
+                combo.setCurrentIndex(idx)
+                combo.blockSignals(False)
         if has_update:
-            self._ver_info_text = f"🆕 发现新版本 v{remote_latest}（via {src_name}）"
+            changes_preview = ""
+            if data.get("changes"):
+                changes_preview = "（" + "、".join(data["changes"][:2]) + "）"
+            self._ver_info_text = f"🆕 发现新版本 v{remote_latest}{changes_preview}（via {src_name}）"
         else:
             self._ver_info_text = f"✅ 已是最新版本（via {src_name}）"
         self._save_update_cache()
@@ -6026,7 +7140,7 @@ class MainWindow(QMainWindow):
             self._ver_git_data = cache.get("git_data", [])
             self._ver_info_text = cache.get("info_text", "")
             self._ver_race_winner = cache.get("race_winner", "")
-            self._active_update_source = cache.get("active_source", "gitee")
+            self._active_update_source = cache.get("active_source", "github_mirror")
             self._latest_version = cache.get("latest_version", "")
             QTimer.singleShot(0, self._deferred_render_version_tab)
             self._check_remote_versions()
@@ -6132,26 +7246,49 @@ class MainWindow(QMainWindow):
         all_versions.sort(key=lambda x: x["version"], reverse=True)
         self._ver_stable_data = all_versions
         self._ver_current_version = VERSION
-        self._ver_info_text = "⚠ 无法连接远程仓库，显示本地版本"
+        error_parts = []
+        for k, err in getattr(self, '_ver_race_errors', {}).items():
+            src_name = UPDATE_SOURCES.get(k, {}).get("name", k)
+            error_parts.append(f"{src_name}: {err}")
+        if error_parts:
+            self._ver_info_text = f"⚠ 无法连接远程仓库，显示本地版本\n失败详情: {'; '.join(error_parts)}"
+        else:
+            self._ver_info_text = "⚠ 无法连接远程仓库，显示本地版本"
 
     def _on_download_version(self, remote_info):
         if not remote_info:
             return
         filename = remote_info.get("filename", "")
         version = remote_info.get("version", "")
-        if not filename:
+        if not filename and not version:
             return
-        source_key = getattr(self, '_active_update_source', 'gitee')
-        source = UPDATE_SOURCES.get(source_key, UPDATE_SOURCES['gitee'])
-        url = source["download_url_tpl"].format(filename=filename, version=version, GITEE_TOKEN=GITEE_TOKEN)
+        source_key = getattr(self, '_active_update_source', 'github_mirror')
+        source = UPDATE_SOURCES.get(source_key, UPDATE_SOURCES.get('github_mirror', list(UPDATE_SOURCES.values())[0] if UPDATE_SOURCES else {}))
+        download_url = ""
+        if filename and version:
+            download_url = source.get("download_url_tpl", "").format(filename=filename, version=version)
+        if not download_url:
+            download_url = source.get("download_url_tpl", "").format(filename=filename or "", version=version or "")
+        release_page = f"https://github.com/yunjii-cn/vi/releases/tag/v{version}" if version else "https://github.com/yunjii-cn/vi/releases"
+        gitee_release_page = f"https://gitee.com/yunjii/vi/releases/tag/v{version}" if version else "https://gitee.com/yunjii/vi/releases"
         try:
             import webbrowser
-            webbrowser.open(url)
-        except Exception as e:
-            self._log(f"× 无法打开下载链接: {e}", "err")
+            if download_url:
+                webbrowser.open(download_url)
+            else:
+                webbrowser.open(release_page)
+        except Exception:
+            try:
+                import webbrowser
+                webbrowser.open(release_page)
+            except Exception as e2:
+                self._log(f"× 无法打开下载链接: {e2}", "err")
 
     def _on_download_update(self):
         if not hasattr(self, '_latest_info') or not self._latest_info:
+            if self._latest_version:
+                self._on_download_version({"version": self._latest_version, "filename": f"{APP_NAME}-v{self._latest_version}.exe"})
+                return
             return
         self._on_download_version(self._latest_info)
 
@@ -6987,6 +8124,7 @@ class MainWindow(QMainWindow):
             self.raise_()
             self.activateWindow()
             self._splash.finish(self)
+            self._splash.deleteLater()
             self._splash = None
 
     def _splash_fallback(self):
@@ -6995,6 +8133,7 @@ class MainWindow(QMainWindow):
             self.raise_()
             self.activateWindow()
             self._splash.finish(self)
+            self._splash.deleteLater()
             self._splash = None
 
     def _delayed_gpu_detect(self):
@@ -7673,6 +8812,9 @@ for d in deps:
         if key == "ffmpeg":
             self._install_ffmpeg_portable()
             return
+        if key in ("voxcpm", "faster_whisper", "real_esrgan"):
+            self._fix_extension_component(key)
+            return
         if not self._python_exe or not os.path.exists(self._python_exe):
             self._log("× Python 环境未就绪，请先在部署维护中安装", "err")
             return
@@ -7690,13 +8832,14 @@ for d in deps:
                 mirror_src = "tsinghua"
             pip_url = MIRROR_SOURCES[mirror_src]["pip"]
             fallback_url = MIRROR_SOURCES[mirror_src]["pip_fallback"]
-            env["UV_INDEX_URL"] = pip_url
-            env["UV_EXTRA_INDEX_URL"] = fallback_url
-            env.pop("PYTHONHOME", None)
+            for _ek in ("UV_INDEX_URL", "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX", "PYTHONHOME"):
+                env.pop(_ek, None)
+            env["UV_LINK_MODE"] = "copy"
             result = hidden_run(
                 [uv_exe, "pip", "install", "--python", self._python_exe, install_spec,
-                 "--index-url", pip_url,
-                 "--extra-index-url", fallback_url],
+                 "--default-index", pip_url,
+                 "--index", fallback_url,
+                 "--index-strategy", "first-index"],
                 capture_output=True, text=True, timeout=300, env=env
             )
             if result.returncode == 0:
@@ -7706,7 +8849,20 @@ for d in deps:
                     self._start_runtime_detect()
             else:
                 err = (result.stderr or result.stdout or "")[:200]
-                self._log(f"× {key} 修复失败: {err}", "err")
+                self._log(f"△ {key} 镜像修复失败: {err}，尝试直连PyPI...", "warn")
+                result = hidden_run(
+                    [uv_exe, "pip", "install", "--python", self._python_exe, install_spec,
+                     "--default-index", "https://pypi.org/simple/"],
+                    capture_output=True, text=True, timeout=300, env=env
+                )
+                if result.returncode == 0:
+                    self._log(f"√ {key} 修复成功(PyPI直连)", "ok")
+                    self._detect_paths_only()
+                    if self._python_exe and os.path.exists(self._python_exe):
+                        self._start_runtime_detect()
+                else:
+                    err = (result.stderr or result.stdout or "")[:200]
+                    self._log(f"× {key} 修复失败: {err}", "err")
         except Exception as e:
             self._log(f"× {key} 修复异常: {e}", "err")
 
@@ -7751,6 +8907,70 @@ for d in deps:
             self._log(f"× ffmpeg 安装失败: {e}", "err")
             self._set_env_widget("ffmpeg", "× 安装失败", "err", True)
 
+    def _fix_extension_component(self, key):
+        if not self._python_exe or not os.path.exists(self._python_exe):
+            self._log("× Python 环境未就绪，请先在部署维护中安装", "err")
+            return
+        uv_exe = os.path.join(self._app_resources, "uv", "uv.exe")
+        if not os.path.exists(uv_exe):
+            self._one_click_deploy()
+            return
+
+        ext_install_map = {
+            "voxcpm": [("voxcpm>=2.0.0", "voxcpm"), ("soundfile", "soundfile"), ("librosa", "librosa")],
+            "faster_whisper": [("faster-whisper", "faster_whisper")],
+            "real_esrgan": [("realesrgan", "realesrgan"), ("basicsr", "basicsr")],
+        }
+        packages = ext_install_map.get(key, [(key, key)])
+        display_name = {"voxcpm": "VoxCPM2", "faster_whisper": "faster-whisper", "real_esrgan": "Real-ESRGAN"}.get(key, key)
+
+        self._log(f"正在修复 {display_name}...", "info")
+        self._set_env_widget(key, f"↻ {display_name} 安装中...", "pending", False)
+
+        env = os.environ.copy()
+        mirror_src = self._mirror_source if hasattr(self, '_mirror_source') and self._mirror_source else "auto"
+        if mirror_src == "auto" or mirror_src not in MIRROR_SOURCES:
+            mirror_src = "tsinghua"
+        pip_url = MIRROR_SOURCES[mirror_src]["pip"]
+        fallback_url = MIRROR_SOURCES[mirror_src]["pip_fallback"]
+        for _ek in ("UV_INDEX_URL", "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX", "PYTHONHOME"):
+            env.pop(_ek, None)
+        env["UV_LINK_MODE"] = "copy"
+
+        all_ok = True
+        for pip_spec, imp_name in packages:
+            try:
+                result = hidden_run(
+                    [uv_exe, "pip", "install", "--python", self._python_exe, pip_spec,
+                     "--default-index", pip_url,
+                     "--index", fallback_url,
+                     "--index-strategy", "first-index"],
+                    capture_output=True, text=True, timeout=600, env=env
+                )
+                if result.returncode != 0:
+                    err = (result.stderr or result.stdout or "")[:200]
+                    self._log(f"△ {pip_spec} 镜像安装失败: {err}，尝试直连PyPI...", "warn")
+                    result = hidden_run(
+                        [uv_exe, "pip", "install", "--python", self._python_exe, pip_spec,
+                         "--default-index", "https://pypi.org/simple/"],
+                        capture_output=True, text=True, timeout=600, env=env
+                    )
+                    if result.returncode != 0:
+                        err = (result.stderr or result.stdout or "")[:200]
+                        self._log(f"× {pip_spec} 安装失败: {err}", "err")
+                        all_ok = False
+            except Exception as e:
+                self._log(f"× {pip_spec} 安装异常: {e}", "err")
+                all_ok = False
+
+        if all_ok:
+            self._log(f"√ {display_name} 修复成功", "ok")
+            self._detect_paths_only()
+            if self._python_exe and os.path.exists(self._python_exe):
+                self._start_runtime_detect()
+        else:
+            self._set_env_widget(key, f"× {display_name} 安装失败", "err", True)
+
     def _detect_running_services(self):
         any_alive = False
         try:
@@ -7790,8 +9010,22 @@ for d in deps:
         c = color_map.get(service_id, "#B0B0C0")
         name = svc.get("name", service_id)
         ts = datetime.now().strftime("%H:%M:%S")
-        self.log_text.append(f"<span style='color:#666688'>[{ts}]</span> <span style='color:{c}'>[{name}]</span> {msg}")
+        if not hasattr(self, '_log_batch'):
+            self._log_batch = []
+            self._log_batch_timer = QTimer(self)
+            self._log_batch_timer.setSingleShot(True)
+            self._log_batch_timer.timeout.connect(self._flush_log_batch)
+        self._log_batch.append(f"<span style='color:#666688'>[{ts}]</span> <span style='color:{c}'>[{name}]</span> {msg}")
         self._write_debug_log(f"[{name}] {msg}", "info", service_id.upper())
+        if not self._log_batch_timer.isActive():
+            self._log_batch_timer.start(100)
+
+    def _flush_log_batch(self):
+        if not hasattr(self, '_log_batch') or not self._log_batch:
+            return
+        combined = "<br>".join(self._log_batch)
+        self._log_batch.clear()
+        self.log_text.append(combined)
         if self.auto_scroll:
             sb = self.log_text.verticalScrollBar()
             sb.setValue(sb.maximum())
@@ -7830,6 +9064,20 @@ for d in deps:
             self._log(f"√ {title}已保存到: {file_path}", "ok")
         except Exception as e:
             self._log(f"× 保存{title}失败: {e}", "err")
+
+    def _copy_log(self, text_edit):
+        try:
+            html_content = text_edit.toHtml()
+            import re
+            html_content = re.sub(r'<style[^>]*>.*?</style>', '', html_content, flags=re.DOTALL)
+            text_content = re.sub(r'<[^>]+>', '\n', html_content)
+            text_content = text_content.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&nbsp;', ' ').replace('&#39;', "'").replace('&quot;', '"')
+            lines = [line.strip() for line in text_content.split('\n') if line.strip()]
+            clipboard = QApplication.clipboard()
+            clipboard.setText('\n'.join(lines))
+            self._log("√ 日志已复制到剪贴板", "ok")
+        except Exception as e:
+            self._log(f"× 复制日志失败: {e}", "err")
 
     def _toggle_debug_mode(self):
         self._debug_mode = self.debug_mode_btn.isChecked()
@@ -8082,9 +9330,22 @@ for d in deps:
 
     def _poll_backend_port(self):
         self._wait_backend_count += 1
-        try:
-            conn = socket.create_connection(('127.0.0.1', self._backend_port), timeout=1)
-            conn.close()
+        import threading
+        result = [False]
+
+        def _check():
+            try:
+                conn = socket.create_connection(('127.0.0.1', self._backend_port), timeout=1)
+                conn.close()
+                result[0] = True
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_check, daemon=True)
+        t.start()
+        t.join(timeout=2)
+
+        if result[0]:
             self._wait_backend_timer.stop()
             self._log(f"核心引擎端口 {self._backend_port} 已就绪 (第{self._wait_backend_count}秒)", "ok")
             self._start_frontend()
@@ -8098,7 +9359,7 @@ for d in deps:
                 self._wait_frontend_timer = QTimer(self)
                 self._wait_frontend_timer.timeout.connect(self._poll_frontend_port)
                 self._wait_frontend_timer.start(1000)
-        except Exception:
+        else:
             if self._wait_backend_count >= 90:
                 self._wait_backend_timer.stop()
                 self._log(f"核心引擎端口 {self._backend_port} 等待超时", "err")
@@ -8106,12 +9367,25 @@ for d in deps:
 
     def _poll_frontend_port(self):
         self._wait_frontend_count += 1
-        try:
-            conn = socket.create_connection(('127.0.0.1', self._frontend_port), timeout=1)
-            conn.close()
+        import threading
+        result = [False]
+
+        def _check():
+            try:
+                conn = socket.create_connection(('127.0.0.1', self._frontend_port), timeout=1)
+                conn.close()
+                result[0] = True
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_check, daemon=True)
+        t.start()
+        t.join(timeout=2)
+
+        if result[0]:
             self._wait_frontend_timer.stop()
             self._open_ui()
-        except Exception:
+        else:
             if self._wait_frontend_count >= 30:
                 self._wait_frontend_timer.stop()
 
@@ -8324,6 +9598,11 @@ async def js():
 async def i18n():
     return _safe_file(os.path.join(ui_dir, "i18n.js"), "application/javascript", NC)
 
+@app.get("/docs")
+async def usage_guide():
+    guide_path = os.path.join(ui_dir, "usage_guide.html")
+    return _safe_file(guide_path, "text/html; charset=utf-8", NC)
+
 @app.get("/app-icon.png")
 async def app_icon():
     icon_candidates = [__ICON_PATH__]
@@ -8340,14 +9619,12 @@ async def proxy_outputs(request: Request, path: str):
     outputs_dir = __OUTPUTS_DIR__
     file_path = os.path.join(outputs_dir, path)
     if not os.path.exists(file_path) or os.path.isdir(file_path):
-        _ui_log(f"OUTPUTS 404: path={path}")
         return Response(content=b"Not found", status_code=404)
     import mimetypes as _mt
     import re as _re
     try:
         file_size = os.path.getsize(file_path)
-    except OSError as _e:
-        _ui_log(f"OUTPUTS OSError: path={path}, err={_e}")
+    except OSError:
         return Response(content=b"Internal error", status_code=500)
     mime_type, _ = _mt.guess_type(file_path)
     if mime_type is None:
@@ -8419,8 +9696,7 @@ async def proxy_api(request: Request, path: str):
             return Response(content=b"Not found", status_code=404)
         try:
             file_size = os.path.getsize(file_path)
-        except OSError as _e:
-            _ui_log(f"MEDIA OSError: path={file_path}, err={_e}")
+        except OSError:
             return Response(content=b"Internal error", status_code=500)
         mime_type, _ = mimetypes.guess_type(file_path)
         if mime_type is None:
@@ -8450,7 +9726,6 @@ async def proxy_api(request: Request, path: str):
                             remaining -= len(chunk)
                             yield chunk
                 
-                _ui_log(f"MEDIA file direct read: status=206, path={file_path}, range={range_header}")
                 return StreamingResponse(
                     iterfile(),
                     status_code=206,
@@ -8461,7 +9736,6 @@ async def proxy_api(request: Request, path: str):
                         "Content-Length": str(content_length),
                     },
                 )
-        _ui_log(f"MEDIA file direct read: status=200, path={file_path}, size={file_size}")
         def _full_iter():
             with open(file_path, "rb") as f:
                 while True:
@@ -8608,6 +9882,10 @@ if __name__ == '__main__':
     def _open_service(self, sid):
         url = SERVICES[sid]["url"]
         self._open_url_in_browser(url)
+
+    def _open_usage_guide(self):
+        dlg = UsageGuideDialog(self)
+        dlg.exec()
 
     def _open_ui(self):
         self._open_url_in_browser(f"http://127.0.0.1:{self._frontend_port}")
@@ -9014,7 +10292,27 @@ if __name__ == '__main__':
         self._ping_proc.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         self._ping_key = key
         self._ping_proc.finished.connect(self._on_ping_finished)
+        self._ping_proc.errorOccurred.connect(self._on_ping_error)
         self._ping_proc.start("ping", ["-n", "1", "-w", "2000", host])
+
+    def _on_ping_error(self, error):
+        proc = getattr(self, '_ping_proc', None)
+        if proc is None:
+            return
+        key = getattr(self, '_ping_key', '')
+        if key:
+            self._speed_results[key] = 99999
+        try:
+            proc.finished.disconnect()
+        except Exception:
+            pass
+        try:
+            proc.errorOccurred.disconnect()
+        except Exception:
+            pass
+        proc.deleteLater()
+        self._ping_proc = None
+        self._ping_next()
 
     def _on_ping_finished(self, exit_code, exit_status):
         proc = getattr(self, '_ping_proc', None)
@@ -9025,6 +10323,10 @@ if __name__ == '__main__':
         self._speed_results[self._ping_key] = float(match.group(1)) if match else 99999
         try:
             proc.finished.disconnect()
+        except Exception:
+            pass
+        try:
+            proc.errorOccurred.disconnect()
         except Exception:
             pass
         proc.deleteLater()
@@ -9049,7 +10351,27 @@ if __name__ == '__main__':
         self._gh_proc = QProcess(self)
         self._gh_proc.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         self._gh_proc.finished.connect(self._on_gh_check_finished)
+        self._gh_proc.errorOccurred.connect(self._on_gh_error)
         self._gh_proc.start("curl.exe", ["-s", "-o", "NUL", "-w", "%{http_code}", "--head", "--connect-timeout", "5", "-m", "8", url])
+
+    def _on_gh_error(self, error):
+        proc = getattr(self, '_gh_proc', None)
+        if proc is None:
+            return
+        gh_key = getattr(self, '_gh_key', '')
+        if gh_key:
+            self._speed_gh_ok[gh_key] = False
+        try:
+            proc.finished.disconnect()
+        except Exception:
+            pass
+        try:
+            proc.errorOccurred.disconnect()
+        except Exception:
+            pass
+        proc.deleteLater()
+        self._gh_proc = None
+        self._check_gh_next()
 
     def _on_gh_check_finished(self, exit_code, exit_status):
         proc = getattr(self, '_gh_proc', None)
@@ -9059,6 +10381,10 @@ if __name__ == '__main__':
         self._speed_gh_ok[self._gh_key] = output.startswith("2") or output.startswith("3")
         try:
             proc.finished.disconnect()
+        except Exception:
+            pass
+        try:
+            proc.errorOccurred.disconnect()
         except Exception:
             pass
         proc.deleteLater()
@@ -9382,6 +10708,10 @@ if __name__ == '__main__':
                 except Exception:
                     pass
                 try:
+                    proc.errorOccurred.disconnect()
+                except Exception:
+                    pass
+                try:
                     proc.terminate()
                 except Exception:
                     pass
@@ -9647,8 +10977,11 @@ def main():
     global _MAIN_WINDOW_REF
     _MAIN_WINDOW_REF = window
 
-    app.processEvents()
-    time.sleep(0.1)
+    try:
+        app.processEvents()
+    except Exception:
+        pass
+    time.sleep(0.2)
 
     try:
         exit_code = app.exec()

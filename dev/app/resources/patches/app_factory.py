@@ -182,6 +182,7 @@ def create_app(
     from extensions.batch_api import install as install_batch_api
     from extensions.env_check import install as install_env_check
     from extensions.community_models import install as install_community_models
+    from extensions.upscale_api import install as install_upscale_api
 
     install_windows_fixes(app, ctx)
     install_output_config(app, ctx)
@@ -213,6 +214,7 @@ def create_app(
     install_batch_api(app, ctx)
     install_env_check(app, ctx)
     install_community_models(app, ctx)
+    install_upscale_api(app, ctx)
 
     print(f"[YunJi] All extensions installed. Upstream: {ctx.upstream_version}")
 

@@ -61,10 +61,12 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
                     headers={
                         "content-range": f"bytes {start}-{end}/{file_size}",
                         "content-length": str(content_length), "accept-ranges": "bytes",
+                        "cache-control": "no-cache",
                     },
                 )
         resp = FileResponse(path, media_type=mime_type)
         resp.headers["accept-ranges"] = "bytes"
+        resp.headers["cache-control"] = "no-cache"
         return resp
 
     @app.get("/api/system/video-thumbnail")

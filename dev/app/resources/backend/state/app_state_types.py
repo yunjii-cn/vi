@@ -133,8 +133,8 @@ class PoseResources:
 class ICLoraState:
     pipeline: IcLoraPipeline
     lora_path: str
-    depth_pipeline: DepthProcessorPipeline
-    depth_model_path: str
+    depth_pipeline: DepthProcessorPipeline | None = None
+    depth_model_path: str = ""
     pose_resources: PoseResources | None = None
     conditioning_cache: ConditioningCache = field(default_factory=ConditioningCache)
 

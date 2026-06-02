@@ -40,6 +40,7 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
             "payload": payload, "task_id": data.get("task_id"),
             "created_at": data.get("created_at"),
             "finished_at": data.get("finished_at"),
+            "result": data.get("result"),
         }
 
     def _extract_gen_info(replay: dict | None, item_type: str) -> dict:
@@ -124,6 +125,64 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
             info["gen_method"] = "文生视频"
         elif endpoint == "/api/ic-lora/generate":
             info["gen_method"] = "视频迁移"
+
+        is_upscale = mode == "upscale" or endpoint in ("/api/upscale/image", "/api/upscale/video")
+        if is_upscale:
+            info["gen_method"] = "高清放大"
+            result_data = replay.get("result") or {}
+            orig_size = result_data.get("original_size") or ""
+            out_size = result_data.get("output_size") or ""
+            if payload.get("keepOriginalRatio"):
+                info["upscale_mode"] = "原始比例"
+            elif payload.get("targetWidth") or payload.get("targetHeight"):
+                info["upscale_mode"] = "目标分辨率"
+            else:
+                info["upscale_mode"] = "按倍数"
+            if payload.get("scale"):
+                info["upscale_scale"] = payload["scale"]
+            if orig_size and out_size:
+                try:
+                    ow, oh = orig_size.split("x")
+                    ow, oh = int(ow), int(oh)
+                    rw, rh = out_size.split("x")
+                    rw, rh = int(rw), int(rh)
+                    actual_scale_w = round(rw / ow, 1) if ow > 0 else 0
+                    actual_scale_h = round(rh / oh, 1) if oh > 0 else 0
+                    if actual_scale_w == actual_scale_h and actual_scale_w == int(actual_scale_w):
+                        info["upscale_actual_scale"] = int(actual_scale_w)
+                    else:
+                        info["upscale_actual_scale"] = actual_scale_w
+                except Exception:
+                    pass
+            if payload.get("engine") == "ltx_fast":
+                info["upscale_model"] = "LTX快速放大"
+            elif payload.get("model"):
+                info["upscale_model"] = payload["model"]
+            if payload.get("engine"):
+                info["upscale_engine"] = payload["engine"]
+            if payload.get("resizeMode"):
+                info["upscale_resize_mode"] = payload["resizeMode"]
+            if payload.get("keepOriginalRatio"):
+                info["upscale_keep_ratio"] = True
+            if orig_size:
+                info["upscale_original_size"] = orig_size
+            if out_size:
+                info["upscale_output_size"] = out_size
+            if result_data.get("resize_mode"):
+                info["upscale_resize_mode"] = result_data["resize_mode"]
+            if result_data.get("width") and result_data.get("height"):
+                info["width"] = result_data["width"]
+                info["height"] = result_data["height"]
+            if result_data.get("frames"):
+                info["upscale_frames"] = result_data["frames"]
+            if result_data.get("elapsed"):
+                info["upscale_elapsed"] = result_data["elapsed"]
+            if result_data.get("original_fps"):
+                info["upscale_original_fps"] = result_data["original_fps"]
+            if result_data.get("output_fps"):
+                info["upscale_output_fps"] = result_data["output_fps"]
+            if result_data.get("duration"):
+                info["upscale_duration"] = result_data["duration"]
 
         created = replay.get("created_at")
         finished = replay.get("finished_at")

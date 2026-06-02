@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any, cast
 
 import torch
 
 from services.services_utils import FrameArray
+
+logger = logging.getLogger(__name__)
 
 _DETECTOR_INPUT_SIZE = (640, 640)
 _POSE_INPUT_SIZE = (288, 384)  # (width, height)
@@ -532,10 +535,12 @@ class DWPosePipeline:
                 continue
             cv2.circle(canvas, (x, y), 3, (255, 255, 255), thickness=-1)
 
+    _POSE_BG_VALUE = 128
+
     def _render_instances(self, instances: list[Any], canvas_shape: tuple[int, int, int]) -> FrameArray:
         import numpy as np
 
-        canvas = np.zeros(canvas_shape, dtype=np.uint8)
+        canvas = np.full(canvas_shape, self._POSE_BG_VALUE, dtype=np.uint8)
 
         for instance in instances:
             body_raw = instance[:18]
@@ -581,19 +586,33 @@ class DWPosePipeline:
 
         return [remapped[i] for i in range(int(remapped.shape[0]))]
 
+    _pose_apply_call_count = 0
+
     @torch.inference_mode()
     def apply(self, frame: FrameArray) -> FrameArray:
         import numpy as np
 
+        DWPosePipeline._pose_apply_call_count += 1
+        call_id = DWPosePipeline._pose_apply_call_count
+
         boxes = self._detect_person_boxes(frame)
         if boxes.size == 0:
-            return cast(FrameArray, np.zeros(frame.shape, dtype=np.uint8))
+            if call_id <= 3:
+                print(f"[dw-pose] Call #{call_id}: No person detected (frame shape={frame.shape}, min={np.min(frame)}, max={np.max(frame)}, mean={np.mean(frame):.1f}), returning gray frame", flush=True)
+            logger.warning("No person detected in frame (shape=%s), returning gray frame", frame.shape)
+            return cast(FrameArray, np.full(frame.shape, self._POSE_BG_VALUE, dtype=np.uint8))
 
         images, centers, scales = self._preprocess_pose(frame, boxes)
         keypoints, scores = self._infer_pose_model(images)
         if keypoints.size == 0:
-            return cast(FrameArray, np.zeros(frame.shape, dtype=np.uint8))
+            if call_id <= 3:
+                print(f"[dw-pose] Call #{call_id}: Pose inference returned no keypoints for {boxes.shape[0]} detected boxes", flush=True)
+            logger.warning("Pose inference returned no keypoints for %d detected boxes", boxes.shape[0])
+            return cast(FrameArray, np.full(frame.shape, self._POSE_BG_VALUE, dtype=np.uint8))
 
         rescaled_keypoints = self._rescale_keypoints(keypoints, centers, scales)
         instances = self._format_instances(rescaled_keypoints, scores)
+        if call_id <= 3:
+            print(f"[dw-pose] Call #{call_id}: Detected {boxes.shape[0]} persons, {len(instances)} instances", flush=True)
+        logger.debug("Pose detected: %d persons, %d instances", boxes.shape[0], len(instances))
         return self._render_instances(instances, canvas_shape=frame.shape)

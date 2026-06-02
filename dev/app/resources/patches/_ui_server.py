@@ -4,7 +4,7 @@ from fastapi.responses import Response, StreamingResponse
 import uvicorn
 
 APP_NAME = '云集智能视频创意站'
-VERSION = '2026.05.25.0750'
+VERSION = '2026.06.02.0747'
 
 _ui_log_path = 'E:\\软件开发\\云集智能视频创意站\\dev\\temp\\logs\\ui_server.log'
 os.makedirs(os.path.dirname(_ui_log_path), exist_ok=True)
@@ -57,6 +57,11 @@ async def js():
 async def i18n():
     return _safe_file(os.path.join(ui_dir, "i18n.js"), "application/javascript", NC)
 
+@app.get("/docs")
+async def usage_guide():
+    guide_path = os.path.join(ui_dir, "usage_guide.html")
+    return _safe_file(guide_path, "text/html; charset=utf-8", NC)
+
 @app.get("/app-icon.png")
 async def app_icon():
     icon_candidates = ['E:\\软件开发\\云集智能视频创意站\\dev\\app\\ico.png']
@@ -73,14 +78,12 @@ async def proxy_outputs(request: Request, path: str):
     outputs_dir = 'E:\\软件开发\\云集智能视频创意站\\dev\\data\\outputs'
     file_path = os.path.join(outputs_dir, path)
     if not os.path.exists(file_path) or os.path.isdir(file_path):
-        _ui_log(f"OUTPUTS 404: path={path}")
         return Response(content=b"Not found", status_code=404)
     import mimetypes as _mt
     import re as _re
     try:
         file_size = os.path.getsize(file_path)
-    except OSError as _e:
-        _ui_log(f"OUTPUTS OSError: path={path}, err={_e}")
+    except OSError:
         return Response(content=b"Internal error", status_code=500)
     mime_type, _ = _mt.guess_type(file_path)
     if mime_type is None:
@@ -152,8 +155,7 @@ async def proxy_api(request: Request, path: str):
             return Response(content=b"Not found", status_code=404)
         try:
             file_size = os.path.getsize(file_path)
-        except OSError as _e:
-            _ui_log(f"MEDIA OSError: path={file_path}, err={_e}")
+        except OSError:
             return Response(content=b"Internal error", status_code=500)
         mime_type, _ = mimetypes.guess_type(file_path)
         if mime_type is None:
@@ -183,7 +185,6 @@ async def proxy_api(request: Request, path: str):
                             remaining -= len(chunk)
                             yield chunk
                 
-                _ui_log(f"MEDIA file direct read: status=206, path={file_path}, range={range_header}")
                 return StreamingResponse(
                     iterfile(),
                     status_code=206,
@@ -194,7 +195,6 @@ async def proxy_api(request: Request, path: str):
                         "Content-Length": str(content_length),
                     },
                 )
-        _ui_log(f"MEDIA file direct read: status=200, path={file_path}, size={file_size}")
         def _full_iter():
             with open(file_path, "rb") as f:
                 while True:

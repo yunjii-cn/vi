@@ -157,6 +157,7 @@ class AppHandler:
         )
 
         self.generation = GenerationHandler(state=self.state, lock=self._lock, config=config)
+        GenerationHandler.bind_pipelines_handler(self.pipelines)
 
         self.video_generation = VideoGenerationHandler(
             state=self.state,
