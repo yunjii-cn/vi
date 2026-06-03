@@ -11706,6 +11706,14 @@ if __name__ == '__main__':
 
 
 def main():
+    # 处理自部署清理：删除旧的源EXE
+    cleanup_target = None
+    for arg in sys.argv[1:]:
+        if arg.startswith("--cleanup="):
+            cleanup_target = arg[len("--cleanup="):]
+            sys.argv.remove(arg)
+            break
+
     if sys.platform == 'win32':
         try:
             import ctypes
@@ -11953,6 +11961,16 @@ def main():
     print("[DEBUG] MainWindow created, resizing...")
     window.resize(1100, 800)
     print("[DEBUG] Window resized, starting event loop...")
+
+    # 自部署清理：延迟删除旧的源EXE文件
+    if cleanup_target and os.path.isfile(cleanup_target):
+        def _do_cleanup():
+            try:
+                os.remove(cleanup_target)
+                print(f"[cleanup] 已删除旧EXE: {cleanup_target}")
+            except Exception as e:
+                print(f"[cleanup] 删除旧EXE失败(可能仍被占用): {e}")
+        QTimer.singleShot(3000, _do_cleanup)
 
     global _MAIN_WINDOW_REF
     _MAIN_WINDOW_REF = window
