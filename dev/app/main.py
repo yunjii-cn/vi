@@ -178,6 +178,23 @@ def _self_deploy(exe_dir):
     app_dir = os.path.join(deploy_dir, APP_DIR)
     os.makedirs(app_dir, exist_ok=True)
 
+    # 从EXE内部释放嵌入的resources（ui/backend/patches）
+    meipass = getattr(sys, '_MEIPASS', '')
+    if meipass:
+        resources_dst = os.path.join(app_dir, "resources")
+        os.makedirs(resources_dst, exist_ok=True)
+        _IGNORE_PATTERNS = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
+        for res_name in ("ui", "backend", "patches"):
+            src = os.path.join(meipass, "resources", res_name)
+            dst = os.path.join(resources_dst, res_name)
+            if os.path.isdir(src):
+                try:
+                    if os.path.exists(dst):
+                        shutil.rmtree(dst, ignore_errors=True)
+                    shutil.copytree(src, dst, ignore=_IGNORE_PATTERNS)
+                except Exception:
+                    pass
+
     with open(lock_path, "w", encoding="utf-8") as f:
         f.write("yunji")
 

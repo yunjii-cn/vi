@@ -820,30 +820,20 @@ def main():
         update_remote_version_json(VERSION, changes)
         print()
 
-        # Step 6: 部署到 dev/
-        print("── Step 6: 部署到 dev/ ──")
-        try:
-            _deploy_to_dev(release_dir)
-        except Exception as deploy_err:
-            print(f"  ⚠ 部署到 dev/ 部分失败: {deploy_err}")
-            print(f"  EXE 和发布包已生成，请关闭旧版 EXE 后重新运行部署")
-        print()
-
         # 完成
         BRAND = APP_NAME
-        entry_exe = DEV_DIR / BRAND / f"{BRAND}.exe"
         print("=" * 60)
         print("  构建完成！（自部署模式）")
         print(f"  发布目录: {release_dir}")
-        print(f"  部署目录: {DEV_DIR / BRAND}")
+        versioned_exe = release_dir / "ver" / f"{BRAND}-v{VERSION}.exe"
+        if versioned_exe.exists():
+            vsize_mb = versioned_exe.stat().st_size / (1024 * 1024)
+            print(f"  版本EXE: ver/{BRAND}-v{VERSION}.exe ({vsize_mb:.1f} MB)")
+        entry_exe = release_dir / f"{BRAND}.exe"
         if entry_exe.exists():
             size_mb = entry_exe.stat().st_size / (1024 * 1024)
             print(f"  入口EXE: {entry_exe}")
             print(f"  EXE 大小: {size_mb:.1f} MB")
-        versioned_exe = DEV_DIR / BRAND / "ver" / f"{BRAND}-v{VERSION}.exe"
-        if versioned_exe.exists():
-            vsize_mb = versioned_exe.stat().st_size / (1024 * 1024)
-            print(f"  版本EXE: ver/{BRAND}-v{VERSION}.exe ({vsize_mb:.1f} MB)")
         print(f"  资源目录: {ROOT_DIR}")
         print("=" * 60)
 
