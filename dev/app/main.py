@@ -11331,37 +11331,49 @@ if __name__ == '__main__':
             self._speed_deploy_source = None
 
     def _show_newbie_guide(self):
-        """首次启动时在部署页顶部显示新手引导提示"""
+        """首次启动时显示动态新手引导（可关闭，内容随部署状态变化）"""
         if hasattr(self, '_newbie_guide_frame') and self._newbie_guide_frame:
             self._newbie_guide_frame.setVisible(True)
+            self._update_newbie_guide()
             return
+
         self._newbie_guide_frame = QFrame()
+        self._newbie_guide_frame.setObjectName("newbieGuideFrame")
         self._newbie_guide_frame.setStyleSheet("""
-            QFrame { background-color: #1A237E; border: 1px solid #3949AB; border-radius: 8px; }
+            #newbieGuideFrame { background-color: #1A237E; border: 1px solid #3949AB; border-radius: 8px; }
         """)
         guide_layout = QVBoxLayout(self._newbie_guide_frame)
-        guide_layout.setContentsMargins(16, 12, 16, 12)
+        guide_layout.setContentsMargins(16, 10, 16, 10)
         guide_layout.setSpacing(6)
 
-        title_lbl = QLabel("👋 欢迎使用云集智能视频创意站！")
-        title_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFFFFF; border: none;")
-        guide_layout.addWidget(title_lbl)
+        # 标题行 + 关闭按钮
+        header_row = QHBoxLayout()
+        self._newbie_title = QLabel("👋 欢迎使用云集智能视频创意站！")
+        self._newbie_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFFFFF; border: none;")
+        header_row.addWidget(self._newbie_title, 1)
 
-        steps_lbl = QLabel(
-            "首次使用需要完成环境部署，请按以下步骤操作：\n"
-            "  ① 点击下方「一键部署维护」按钮，等待自动安装完成\n"
-            "  ② 部署完成后，点击底部「运行服务」页面\n"
-            "  ③ 点击「启动全部」，浏览器将自动打开操作界面\n"
-            "  ④ 在浏览器中输入文字描述，即可生成AI视频"
-        )
-        steps_lbl.setStyleSheet("font-size: 12px; color: #BBDEFB; border: none;")
-        steps_lbl.setWordWrap(True)
-        guide_layout.addWidget(steps_lbl)
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(24, 24)
+        close_btn.setStyleSheet("""
+            QPushButton { background-color: transparent; color: #90CAF9; border: none; font-size: 14px; font-weight: bold; }
+            QPushButton:hover { color: #FFFFFF; background-color: rgba(255,255,255,30); border-radius: 4px; }
+        """)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.clicked.connect(lambda: self._newbie_guide_frame.setVisible(False))
+        header_row.addWidget(close_btn)
+        guide_layout.addLayout(header_row)
 
-        tip_lbl = QLabel("💡 提示：部署过程需要下载约 10GB 文件，请确保网络稳定和磁盘空间充足")
-        tip_lbl.setStyleSheet("font-size: 11px; color: #90CAF9; border: none;")
-        tip_lbl.setWordWrap(True)
-        guide_layout.addWidget(tip_lbl)
+        # 动态内容标签
+        self._newbie_content = QLabel()
+        self._newbie_content.setStyleSheet("font-size: 12px; color: #BBDEFB; border: none;")
+        self._newbie_content.setWordWrap(True)
+        guide_layout.addWidget(self._newbie_content)
+
+        # 提示标签
+        self._newbie_tip = QLabel()
+        self._newbie_tip.setStyleSheet("font-size: 11px; color: #90CAF9; border: none;")
+        self._newbie_tip.setWordWrap(True)
+        guide_layout.addWidget(self._newbie_tip)
 
         # 插入到部署页顶部
         if hasattr(self, '_env_page_widget'):
@@ -11369,39 +11381,52 @@ if __name__ == '__main__':
             if env_layout:
                 env_layout.insertWidget(0, self._newbie_guide_frame)
 
+        self._update_newbie_guide()
+
+    def _update_newbie_guide(self):
+        """根据当前部署状态更新新手引导内容"""
+        if not hasattr(self, '_newbie_guide_frame') or not self._newbie_guide_frame or not self._newbie_guide_frame.isVisible():
+            return
+
+        # 判断当前状态
+        uv_ok = self._check_uv_ok() if hasattr(self, '_check_uv_ok') else False
+        python_ok = self._check_python_ok() if hasattr(self, '_check_python_ok') else False
+        deploying = hasattr(self, 'btn_one_click_deploy') and not self.btn_one_click_deploy.isEnabled()
+
+        if deploying:
+            # 正在部署中
+            self._newbie_title.setText("⏳ 正在自动部署中...")
+            self._newbie_content.setText(
+                "系统正在自动安装所需环境，请耐心等待：\n"
+                "  ① UV 包管理器 → ② Python 环境 → ③ 核心依赖 → ④ 扩展组件 → ⑤ 必需模型\n"
+                "整个过程全自动，无需手动操作。"
+            )
+            self._newbie_tip.setText("💡 提示：部署过程需要下载约 10GB 文件，请确保网络稳定和磁盘空间充足")
+        elif uv_ok and python_ok:
+            # 部署完成
+            self._newbie_title.setText("✅ 部署完成！准备开始使用")
+            self._newbie_content.setText(
+                "环境已就绪！接下来：\n"
+                "  ① 点击上方「运行服务」导航按钮\n"
+                "  ② 点击「启动全部」，浏览器将自动打开\n"
+                "  ③ 在浏览器中输入文字描述，即可生成AI视频"
+            )
+            self._newbie_tip.setText("💡 提示：如需重新部署或修复环境，随时回到此页面点击「一键部署维护」")
+        else:
+            # 未部署
+            self._newbie_title.setText("👋 欢迎使用云集智能视频创意站！")
+            self._newbie_content.setText(
+                "首次使用需要完成环境部署：\n"
+                "  ① 点击下方「一键部署维护」按钮，等待自动安装完成\n"
+                "  ② 部署完成后，点击上方「运行服务」导航按钮\n"
+                "  ③ 点击「启动全部」，浏览器将自动打开操作界面\n"
+                "  ④ 在浏览器中输入文字描述，即可生成AI视频"
+            )
+            self._newbie_tip.setText("💡 提示：如果自动部署未开始，请手动点击「一键部署维护」按钮")
+
     def _show_deploy_success_guide(self):
-        """部署完成后显示引导提示，引导用户去启动服务"""
-        guide_frame = QFrame()
-        guide_frame.setStyleSheet("""
-            QFrame { background-color: #1B5E20; border: 1px solid #2E7D32; border-radius: 8px; }
-        """)
-        guide_layout = QHBoxLayout(guide_frame)
-        guide_layout.setContentsMargins(16, 10, 16, 10)
-
-        msg_lbl = QLabel("✅ 部署完成！点击下方按钮切换到「运行服务」页面，然后点击「启动全部」即可开始使用")
-        msg_lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #C8E6C9; border: none;")
-        msg_lbl.setWordWrap(True)
-        guide_layout.addWidget(msg_lbl, 1)
-
-        go_btn = QPushButton("→ 前往启动服务")
-        go_btn.setStyleSheet("""
-            QPushButton { background-color: #2E7D32; color: #FFFFFF; border: none; border-radius: 6px; padding: 8px 20px; font-size: 13px; font-weight: bold; }
-            QPushButton:hover { background-color: #388E3C; }
-        """)
-        go_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        go_btn.clicked.connect(lambda: self._switch_page(0))
-        guide_layout.addWidget(go_btn)
-
-        # 插入到部署页顶部（新手引导下方）
-        if hasattr(self, '_env_page_widget'):
-            env_layout = self._env_page_widget.layout()
-            if env_layout:
-                insert_idx = 0
-                if hasattr(self, '_newbie_guide_frame') and self._newbie_guide_frame and self._newbie_guide_frame.isVisible():
-                    insert_idx = 1
-                env_layout.insertWidget(insert_idx, guide_frame)
-                # 5秒后自动隐藏
-                QTimer.singleShot(30000, lambda: guide_frame.setVisible(False))
+        """部署完成后更新新手引导状态"""
+        self._update_newbie_guide()
 
     def _one_click_deploy(self):
         self.btn_one_click_deploy.setEnabled(False)
@@ -11476,6 +11501,7 @@ if __name__ == '__main__':
     def _on_deploy_progress(self, pct, msg):
         self.deploy_progress_bar.setValue(int(pct))
         self.deploy_progress_label.setText(msg)
+        self._update_newbie_guide()
 
     def _append_deploy_log(self, msg, level):
         color_map = {"ok": "#66BB6A", "err": "#EF5350", "warn": "#FFA726", "info": "#CCCCCC"}
