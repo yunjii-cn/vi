@@ -1,5 +1,15 @@
 [
   {
+    "version": "2026.06.03.1600",
+    "date": "2026-06-03 16:02",
+    "message": "简化构建输出-EXE直接输出到dev/dist",
+    "changes": [
+      "简化构建输出-EXE直接输出到dev/dist"
+    ],
+    "name": "云集智能视频创意站-v2026.06.03.1600.exe",
+    "download_url": ""
+  },
+  {
     "version": "2026.06.03.1337",
     "date": "2026-06-03 13:38",
     "message": "修复EXE输出路径到dev/dist",

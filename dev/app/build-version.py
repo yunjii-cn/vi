@@ -525,110 +525,21 @@ def build_exe():
 
 # ── 打包后处理 ──
 def post_build(exe_path: Path):
-    """创建自部署发布目录结构
+    """打包后处理：确认EXE输出，清理临时文件
     
-    目录结构：
-    品牌名/
-    ├── 品牌名.exe          (硬链接入口)
-    ├── 品牌名-v版本.exe    (版本化EXE，在ver/目录)
-    ├── .yunji.lock         (部署标识)
-    ├── ver/
-    │   └── 品牌名-v版本.exe
-    ├── app/resources/      (应用资源)
-    ├── data/               (用户数据)
-    └── temp/               (临时文件)
+    PyInstaller已将EXE直接输出到 dev/dist/，无需额外复制。
+    自部署结构由EXE运行时自行创建。
     """
-    print("  打包后处理（自部署模式）...")
+    print("  打包后处理...")
 
-    BRAND = APP_NAME  # "云集智能视频创意站"
-    release_dir = BUILD_DIR / BRAND
-    if release_dir.exists():
-        shutil.rmtree(str(release_dir), ignore_errors=True)
-    release_dir.mkdir(parents=True, exist_ok=True)
+    if not exe_path.exists():
+        print(f"  ⚠ EXE不存在: {exe_path}")
+        return exe_path
 
-    # 1. 创建 ver/ 目录，将版本化 EXE 放入
-    ver_dir = release_dir / "ver"
-    ver_dir.mkdir(parents=True, exist_ok=True)
-    versioned_exe_name = f"{BRAND}-v{VERSION}.exe"
-    versioned_exe_path = ver_dir / versioned_exe_name
-    shutil.copy2(str(exe_path), str(versioned_exe_path))
-    print(f"  ✓ 版本化 EXE -> ver/{versioned_exe_name}")
+    size_mb = exe_path.stat().st_size / (1024 * 1024)
+    print(f"  ✓ EXE: {exe_path.name} ({size_mb:.1f} MB)")
 
-    # 2. 创建硬链接入口 EXE
-    entry_exe = release_dir / f"{BRAND}.exe"
-    try:
-        os.link(str(versioned_exe_path), str(entry_exe))
-        print(f"  ✓ 硬链接入口: {BRAND}.exe -> ver/{versioned_exe_name}")
-    except OSError:
-        shutil.copy2(str(versioned_exe_path), str(entry_exe))
-        print(f"  ✓ 复制入口: {BRAND}.exe (硬链接不可用，使用文件复制)")
-
-    # 3. 创建 .yunji.lock
-    lock_path = release_dir / ".yunji.lock"
-    with open(str(lock_path), "w", encoding="utf-8") as f:
-        f.write("yunji")
-    print(f"  ✓ 创建部署标识: .yunji.lock")
-
-    # 4. 复制 resources/ 目录
-    _IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc")
-
-    patches_src = ROOT_DIR / "resources" / "patches"
-    patches_dst = release_dir / "app" / "resources" / "patches"
-    if patches_src.exists():
-        if patches_dst.exists():
-            shutil.rmtree(str(patches_dst), ignore_errors=True)
-        shutil.copytree(str(patches_src), str(patches_dst), ignore=_IGNORE)
-        print("  ✓ 复制 patches/")
-
-    backend_src = ROOT_DIR / "resources" / "backend"
-    backend_dst = release_dir / "app" / "resources" / "backend"
-    if backend_src.exists():
-        if backend_dst.exists():
-            shutil.rmtree(str(backend_dst), ignore_errors=True)
-        shutil.copytree(str(backend_src), str(backend_dst), ignore=_IGNORE)
-        print("  ✓ 复制 backend/")
-
-    ui_src = ROOT_DIR / "resources" / "ui"
-    ui_dst = release_dir / "app" / "resources" / "ui"
-    if ui_src.exists():
-        if ui_dst.exists():
-            shutil.rmtree(str(ui_dst), ignore_errors=True)
-        shutil.copytree(str(ui_src), str(ui_dst), ignore=_IGNORE)
-        print("  ✓ 复制 ui/")
-
-    # 5. 创建 data/ 目录结构
-    data_dir = release_dir / "data"
-    for sub in ("outputs", "uploads", "models", "config"):
-        (data_dir / sub).mkdir(parents=True, exist_ok=True)
-    print("  ✓ 创建 data/ 目录结构")
-
-    # 6. 创建 temp/ 目录结构
-    temp_dir = release_dir / "temp"
-    for sub in ("logs", Path("cache") / "thumbnails", Path("cache") / "temp", "debug"):
-        (temp_dir / sub).mkdir(parents=True, exist_ok=True)
-    print("  ✓ 创建 temp/ 目录结构")
-
-    # 7. 生成 resources.zip（用于首次启动自举下载）
-    resources_zip = release_dir / "resources.zip"
-    resources_src = release_dir / "app" / "resources"
-    if resources_src.exists():
-        import zipfile
-        with zipfile.ZipFile(str(resources_zip), 'w', zipfile.ZIP_DEFLATED) as zf:
-            for file_path in resources_src.rglob("*"):
-                if file_path.is_file() and "__pycache__" not in str(file_path):
-                    arc_name = file_path.relative_to(resources_src)
-                    zf.write(str(file_path), str(arc_name))
-        zip_size_mb = resources_zip.stat().st_size / (1024 * 1024)
-        print(f"  ✓ 生成 resources.zip ({zip_size_mb:.2f} MB)")
-    else:
-        print("  ⚠ 未找到 resources/ 目录，跳过生成 resources.zip")
-
-    # 计算发布目录大小
-    total_size = sum(f.stat().st_size for f in release_dir.rglob("*") if f.is_file())
-    size_mb = total_size / (1024 * 1024)
-    print(f"  发布目录大小: {size_mb:.1f} MB")
-
-    return release_dir
+    return exe_path
 
 
 # ── 清理 ──
@@ -657,81 +568,6 @@ def cleanup():
 
 
 # ── 部署到 dev/ ──
-def _deploy_to_dev(release_dir: Path):
-    """将自部署发布目录复制到 dev/ 下
-    
-    部署结构：
-    dev/云集智能视频创意站/
-    ├── 云集智能视频创意站.exe          (硬链接入口)
-    ├── ver/云集智能视频创意站-v版本.exe (版本化EXE)
-    ├── .yunji.lock
-    ├── app/resources/
-    ├── data/
-    └── temp/
-    """
-    BRAND = APP_NAME
-    deploy_dir = DEV_DIR / BRAND
-
-    _kill_running_exe()
-
-    # 1. 如果目标目录已存在，只更新 EXE 和 resources
-    if deploy_dir.exists():
-        print(f"  更新现有部署: {deploy_dir}")
-        
-        # 更新 ver/ 目录中的 EXE
-        ver_dir = deploy_dir / "ver"
-        ver_dir.mkdir(parents=True, exist_ok=True)
-        src_versioned = release_dir / "ver" / f"{BRAND}-v{VERSION}.exe"
-        if src_versioned.exists():
-            dst_versioned = ver_dir / f"{BRAND}-v{VERSION}.exe"
-            shutil.copy2(str(src_versioned), str(dst_versioned))
-            print(f"  ✓ 版本化 EXE: ver/{BRAND}-v{VERSION}.exe")
-        
-        # 更新硬链接入口
-        entry_exe = deploy_dir / f"{BRAND}.exe"
-        versioned_exe = ver_dir / f"{BRAND}-v{VERSION}.exe"
-        if versioned_exe.exists():
-            try:
-                if entry_exe.exists():
-                    entry_exe.unlink()
-                os.link(str(versioned_exe), str(entry_exe))
-                print(f"  ✓ 更新硬链接入口: {BRAND}.exe")
-            except OSError:
-                shutil.copy2(str(versioned_exe), str(entry_exe))
-                print(f"  ✓ 更新入口 (复制): {BRAND}.exe")
-        
-        # 更新 .yunji.lock
-        lock_path = deploy_dir / ".yunji.lock"
-        if not lock_path.exists():
-            with open(str(lock_path), "w", encoding="utf-8") as f:
-                f.write("yunji")
-        
-        # 更新 resources
-        for res_name in ("patches", "backend", "ui"):
-            src_res = release_dir / "app" / "resources" / res_name
-            dst_res = deploy_dir / "app" / "resources" / res_name
-            if src_res.exists():
-                if dst_res.exists():
-                    shutil.rmtree(str(dst_res), ignore_errors=True)
-                _IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc")
-                shutil.copytree(str(src_res), str(dst_res), ignore=_IGNORE)
-                print(f"  ✓ 更新 {res_name}/")
-    else:
-        # 全新部署：直接复制整个目录
-        shutil.copytree(str(release_dir), str(deploy_dir), 
-                       ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-        print(f"  ✓ 全新部署: {deploy_dir}")
-
-    # 确保 data/ 和 temp/ 目录结构存在
-    for sub in ("outputs", "uploads", "models", "config"):
-        (deploy_dir / "data" / sub).mkdir(parents=True, exist_ok=True)
-    for sub in ("logs", Path("cache") / "thumbnails", Path("cache") / "temp", "debug"):
-        (deploy_dir / "temp" / sub).mkdir(parents=True, exist_ok=True)
-    print(f"  ✓ 确保 data/ 和 temp/ 目录结构存在")
-
-    print(f"  ✓ 部署完成")
-
-
 def main():
     print("=" * 60)
     print(f"  {APP_NAME} - 版本化构建工具")
@@ -794,7 +630,7 @@ def main():
 
         # Step 3: 打包后处理
         print("── Step 3: 打包后处理 ──")
-        release_dir = post_build(exe_path)
+        exe_output = post_build(exe_path)
         print()
 
         # Step 4: 清理
@@ -805,7 +641,7 @@ def main():
         # Step 5: 记录版本
         print("── Step 5: 记录版本 ──")
         version_history = load_version_history()
-        version_name = release_dir.name
+        version_name = f"{APP_NAME}-v{VERSION}"
         version_history[version_name] = {
             "version": version_name,
             "changes": changes,
@@ -815,25 +651,17 @@ def main():
         save_version_history(version_history)
         print("  ✓ 版本历史已更新")
 
-        update_versions_json(VERSION, changes, f"{version_name}.exe")
+        update_versions_json(VERSION, changes, exe_output.name)
 
         update_remote_version_json(VERSION, changes)
         print()
 
         # 完成
-        BRAND = APP_NAME
         print("=" * 60)
-        print("  构建完成！（自部署模式）")
-        print(f"  发布目录: {release_dir}")
-        versioned_exe = release_dir / "ver" / f"{BRAND}-v{VERSION}.exe"
-        if versioned_exe.exists():
-            vsize_mb = versioned_exe.stat().st_size / (1024 * 1024)
-            print(f"  版本EXE: ver/{BRAND}-v{VERSION}.exe ({vsize_mb:.1f} MB)")
-        entry_exe = release_dir / f"{BRAND}.exe"
-        if entry_exe.exists():
-            size_mb = entry_exe.stat().st_size / (1024 * 1024)
-            print(f"  入口EXE: {entry_exe}")
-            print(f"  EXE 大小: {size_mb:.1f} MB")
+        print("  构建完成！")
+        print(f"  EXE: {exe_output}")
+        size_mb = exe_output.stat().st_size / (1024 * 1024)
+        print(f"  大小: {size_mb:.1f} MB")
         print(f"  资源目录: {ROOT_DIR}")
         print("=" * 60)
 
