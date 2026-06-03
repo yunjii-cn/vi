@@ -1,13 +1,79 @@
 {
-  "latest": "2026.05.27.0245",
-  "release_date": "2026-05-27",
+  "latest": "2026.06.03.1000",
+  "release_date": "2026-06-03",
   "download_url": "https://github.com/yunjii-cn/vi/releases/latest",
   "gitee_download_url": "https://gitee.com/yunjii/vi/releases",
   "changes": [
-    "修复视频迁移视频上传预览图页面刷新后丢失",
-    "state恢复时设置video的poster和src"
+    "本地EXE检测刷新修复",
+    "缓存过时自动重新扫描",
+    "版本切换按钮显示修复"
   ],
   "versions": [
+    {
+      "version": "2026.06.03.1000",
+      "date": "2026-06-03",
+      "changes": [
+        "本地EXE检测刷新修复",
+        "缓存过时自动重新扫描",
+        "版本切换按钮显示修复"
+      ],
+      "filename": "云集智能视频创意站-v2026.06.03.1000.exe"
+    },
+    {
+      "version": "2026.06.02.1145",
+      "date": "2026-06-02",
+      "changes": [
+        "修复_active_update_source未初始化导致启动崩溃",
+        "版本切换逻辑完善"
+      ]
+    },
+    {
+      "version": "2026.06.01.0930",
+      "date": "2026-06-01",
+      "changes": [
+        "开发动态页面完善",
+        "远程commits竞速获取",
+        "Git历史本地优先显示"
+      ]
+    },
+    {
+      "version": "2026.05.31.1600",
+      "date": "2026-05-31",
+      "changes": [
+        "版本切换按钮修复",
+        "缓存刷新机制",
+        "current_version变量定义顺序修复"
+      ]
+    },
+    {
+      "version": "2026.05.30.1100",
+      "date": "2026-05-30",
+      "changes": [
+        "单EXE自部署机制",
+        "launcher.py入口重写",
+        "project.json项目配置",
+        "构建脚本支持自部署目录结构"
+      ]
+    },
+    {
+      "version": "2026.05.29.1420",
+      "date": "2026-05-29",
+      "changes": [
+        "Git版本历史显示",
+        "软件版本切换逻辑",
+        "懒加载机制",
+        "Git提交切换功能"
+      ]
+    },
+    {
+      "version": "2026.05.28.0930",
+      "date": "2026-05-28",
+      "changes": [
+        "修复高清放大视频上传改为FormData",
+        "移除多余重试按钮",
+        "上传代理超时和流式转发"
+      ]
+    },
     {
       "version": "2026.05.27.0245",
       "date": "2026-05-27",
@@ -16,6 +82,50 @@
         "state恢复时设置video的poster和src"
       ],
       "filename": "云集智能视频创意站-v2026.05.27.0245.exe"
+    },
+    {
+      "version": "2026.05.18.1153",
+      "date": "2026-05-18",
+      "changes": [
+        "修复_populate_version_table中setParent(None)导致ACCESS_VIOLATION崩溃"
+      ],
+      "filename": "云集智能视频创意站-v2026.05.18.1153.exe"
+    },
+    {
+      "version": "2026.05.17.0659",
+      "date": "2026-05-17",
+      "changes": [
+        "Python3.12环境重建",
+        "软件更新弹窗",
+        "模型管理弹窗重构"
+      ],
+      "filename": "云集智能视频创意站-v2026.05.17.0659.exe"
+    },
+    {
+      "version": "2026.05.17.0309",
+      "date": "2026-05-17",
+      "changes": [
+        "修复sip.pyd",
+        "软件更新弹窗",
+        "模型管理弹窗重构"
+      ],
+      "filename": "云集智能视频创意站-v2026.05.17.0309.exe"
+    },
+    {
+      "version": "2026.05.16.2352",
+      "date": "2026-05-16",
+      "changes": [
+        "修复PyQt6.sip模块缺失导致exe运行崩溃"
+      ],
+      "filename": "云集智能视频创意站-v2026.05.16.2352.exe"
+    },
+    {
+      "version": "2026.05.12.0431",
+      "date": "2026-05-12",
+      "changes": [
+        "修复QPalette未导入导致NameError"
+      ],
+      "filename": "云集智能视频创意站-v2026.05.12.0431.exe"
     }
   ]
 }
