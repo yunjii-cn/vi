@@ -1,12 +1,20 @@
 {
-  "latest": "2026.06.03.1242",
+  "latest": "2026.06.03.1337",
   "release_date": "2026-06-03",
-  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.03.1242",
-  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.03.1242",
+  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.03.1337",
+  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.03.1337",
   "changes": [
-    "修复自部署资源释放-去掉dev部署-新手引导"
+    "修复EXE输出路径到dev/dist"
   ],
   "versions": [
+    {
+      "version": "2026.06.03.1337",
+      "date": "2026-06-03 13:38",
+      "changes": [
+        "修复EXE输出路径到dev/dist"
+      ],
+      "filename": "云集智能视频创意站-v2026.06.03.1337.exe"
+    },
     {
       "version": "2026.06.03.1242",
       "date": "2026-06-03 12:43",

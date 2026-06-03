@@ -17,6 +17,7 @@
 
 # ── 构建产物 ──
 build/
+dev/dist/
 
 # ── EXE文件（通过GitHub/Gitee Release分发）──
 *.exe

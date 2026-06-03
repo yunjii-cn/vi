@@ -11,9 +11,9 @@ EXE构建脚本 - 云集智能视频创意站
 架构说明：
   - --onefile 模式打包（单文件EXE，启动稍慢但极少出问题）
   - main.py 直接作为入口（launcher 功能已合并到 main.py）
-  - PyInstaller 工作目录: build/ (仅构建用，不推送)
+  - PyInstaller 工作目录: dev/dist/ (仅构建用，不推送)
   - 三目录原则：
-    dev/*.exe           = 启动器（gitignore）
+    dev/dist/           = 构建产物（gitignore）
     dev/app/resources/  = 应用代码（git 管理）
     dev/data/           = 用户数据（gitignore）
     dev/temp/           = 临时文件（gitignore）
@@ -36,7 +36,7 @@ VERSION = datetime.now().strftime("%Y.%m.%d.%H%M")
 ROOT_DIR = Path(__file__).resolve().parent       # dev/app/
 DEV_DIR = ROOT_DIR.parent                        # dev/
 PROJECT_ROOT = ROOT_DIR.parent.parent             # 项目根目录
-BUILD_DIR = PROJECT_ROOT / "build"               # 项目根/build/
+BUILD_DIR = DEV_DIR / "dist"                        # dev/dist/
 VERSION_HISTORY_FILE = ROOT_DIR / "version_history.json"
 REMOTE_VERSION_FILE = PROJECT_ROOT / "ver" / "version.json"
 APP_NAME = "云集智能视频创意站"
