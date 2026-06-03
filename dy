@@ -1,0 +1,5 @@
+{
+  "message": "Invalid request.\n\nFor 'links/0/schema', nil is not an object.",
+  "documentation_url": "https://docs.github.com/rest/releases/releases#create-a-release",
+  "status": "422"
+}

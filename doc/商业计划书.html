@@ -1,0 +1,1673 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>云集智能视频创意站 — 商业计划书</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg-deep: #06080f;
+  --bg-card: #0d1117;
+  --bg-card-hover: #151b25;
+  --bg-surface: #111820;
+  --border: #1e2a3a;
+  --border-light: #2a3a4e;
+  --text-primary: #e8edf5;
+  --text-secondary: #8b99b0;
+  --text-muted: #5a6a80;
+  --accent-blue: #3b82f6;
+  --accent-blue-glow: rgba(59, 130, 246, 0.15);
+  --accent-cyan: #06b6d4;
+  --accent-amber: #f59e0b;
+  --accent-green: #10b981;
+  --accent-red: #ef4444;
+  --accent-purple: #8b5cf6;
+  --gradient-hero: linear-gradient(135deg, #0a0e1a 0%, #0f172a 40%, #1e1b4b 100%);
+  --gradient-card: linear-gradient(145deg, rgba(59,130,246,0.06) 0%, transparent 60%);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow-card: 0 4px 24px rgba(0,0,0,0.3), 0 1px 4px rgba(0,0,0,0.2);
+  --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  line-height: 1.7;
+  overflow-x: hidden;
+}
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-blue); }
+
+/* ===== Layout ===== */
+.app { display: flex; min-height: 100vh; }
+
+/* ===== Sidebar ===== */
+.sidebar {
+  position: fixed;
+  top: 0; left: 0;
+  width: 260px;
+  height: 100vh;
+  background: var(--bg-card);
+  border-right: 1px solid var(--border);
+  padding: 32px 0;
+  z-index: 100;
+  overflow-y: auto;
+  transition: transform var(--transition);
+}
+
+.sidebar-brand {
+  padding: 0 24px 28px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+
+.sidebar-brand h2 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+
+.sidebar-brand span {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: block;
+  margin-top: 4px;
+}
+
+.sidebar-nav { list-style: none; }
+
+.sidebar-nav li a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 24px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: all var(--transition);
+  border-left: 2px solid transparent;
+}
+
+.sidebar-nav li a:hover {
+  color: var(--text-primary);
+  background: rgba(59,130,246,0.06);
+}
+
+.sidebar-nav li a.active {
+  color: var(--accent-blue);
+  background: var(--accent-blue-glow);
+  border-left-color: var(--accent-blue);
+  font-weight: 500;
+}
+
+.sidebar-nav li a .nav-num {
+  width: 22px; height: 22px;
+  border-radius: 6px;
+  background: var(--bg-surface);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: all var(--transition);
+}
+
+.sidebar-nav li a.active .nav-num,
+.sidebar-nav li a:hover .nav-num {
+  background: var(--accent-blue);
+  color: #fff;
+}
+
+/* ===== Main Content ===== */
+.main {
+  margin-left: 260px;
+  flex: 1;
+  min-height: 100vh;
+}
+
+/* ===== Hero ===== */
+.hero {
+  background: var(--gradient-hero);
+  padding: 80px 60px;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero::before {
+  content: '';
+  position: absolute;
+  top: -50%; right: -20%;
+  width: 600px; height: 600px;
+  background: radial-gradient(circle, rgba(59,130,246,0.12) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.hero::after {
+  content: '';
+  position: absolute;
+  bottom: -30%; left: 10%;
+  width: 400px; height: 400px;
+  background: radial-gradient(circle, rgba(139,92,246,0.08) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(59,130,246,0.12);
+  border: 1px solid rgba(59,130,246,0.25);
+  border-radius: 20px;
+  padding: 6px 16px;
+  font-size: 12px;
+  color: var(--accent-blue);
+  font-weight: 500;
+  margin-bottom: 24px;
+  position: relative;
+}
+
+.hero-badge::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.hero h1 {
+  font-size: 42px;
+  font-weight: 900;
+  line-height: 1.2;
+  margin-bottom: 16px;
+  position: relative;
+  background: linear-gradient(135deg, #e8edf5 0%, #93c5fd 50%, #c4b5fd 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hero p {
+  font-size: 16px;
+  color: var(--text-secondary);
+  max-width: 600px;
+  line-height: 1.8;
+  position: relative;
+}
+
+.hero-meta {
+  display: flex;
+  gap: 24px;
+  margin-top: 32px;
+  position: relative;
+}
+
+.hero-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.hero-meta-item svg {
+  width: 16px; height: 16px;
+  stroke: var(--accent-blue);
+}
+
+/* ===== Content Sections ===== */
+.content {
+  padding: 48px 60px;
+  max-width: 960px;
+}
+
+.section {
+  margin-bottom: 64px;
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+
+.section.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 28px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.section-num {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 900;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.section-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* ===== Cards ===== */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow-card);
+  transition: all var(--transition);
+  position: relative;
+  overflow: hidden;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(59,130,246,0.3), transparent);
+}
+
+.card:hover {
+  border-color: var(--border-light);
+  background: var(--bg-card-hover);
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-title .icon {
+  width: 20px; height: 20px;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px;
+}
+
+/* ===== Stat Cards ===== */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 2px;
+}
+
+.stat-card.blue::after { background: var(--accent-blue); }
+.stat-card.amber::after { background: var(--accent-amber); }
+.stat-card.green::after { background: var(--accent-green); }
+.stat-card.cyan::after { background: var(--accent-cyan); }
+.stat-card.purple::after { background: var(--accent-purple); }
+
+.stat-value {
+  font-size: 28px;
+  font-weight: 900;
+  margin-bottom: 4px;
+}
+
+.stat-card.blue .stat-value { color: var(--accent-blue); }
+.stat-card.amber .stat-value { color: var(--accent-amber); }
+.stat-card.green .stat-value { color: var(--accent-green); }
+.stat-card.cyan .stat-value { color: var(--accent-cyan); }
+.stat-card.purple .stat-value { color: var(--accent-purple); }
+
+.stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ===== Tables ===== */
+.table-wrap {
+  overflow-x: auto;
+  margin-bottom: 20px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+thead th {
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-align: left;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+tbody td {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(30,42,58,0.5);
+  color: var(--text-primary);
+}
+
+tbody tr {
+  transition: background var(--transition);
+}
+
+tbody tr:hover {
+  background: rgba(59,130,246,0.04);
+}
+
+/* ===== Tags ===== */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tag-blue { background: rgba(59,130,246,0.15); color: #60a5fa; }
+.tag-green { background: rgba(16,185,129,0.15); color: #34d399; }
+.tag-amber { background: rgba(245,158,11,0.15); color: #fbbf24; }
+.tag-red { background: rgba(239,68,68,0.15); color: #f87171; }
+.tag-purple { background: rgba(139,92,246,0.15); color: #a78bfa; }
+.tag-cyan { background: rgba(6,182,212,0.15); color: #22d3ee; }
+
+/* ===== Bar Chart ===== */
+.chart-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chart-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.chart-label {
+  width: 50px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.chart-bar-wrap {
+  flex: 1;
+  height: 28px;
+  background: var(--bg-surface);
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+}
+
+.chart-bar {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  min-width: 40px;
+}
+
+.chart-bar.blue { background: linear-gradient(90deg, #2563eb, #3b82f6); }
+.chart-bar.cyan { background: linear-gradient(90deg, #0891b2, #06b6d4); }
+.chart-bar.amber { background: linear-gradient(90deg, #d97706, #f59e0b); }
+.chart-bar.green { background: linear-gradient(90deg, #059669, #10b981); }
+.chart-bar.purple { background: linear-gradient(90deg, #7c3aed, #8b5cf6); }
+
+/* ===== Timeline ===== */
+.timeline {
+  position: relative;
+  padding-left: 36px;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 14px; top: 0; bottom: 0;
+  width: 2px;
+  background: linear-gradient(180deg, var(--accent-blue), var(--accent-purple), var(--accent-amber));
+}
+
+.timeline-item {
+  position: relative;
+  margin-bottom: 32px;
+  padding-left: 24px;
+}
+
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: -24px; top: 6px;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--bg-deep);
+  border: 2px solid var(--accent-blue);
+  z-index: 1;
+}
+
+.timeline-item:nth-child(2)::before { border-color: var(--accent-cyan); }
+.timeline-item:nth-child(3)::before { border-color: var(--accent-green); }
+.timeline-item:nth-child(4)::before { border-color: var(--accent-amber); }
+.timeline-item:nth-child(5)::before { border-color: var(--accent-purple); }
+.timeline-item:nth-child(6)::before { border-color: var(--accent-red); }
+
+.timeline-time {
+  font-size: 12px;
+  color: var(--accent-blue);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.timeline-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.timeline-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* ===== Checklist ===== */
+.checklist {
+  list-style: none;
+}
+
+.checklist li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all var(--transition);
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.checklist li:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-light);
+}
+
+.checklist li.checked {
+  opacity: 0.5;
+}
+
+.checklist li.checked .check-text {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.check-box {
+  width: 20px; height: 20px;
+  border-radius: 6px;
+  border: 2px solid var(--border-light);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  transition: all var(--transition);
+}
+
+.checklist li.checked .check-box {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+.check-box svg {
+  width: 12px; height: 12px;
+  stroke: #fff;
+  stroke-width: 3;
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+
+.checklist li.checked .check-box svg {
+  opacity: 1;
+}
+
+/* ===== Pillar Cards ===== */
+.pillar-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.pillar-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.pillar-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+}
+
+.pillar-card.p1::before { background: linear-gradient(90deg, var(--accent-blue), var(--accent-cyan)); }
+.pillar-card.p2::before { background: linear-gradient(90deg, var(--accent-amber), #f97316); }
+.pillar-card.p3::before { background: linear-gradient(90deg, var(--accent-green), var(--accent-cyan)); }
+
+.pillar-icon {
+  width: 48px; height: 48px;
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 16px;
+  font-size: 22px;
+}
+
+.p1 .pillar-icon { background: rgba(59,130,246,0.12); }
+.p2 .pillar-icon { background: rgba(245,158,11,0.12); }
+.p3 .pillar-icon { background: rgba(16,185,129,0.12); }
+
+.pillar-card h4 {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.pillar-card p {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.pillar-tag {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.p1 .pillar-tag { color: var(--accent-blue); }
+.p2 .pillar-tag { color: var(--accent-amber); }
+.p3 .pillar-tag { color: var(--accent-green); }
+
+/* ===== Pricing Cards ===== */
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+
+.pricing-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  text-align: center;
+  transition: all var(--transition);
+  position: relative;
+}
+
+.pricing-card.featured {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 24px rgba(59,130,246,0.1);
+}
+
+.pricing-card.featured::before {
+  content: '推荐';
+  position: absolute;
+  top: -1px; right: 16px;
+  background: var(--accent-blue);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 0 0 8px 8px;
+}
+
+.pricing-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-light);
+}
+
+.pricing-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.pricing-price {
+  font-size: 28px;
+  font-weight: 900;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.pricing-price span {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.pricing-features {
+  list-style: none;
+  margin-top: 16px;
+  text-align: left;
+}
+
+.pricing-features li {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(30,42,58,0.3);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pricing-features li::before {
+  content: '✓';
+  color: var(--accent-green);
+  font-weight: 700;
+  font-size: 11px;
+}
+
+/* ===== Flow Diagram ===== */
+.flow-diagram {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 20px;
+  background: var(--bg-surface);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.flow-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 16px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.flow-step .step-num {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700;
+  flex-shrink: 0;
+}
+
+.flow-arrow {
+  color: var(--text-muted);
+  font-size: 16px;
+}
+
+/* ===== Phase Cards ===== */
+.phase-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.phase-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  position: relative;
+  overflow: hidden;
+}
+
+.phase-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 3px;
+}
+
+.phase-card.ph1::before { background: var(--accent-blue); }
+.phase-card.ph2::before { background: var(--accent-cyan); }
+.phase-card.ph3::before { background: var(--accent-green); }
+.phase-card.ph4::before { background: var(--accent-amber); }
+.phase-card.ph5::before { background: var(--accent-purple); }
+
+.phase-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.phase-name {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.phase-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  padding: 4px 10px;
+  border-radius: 12px;
+}
+
+.phase-goal {
+  font-size: 13px;
+  color: var(--accent-blue);
+  margin-bottom: 12px;
+  font-weight: 500;
+}
+
+.phase-tasks {
+  list-style: none;
+}
+
+.phase-tasks li {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.phase-tasks li::before {
+  content: '';
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* ===== Risk Matrix ===== */
+.risk-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.risk-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+}
+
+.risk-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.risk-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.risk-body {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.risk-counter {
+  font-size: 12px;
+  color: var(--accent-cyan);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.risk-counter::before {
+  content: '→';
+  font-weight: 700;
+}
+
+/* ===== Footer ===== */
+.footer {
+  padding: 32px 60px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ===== Mobile ===== */
+.mobile-toggle {
+  display: none;
+  position: fixed;
+  top: 16px; left: 16px;
+  z-index: 200;
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  align-items: center; justify-content: center;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+@media (max-width: 900px) {
+  .sidebar { transform: translateX(-100%); }
+  .sidebar.open { transform: translateX(0); }
+  .main { margin-left: 0; }
+  .hero { padding: 60px 24px; }
+  .content { padding: 32px 24px; }
+  .hero h1 { font-size: 28px; }
+  .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .pillar-grid { grid-template-columns: 1fr; }
+  .pricing-grid { grid-template-columns: repeat(2, 1fr); }
+  .phase-grid { grid-template-columns: 1fr; }
+  .risk-grid { grid-template-columns: 1fr; }
+  .mobile-toggle { display: flex; }
+}
+
+/* ===== Print ===== */
+@media print {
+  .sidebar, .mobile-toggle { display: none !important; }
+  .main { margin-left: 0; }
+  .section { opacity: 1 !important; transform: none !important; }
+  body { background: #fff; color: #000; }
+  .card, .stat-card, .pillar-card, .pricing-card, .phase-card, .risk-card {
+    background: #f8f8f8; border-color: #ddd; box-shadow: none;
+  }
+}
+</style>
+</head>
+<body>
+
+<button class="mobile-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+</button>
+
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <h2>云集智能视频创意站</h2>
+      <span>商业计划书 v1.0</span>
+    </div>
+    <ul class="sidebar-nav">
+      <li><a href="#executive" class="nav-link active"><span class="nav-num">1</span>执行摘要</a></li>
+      <li><a href="#market" class="nav-link"><span class="nav-num">2</span>产品与市场</a></li>
+      <li><a href="#business" class="nav-link"><span class="nav-num">3</span>商业模式</a></li>
+      <li><a href="#card-system" class="nav-link"><span class="nav-num">3.2</span>卡密体系</a></li>
+      <li><a href="#cloud" class="nav-link"><span class="nav-num">3.3</span>云电脑代理</a></li>
+      <li><a href="#service" class="nav-link"><span class="nav-num">3.4</span>安装服务</a></li>
+      <li><a href="#plan" class="nav-link"><span class="nav-num">4</span>实施计划</a></li>
+      <li><a href="#finance" class="nav-link"><span class="nav-num">5</span>财务预测</a></li>
+      <li><a href="#risk" class="nav-link"><span class="nav-num">6</span>风险与对策</a></li>
+      <li><a href="#milestone" class="nav-link"><span class="nav-num">7</span>关键里程碑</a></li>
+      <li><a href="#action" class="nav-link"><span class="nav-num">8</span>立即行动</a></li>
+    </ul>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <!-- Hero -->
+    <section class="hero">
+      <div class="hero-badge">商业计划书</div>
+      <h1>云集智能视频创意站</h1>
+      <p>国内最好用的 AI 视频生成一站式工具——从安装到出片，全程无忧。轻资产、快变现、重服务，用别人的 GPU 赚钱，用自己的封装能力做差异化。</p>
+      <div class="hero-meta">
+        <div class="hero-meta-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          版本 v1.0
+        </div>
+        <div class="hero-meta-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          2026-06-03
+        </div>
+        <div class="hero-meta-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          轻资产 · 快变现 · 重服务
+        </div>
+      </div>
+    </section>
+
+    <div class="content">
+
+      <!-- 1. 执行摘要 -->
+      <section id="executive" class="section">
+        <div class="section-header">
+          <div class="section-num">1</div>
+          <h2 class="section-title">执行摘要</h2>
+        </div>
+
+        <div class="card">
+          <p style="font-size:14px;color:var(--text-secondary);line-height:1.9;">
+            云集智能视频创意站是一款基于 LTX Studio 的 AI 视频生成桌面软件，核心价值是<strong style="color:var(--text-primary)">降低 AI 视频本地化使用门槛</strong>和<strong style="color:var(--text-primary)">解决国内网络适配问题</strong>。
+          </p>
+          <p style="font-size:14px;color:var(--text-secondary);line-height:1.9;margin-top:12px;">
+            本计划以<strong style="color:var(--accent-blue)">轻资产、快变现、重服务</strong>为核心原则，通过"微信登录+时间卡密"体系，结合云电脑代理和人工安装服务，在1个月内实现首笔收入，6个月内实现稳定现金流。
+          </p>
+        </div>
+
+        <div class="pillar-grid">
+          <div class="pillar-card p1">
+            <div class="pillar-icon">☁️</div>
+            <h4>云电脑时长代理</h4>
+            <p>代理云GPU算力，时间收费，用户成本可控</p>
+            <div class="pillar-tag">第2个月启动</div>
+          </div>
+          <div class="pillar-card p2">
+            <div class="pillar-icon">🔧</div>
+            <h4>1对1安装服务</h4>
+            <p>远程安装部署，即时收入，零成本</p>
+            <div class="pillar-tag">第1个月启动</div>
+          </div>
+          <div class="pillar-card p3">
+            <div class="pillar-icon">⚡</div>
+            <h4>云端API代理</h4>
+            <p>转发LTX/fal.ai API，按量赚差价</p>
+            <div class="pillar-tag">第3个月启动</div>
+          </div>
+        </div>
+
+        <div class="stat-grid" style="margin-top:24px;">
+          <div class="stat-card blue">
+            <div class="stat-value">~1000元</div>
+            <div class="stat-label">启动成本</div>
+          </div>
+          <div class="stat-card green">
+            <div class="stat-value">1个月</div>
+            <div class="stat-label">首笔收入周期</div>
+          </div>
+          <div class="stat-card amber">
+            <div class="stat-value">1.2万+</div>
+            <div class="stat-label">12个月月利润</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. 产品与市场 -->
+      <section id="market" class="section">
+        <div class="section-header">
+          <div class="section-num">2</div>
+          <h2 class="section-title">产品与市场</h2>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span class="icon" style="background:rgba(59,130,246,0.15);color:var(--accent-blue);">🎯</span>
+            核心差异化
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div style="padding:12px;background:var(--bg-surface);border-radius:8px;">
+              <div style="font-size:13px;font-weight:600;color:var(--accent-blue);margin-bottom:4px;">本地推理零门槛</div>
+              <div style="font-size:12px;color:var(--text-secondary);">6GB显存即可运行</div>
+            </div>
+            <div style="padding:12px;background:var(--bg-surface);border-radius:8px;">
+              <div style="font-size:13px;font-weight:600;color:var(--accent-cyan);margin-bottom:4px;">国内网络全适配</div>
+              <div style="font-size:12px;color:var(--text-secondary);">镜像源自动测速、HF-Mirror、Gitee双源</div>
+            </div>
+            <div style="padding:12px;background:var(--bg-surface);border-radius:8px;">
+              <div style="font-size:13px;font-weight:600;color:var(--accent-green);margin-bottom:4px;">硬件自适应</div>
+              <div style="font-size:12px;color:var(--text-secondary);">GPU检测→自动推荐→FP8量化→显存保护</div>
+            </div>
+            <div style="padding:12px;background:var(--bg-surface);border-radius:8px;">
+              <div style="font-size:13px;font-weight:600;color:var(--accent-amber);margin-bottom:4px;">一键部署维护</div>
+              <div style="font-size:12px;color:var(--text-secondary);">Python环境、模型下载、依赖修复全自动</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span class="icon" style="background:rgba(139,92,246,0.15);color:var(--accent-purple);">👥</span>
+            目标用户画像
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>用户类型</th><th>占比</th><th>核心需求</th><th>付费意愿</th><th>付费能力</th></tr></thead>
+              <tbody>
+                <tr><td>个人创作者/自媒体</td><td>50%</td><td>快速出片、低成本</td><td><span class="tag tag-amber">中</span></td><td>月50-200元</td></tr>
+                <tr><td>小型工作室/电商</td><td>25%</td><td>批量生产、稳定可靠</td><td><span class="tag tag-green">高</span></td><td>月200-1000元</td></tr>
+                <tr><td>企业/教育机构</td><td>15%</td><td>私有部署、技术支持</td><td><span class="tag tag-green">高</span></td><td>月1000-5000元</td></tr>
+                <tr><td>AI爱好者/开发者</td><td>10%</td><td>本地折腾、技术探索</td><td><span class="tag tag-red">低</span></td><td>低</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span class="icon" style="background:rgba(245,158,11,0.15);color:var(--accent-amber);">⚔️</span>
+            竞品分析
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>竞品</th><th>模式</th><th>优势</th><th>劣势</th><th>我们的差异化</th></tr></thead>
+              <tbody>
+                <tr><td>可灵 Kling</td><td>云端SaaS</td><td>效果好、易用</td><td>按次收费贵、审核严</td><td>本地无限制+隐私</td></tr>
+                <tr><td>Runway</td><td>云端SaaS</td><td>功能全面</td><td>国内访问难、价格高</td><td>国内优化+中文UI</td></tr>
+                <tr><td>ComfyUI</td><td>开源工具</td><td>灵活、社区强</td><td>上手门槛极高</td><td>一键部署+开箱即用</td></tr>
+                <tr><td>LTX Studio原版</td><td>开源</td><td>官方</td><td>国内部署难、无中文</td><td>完整本地化+服务</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. 商业模式 -->
+      <section id="business" class="section">
+        <div class="section-header">
+          <div class="section-num">3</div>
+          <h2 class="section-title">商业模式</h2>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span class="icon" style="background:rgba(16,185,129,0.15);color:var(--accent-green);">💰</span>
+            收入模型总览
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg-surface);border-radius:8px;">
+              <span style="font-size:18px;">🔑</span>
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--accent-blue);">时间卡密体系（核心）</div>
+                <div style="font-size:12px;color:var(--text-muted);">本地功能解锁 · 云电脑时长 · API调用额度</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg-surface);border-radius:8px;">
+              <span style="font-size:18px;">🛠️</span>
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--accent-amber);">人工服务</div>
+                <div style="font-size:12px;color:var(--text-muted);">1对1远程安装 · 技术支持包月 · 企业定制部署</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg-surface);border-radius:8px;">
+              <span style="font-size:18px;">🚀</span>
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--accent-green);">未来扩展</div>
+                <div style="font-size:12px;color:var(--text-muted);">模型/模板市场 · API开放平台</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3.2 卡密体系 -->
+      <section id="card-system" class="section">
+        <div class="section-header">
+          <div class="section-num">3.2</div>
+          <h2 class="section-title">时间卡密体系</h2>
+        </div>
+
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;">
+          复用已有微信登录+卡密系统，统一为"云集时长卡"：
+        </p>
+
+        <div class="pricing-grid">
+          <div class="pricing-card">
+            <div class="pricing-name">体验卡</div>
+            <div class="pricing-price">¥9.9</div>
+            <ul class="pricing-features">
+              <li>2小时云端时长</li>
+              <li>7天高级功能</li>
+            </ul>
+          </div>
+          <div class="pricing-card featured">
+            <div class="pricing-name">月卡</div>
+            <div class="pricing-price">¥49</div>
+            <ul class="pricing-features">
+              <li>10小时云端时长</li>
+              <li>30天高级功能</li>
+            </ul>
+          </div>
+          <div class="pricing-card">
+            <div class="pricing-name">季卡</div>
+            <div class="pricing-price">¥129</div>
+            <ul class="pricing-features">
+              <li>40小时云端时长</li>
+              <li>90天高级功能</li>
+            </ul>
+          </div>
+          <div class="pricing-card">
+            <div class="pricing-name">年卡</div>
+            <div class="pricing-price">¥399</div>
+            <ul class="pricing-features">
+              <li>200小时云端时长</li>
+              <li>365天高级功能</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:20px;">
+          <div class="card-title">
+            <span class="icon" style="background:rgba(139,92,246,0.15);color:var(--accent-purple);">⭐</span>
+            高级功能（卡密解锁）
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);">
+              <span class="tag tag-blue">批量</span> 免费限3个，付费无限
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);">
+              <span class="tag tag-green">高清</span> 免费限720p，付费4K
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);">
+              <span class="tag tag-purple">TTS</span> 语音克隆付费专属
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);">
+              <span class="tag tag-amber">LoRA</span> 免费限1个，付费3个
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3.3 云电脑代理 -->
+      <section id="cloud" class="section">
+        <div class="section-header">
+          <div class="section-num">3.3</div>
+          <h2 class="section-title">云电脑代理模式</h2>
+        </div>
+
+        <div class="card">
+          <div class="card-title">💡 核心思路</div>
+          <p style="font-size:14px;color:var(--text-secondary);line-height:1.8;">
+            <strong style="color:var(--text-primary)">不自己买GPU，代理云电脑厂商的算力，赚时间差价。</strong><br>
+            用户按时间付费，成本可控；我们赚批发零售差价，零硬件风险。
+          </p>
+        </div>
+
+        <div class="card">
+          <div class="card-title">🤝 合作厂商</div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>优先级</th><th>厂商</th><th>优势</th><th>接入难度</th></tr></thead>
+              <tbody>
+                <tr><td><span class="tag tag-blue">P1</span></td><td>AutoDL</td><td>国内最大、API成熟</td><td><span class="tag tag-green">低</span></td></tr>
+                <tr><td><span class="tag tag-cyan">P2</span></td><td>矩池云</td><td>学术用户多、镜像丰富</td><td><span class="tag tag-green">低</span></td></tr>
+                <tr><td><span class="tag tag-amber">P3</span></td><td>恒源云</td><td>稳定、有企业版</td><td><span class="tag tag-amber">中</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">📊 定价与利润模型</div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>GPU档位</th><th>云电脑成本</th><th>用户售价</th><th>毛利率</th></tr></thead>
+              <tbody>
+                <tr><td>T4/3060 (16GB)</td><td>1.5元/时</td><td>3元/时</td><td><span class="tag tag-green">50%</span></td></tr>
+                <tr><td>4090 (24GB)</td><td>4元/时</td><td>8元/时</td><td><span class="tag tag-green">50%</span></td></tr>
+                <tr><td>A100 (80GB)</td><td>12元/时</td><td>22元/时</td><td><span class="tag tag-green">45%</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">🔄 技术实现流程</div>
+          <div class="flow-diagram">
+            <div class="flow-step"><span class="step-num">1</span>检查卡密余额</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step"><span class="step-num">2</span>选择GPU档位</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step"><span class="step-num">3</span>创建云实例</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step"><span class="step-num">4</span>计时扣费</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step"><span class="step-num">5</span>释放实例</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3.4 安装服务 -->
+      <section id="service" class="section">
+        <div class="section-header">
+          <div class="section-num">3.4</div>
+          <h2 class="section-title">1对1安装服务</h2>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>服务等级</th><th>价格</th><th>内容</th><th>交付方式</th></tr></thead>
+            <tbody>
+              <tr><td><span class="tag tag-blue">基础安装</span></td><td>99元</td><td>远程安装+环境调试+首次生成演示</td><td>向日葵/ToDesk</td></tr>
+              <tr><td><span class="tag tag-cyan">标准服务</span></td><td>199元</td><td>以上+模型定制+LoRA配置+7天答疑</td><td>远程+微信</td></tr>
+              <tr><td><span class="tag tag-amber">高级服务</span></td><td>399元</td><td>以上+多模型配置+工作流优化+30天答疑</td><td>远程+微信</td></tr>
+              <tr><td><span class="tag tag-purple">企业部署</span></td><td>面议</td><td>多卡部署+批量生产+私有化</td><td>现场或远程</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 4. 实施计划 -->
+      <section id="plan" class="section">
+        <div class="section-header">
+          <div class="section-num">4</div>
+          <h2 class="section-title">实施计划</h2>
+        </div>
+
+        <div class="phase-grid">
+          <div class="phase-card ph1">
+            <div class="phase-header">
+              <div class="phase-name">基建期</div>
+              <div class="phase-time">第1-2周</div>
+            </div>
+            <div class="phase-goal">🎯 微信登录+卡密系统上线</div>
+            <ul class="phase-tasks">
+              <li>微信开放平台注册+审核</li>
+              <li>微信登录集成（复用另一项目）</li>
+              <li>卡密生成+验证后端</li>
+              <li>启动器登录/充值界面UI</li>
+              <li>高级功能门控逻辑</li>
+            </ul>
+          </div>
+          <div class="phase-card ph2">
+            <div class="phase-header">
+              <div class="phase-name">服务变现期</div>
+              <div class="phase-time">第3-4周</div>
+            </div>
+            <div class="phase-goal">🎯 1对1安装服务上线，实现首笔收入</div>
+            <ul class="phase-tasks">
+              <li>官网/公众号服务页面搭建</li>
+              <li>服务下单流程（微信支付）</li>
+              <li>服务流程SOP文档</li>
+              <li>首批种子用户邀请</li>
+            </ul>
+          </div>
+          <div class="phase-card ph3">
+            <div class="phase-header">
+              <div class="phase-name">云端变现期</div>
+              <div class="phase-time">第2-3月</div>
+            </div>
+            <div class="phase-goal">🎯 云电脑代理上线，核心收入模式跑通</div>
+            <ul class="phase-tasks">
+              <li>调研云电脑厂商，确定合作方</li>
+              <li>谈判批量折扣+API对接</li>
+              <li>制作预装镜像</li>
+              <li>启动器"云端模式"UI+逻辑</li>
+              <li>计时扣费逻辑</li>
+            </ul>
+          </div>
+          <div class="phase-card ph4">
+            <div class="phase-header">
+              <div class="phase-name">增长期</div>
+              <div class="phase-time">第4-6月</div>
+            </div>
+            <div class="phase-goal">🎯 多渠道获客，收入规模化</div>
+            <ul class="phase-tasks">
+              <li>B站/抖音发布AI视频教程</li>
+              <li>微信群+知识星球付费社群</li>
+              <li>AI培训机构推荐分成</li>
+              <li>集成LTX API计费</li>
+            </ul>
+          </div>
+          <div class="phase-card ph5" style="grid-column: 1 / -1;">
+            <div class="phase-header">
+              <div class="phase-name">平台化</div>
+              <div class="phase-time">第6-12月</div>
+            </div>
+            <div class="phase-goal">🎯 从工具到平台，构建生态</div>
+            <ul class="phase-tasks" style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px 24px;">
+              <li>模型市场（平台抽成20-30%）</li>
+              <li>模板市场（视频/提示词模板）</li>
+              <li>API开放平台</li>
+              <li>企业版（私有化+GPU集群）</li>
+              <li>移动端（云端推理+预览编辑）</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. 财务预测 -->
+      <section id="finance" class="section">
+        <div class="section-header">
+          <div class="section-num">5</div>
+          <h2 class="section-title">财务预测</h2>
+        </div>
+
+        <div class="stat-grid" style="grid-template-columns:repeat(4,1fr);">
+          <div class="stat-card blue">
+            <div class="stat-value">~1千</div>
+            <div class="stat-label">启动成本</div>
+          </div>
+          <div class="stat-card green">
+            <div class="stat-value">5千</div>
+            <div class="stat-label">M3月收入</div>
+          </div>
+          <div class="stat-card amber">
+            <div class="stat-value">1.05万</div>
+            <div class="stat-label">M6月收入</div>
+          </div>
+          <div class="stat-card purple">
+            <div class="stat-value">2.3万</div>
+            <div class="stat-label">M12月收入</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">📈 月度收入预测</div>
+          <div class="chart-container">
+            <div class="chart-row">
+              <div class="chart-label">M1</div>
+              <div class="chart-bar-wrap"><div class="chart-bar blue" data-width="6.5">1,500</div></div>
+            </div>
+            <div class="chart-row">
+              <div class="chart-label">M2</div>
+              <div class="chart-bar-wrap"><div class="chart-bar blue" data-width="13">3,000</div></div>
+            </div>
+            <div class="chart-row">
+              <div class="chart-label">M3</div>
+              <div class="chart-bar-wrap"><div class="chart-bar blue" data-width="21.7">5,000</div></div>
+            </div>
+            <div class="chart-row">
+              <div class="chart-label">M6</div>
+              <div class="chart-bar-wrap"><div class="chart-bar cyan" data-width="45.6">10,500</div></div>
+            </div>
+            <div class="chart-row">
+              <div class="chart-label">M12</div>
+              <div class="chart-bar-wrap"><div class="chart-bar green" data-width="100">23,000</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">💹 月度利润预测</div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>月份</th><th>收入</th><th>成本</th><th>利润</th><th>利润率</th></tr></thead>
+              <tbody>
+                <tr><td>M1</td><td>1,500</td><td>100</td><td style="color:var(--accent-green);font-weight:700">1,400</td><td><span class="tag tag-green">93%</span></td></tr>
+                <tr><td>M3</td><td>5,000</td><td>1,300</td><td style="color:var(--accent-green);font-weight:700">3,700</td><td><span class="tag tag-green">74%</span></td></tr>
+                <tr><td>M6</td><td>10,500</td><td>3,200</td><td style="color:var(--accent-green);font-weight:700">7,300</td><td><span class="tag tag-green">70%</span></td></tr>
+                <tr><td>M12</td><td>23,000</td><td>10,700</td><td style="color:var(--accent-green);font-weight:700">12,300</td><td><span class="tag tag-amber">53%</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6. 风险与对策 -->
+      <section id="risk" class="section">
+        <div class="section-header">
+          <div class="section-num">6</div>
+          <h2 class="section-title">风险与对策</h2>
+        </div>
+
+        <div class="risk-grid">
+          <div class="risk-card">
+            <div class="risk-header">
+              <span class="tag tag-amber">中概率</span>
+              <span class="risk-name">云电脑厂商涨价/停服</span>
+            </div>
+            <div class="risk-body">上游合作方不稳定影响云端业务</div>
+            <div class="risk-counter">至少对接2家，互为备份</div>
+          </div>
+          <div class="risk-card">
+            <div class="risk-header">
+              <span class="tag tag-amber">中概率</span>
+              <span class="risk-name">LTX Studio重大更新破坏兼容</span>
+            </div>
+            <div class="risk-body">上游代码变更导致功能异常</div>
+            <div class="risk-counter">upstream_tracker机制+快速跟进</div>
+          </div>
+          <div class="risk-card">
+            <div class="risk-header">
+              <span class="tag tag-red">低概率</span>
+              <span class="risk-name">微信审核不通过</span>
+            </div>
+            <div class="risk-body">无法使用微信登录</div>
+            <div class="risk-counter">备选：手机号+验证码登录</div>
+          </div>
+          <div class="risk-card">
+            <div class="risk-header">
+              <span class="tag tag-amber">中概率</span>
+              <span class="risk-name">用户付费意愿低</span>
+            </div>
+            <div class="risk-body">用户不愿为本地工具付费</div>
+            <div class="risk-counter">先推9.9元体验卡，降低门槛</div>
+          </div>
+          <div class="risk-card">
+            <div class="risk-header">
+              <span class="tag tag-red">低概率</span>
+              <span class="risk-name">GPL-3.0限制商业化</span>
+            </div>
+            <div class="risk-body">开源协议约束商业行为</div>
+            <div class="risk-counter">商业化重心在服务而非软件本身</div>
+          </div>
+          <div class="risk-card">
+            <div class="risk-header">
+              <span class="tag tag-red">低概率</span>
+              <span class="risk-name">竞品推出类似本地化方案</span>
+            </div>
+            <div class="risk-body">市场差异化被追平</div>
+            <div class="risk-counter">持续迭代+社区壁垒+服务壁垒</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 7. 关键里程碑 -->
+      <section id="milestone" class="section">
+        <div class="section-header">
+          <div class="section-num">7</div>
+          <h2 class="section-title">关键里程碑</h2>
+        </div>
+
+        <div class="timeline">
+          <div class="timeline-item">
+            <div class="timeline-time">第2周末</div>
+            <div class="timeline-title">微信登录+卡密上线</div>
+            <div class="timeline-desc">用户可登录、购买卡密、充值使用</div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-time">第4周末</div>
+            <div class="timeline-title">首笔服务收入</div>
+            <div class="timeline-desc">完成 ≥ 3单安装服务</div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-time">第8周末</div>
+            <div class="timeline-title">云电脑代理上线</div>
+            <div class="timeline-desc">用户可在启动器内连接云电脑</div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-time">第12周末</div>
+            <div class="timeline-title">月收入破5,000元</div>
+            <div class="timeline-desc">安装服务+云电脑+API三项收入</div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-time">第24周末</div>
+            <div class="timeline-title">月收入破15,000元</div>
+            <div class="timeline-desc">用户基数 ≥ 500，付费率 ≥ 10%</div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-time">第52周末</div>
+            <div class="timeline-title">月收入破20,000元</div>
+            <div class="timeline-desc">平台化初具规模</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 8. 立即行动 -->
+      <section id="action" class="section">
+        <div class="section-header">
+          <div class="section-num">8</div>
+          <h2 class="section-title">立即行动清单</h2>
+        </div>
+
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">以下为本周即可开始的事项：</p>
+
+        <ul class="checklist" id="checklist">
+          <li onclick="this.classList.toggle('checked')">
+            <div class="check-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <span class="check-text">注册微信开放平台，提交应用审核</span>
+          </li>
+          <li onclick="this.classList.toggle('checked')">
+            <div class="check-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <span class="check-text">从另一项目复制微信登录+卡密代码，评估适配工作量</span>
+          </li>
+          <li onclick="this.classList.toggle('checked')">
+            <div class="check-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <span class="check-text">联系AutoDL/矩池云商务，咨询API对接+批量折扣</span>
+          </li>
+          <li onclick="this.classList.toggle('checked')">
+            <div class="check-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <span class="check-text">在软件内/社群发布安装服务试运营公告</span>
+          </li>
+          <li onclick="this.classList.toggle('checked')">
+            <div class="check-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <span class="check-text">梳理高级功能门控点（哪些功能免费、哪些付费）</span>
+          </li>
+          <li onclick="this.classList.toggle('checked')">
+            <div class="check-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <span class="check-text">注册微信支付商户号</span>
+          </li>
+        </ul>
+      </section>
+
+    </div>
+
+    <footer class="footer">
+      轻资产起步，用别人的GPU赚钱，用自己的封装能力做差异化。
+    </footer>
+  </main>
+</div>
+
+<script>
+// Scroll-based section reveal
+const sections = document.querySelectorAll('.section');
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+sections.forEach(s => observer.observe(s));
+
+// Sidebar active link tracking
+const navLinks = document.querySelectorAll('.nav-link');
+const sectionMap = [];
+navLinks.forEach(link => {
+  const id = link.getAttribute('href').slice(1);
+  const el = document.getElementById(id);
+  if (el) sectionMap.push({ id, el, link });
+});
+
+function updateActiveNav() {
+  let current = sectionMap[0];
+  for (const item of sectionMap) {
+    if (item.el.getBoundingClientRect().top <= 120) current = item;
+  }
+  navLinks.forEach(l => l.classList.remove('active'));
+  if (current) current.link.classList.add('active');
+}
+
+window.addEventListener('scroll', updateActiveNav, { passive: true });
+
+// Close sidebar on mobile when clicking a link
+navLinks.forEach(link => {
+  link.addEventListener('click', () => {
+    if (window.innerWidth <= 900) {
+      document.querySelector('.sidebar').classList.remove('open');
+    }
+  });
+});
+
+// Animate chart bars on scroll
+const chartBars = document.querySelectorAll('.chart-bar');
+const chartObserver = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      const bar = entry.target;
+      const w = bar.getAttribute('data-width');
+      bar.style.width = w + '%';
+      chartObserver.unobserve(bar);
+    }
+  });
+}, { threshold: 0.3 });
+
+chartBars.forEach(bar => {
+  bar.style.width = '0%';
+  chartObserver.observe(bar);
+});
+
+// Load checklist state from localStorage
+const saved = JSON.parse(localStorage.getItem('bp-checklist') || '[]');
+const items = document.querySelectorAll('#checklist li');
+items.forEach((li, i) => {
+  if (saved[i]) li.classList.add('checked');
+  li.addEventListener('click', () => {
+    setTimeout(() => {
+      const state = Array.from(items).map(li => li.classList.contains('checked'));
+      localStorage.setItem('bp-checklist', JSON.stringify(state));
+    }, 10);
+  });
+});
+</script>
+
+</body>
+</html>

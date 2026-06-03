@@ -1,17 +1,20 @@
 {
-  "latest": "2026.06.03.0642",
+  "latest": "2026.06.03.1215",
   "release_date": "2026-06-03",
-  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.03.0642",
-  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.03.0642",
+  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.03.1215",
+  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.03.1215",
   "changes": [
-    "前端: 高清放大视频上传改为FormData",
-    "前端: _isImageModel修复排除LoRA",
-    "前端: LoRA按基模分类筛选",
-    "后端: 新增/system/upload-file端点",
-    "后端: 上传代理流式转发+300s超时",
-    "启动器: 单EXE自部署+版本切换+Git历史+缓存刷新"
+    "新手引导机制-首次启动跳转部署页-部署完成提示"
   ],
   "versions": [
+    {
+      "version": "2026.06.03.1215",
+      "date": "2026-06-03 12:17",
+      "changes": [
+        "新手引导机制-首次启动跳转部署页-部署完成提示"
+      ],
+      "filename": "云集智能视频创意站-v2026.06.03.1215.exe"
+    },
     {
       "version": "2026.06.03.0642",
       "date": "2026-06-03 06:43",
@@ -118,7 +121,14 @@
       "version": "2026.05.18.1153",
       "date": "2026-05-18",
       "changes": [
-        "修复_populate_version_table中setParent(None)导致ACCESS_VIOLATION崩溃"
+        "启动器: 修复_populate_version_table中setParent(None)导致ACCESS_VIOLATION崩溃",
+        "启动器: 修复launcher.py的subprocess monkey-patch导致崩溃",
+        "启动器: 修复launcher.py+删除重复MainWindow",
+        "构建: 清理PyQt6-Qt6-DLL冲突",
+        "构建: 降级PyInstaller到6.11.1",
+        "构建: 切换到--onefile模式打包后回归最简配置",
+        "启动器: 软件更新页面重构(当前版本卡片+展开详情+获取开发版)",
+        "启动器: 修复_detail_expanded初始化顺序"
       ],
       "filename": "云集智能视频创意站-v2026.05.18.1153.exe"
     },
@@ -126,9 +136,13 @@
       "version": "2026.05.17.0659",
       "date": "2026-05-17",
       "changes": [
-        "Python3.12环境重建",
-        "软件更新弹窗",
-        "模型管理弹窗重构"
+        "启动器: Python3.12环境重建(解决PyQt6打包兼容性)",
+        "启动器: 软件更新弹窗(远程版本检查+更新日志+内联状态)",
+        "启动器: 模型管理弹窗重构(表格+分类+复选框+多目录)",
+        "启动器: 模型管理UI完善(目录单排展开+全选按钮+描述栏+排序+删除按钮)",
+        "启动器: 模型管理重构完善(扫描用户目录+分类标签+多目录去重+安全校验+批量下载优化)",
+        "启动器: SageAttention强制安装",
+        "启动器: 版本列表融合+EXE描述"
       ],
       "filename": "云集智能视频创意站-v2026.05.17.0659.exe"
     },
@@ -136,9 +150,11 @@
       "version": "2026.05.17.0309",
       "date": "2026-05-17",
       "changes": [
-        "修复sip.pyd",
-        "软件更新弹窗",
-        "模型管理弹窗重构"
+        "构建: 修复sip.pyd打包(PyQt6.sip模块缺失)",
+        "启动器: 软件更新弹窗(新增更新栏目)",
+        "启动器: 模型管理弹窗重构(表格+分类+复选框+批量下载)",
+        "启动器: 表格排序功能",
+        "启动器: 第三方模型LoRA支持"
       ],
       "filename": "云集智能视频创意站-v2026.05.17.0309.exe"
     },
@@ -146,7 +162,15 @@
       "version": "2026.05.16.2352",
       "date": "2026-05-16",
       "changes": [
-        "修复PyQt6.sip模块缺失导致exe运行崩溃"
+        "构建: 修复PyQt6.sip模块缺失导致exe运行崩溃",
+        "构建: 优化PyInstaller构建参数(运行时依赖从579MB缩减至~92MB)",
+        "构建: 统一一键构建.bat为build-version.py调用入口",
+        "启动器: 新增软件更新栏目",
+        "启动器: 模型管理重构为表格+分类+复选框+多目录",
+        "启动器: 修复QListWidget/QTableWidget/QHeaderView导入缺失",
+        "启动器: 修复pyexpat DLL加载问题",
+        "启动器: 修复_models_dir为None导致EXE崩溃",
+        "前端: 修复httpx.ConnectError循环报错+浏览器持久化+emoji图标修复"
       ],
       "filename": "云集智能视频创意站-v2026.05.16.2352.exe"
     },
@@ -154,7 +178,17 @@
       "version": "2026.05.12.0431",
       "date": "2026-05-12",
       "changes": [
-        "修复QPalette未导入导致NameError"
+        "启动器: 修复QPalette未导入导致NameError",
+        "启动器: 实现Windows命名事件单实例控制(替代psutil杀进程)",
+        "启动器: 添加高DPI缩放PassThrough策略+Fusion风格+暗色主题调色板",
+        "启动器: 修复SplashScreen进度条闪烁+图标加载frozen路径",
+        "启动器: 改用Mutex替代Event单实例控制(进程退出自动释放)",
+        "启动器: UI优化(齿轮按钮+系统设置字样+开始渲染按钮移到任务队列上方)",
+        "后端: 修复rotary_emb参数未初始化导致核心引擎ACCESS_VIOLATION崩溃",
+        "后端: 修复视频无法播放(添加/outputs/路由并支持Range请求)",
+        "前端: 修复缩略图请求被错误直接返回视频文件",
+        "前端: UI代理层直接读取媒体文件+流式转发206响应",
+        "前端: 修复BOM字符导致EXE启动崩溃"
       ],
       "filename": "云集智能视频创意站-v2026.05.12.0431.exe"
     }

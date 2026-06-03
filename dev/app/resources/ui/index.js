@@ -717,7 +717,9 @@
         if (lora.description) html += `<div style="margin-bottom:3px;color:var(--text-secondary)">${escapeHtmlAttr(lora.description)}</div>`;
         if (lora.trigger_words && lora.trigger_words.length > 0) {
             const twHtml = lora.trigger_words.map(tw => `<span style="display:inline-block;background:rgba(255,255,255,0.08);padding:1px 6px;border-radius:3px;margin:1px 3px 1px 0;color:var(--accent);font-size:11px">${escapeHtmlAttr(tw)}</span>`).join('');
-            html += `<div style="margin-bottom:2px">触发词: ${twHtml}</div>`;
+            html += `<div style="margin-bottom:2px;color:#66BB6A;">✓ 触发词已自动注入: ${twHtml}</div>`;
+        } else {
+            html += `<div style="margin-bottom:2px;color:#888;">✓ 通用LoRA，无需触发词即可生效</div>`;
         }
         if (lora.base_model) html += `<div style="color:var(--text-secondary)">基模: ${escapeHtmlAttr(lora.base_model)}</div>`;
         return html;
@@ -4440,7 +4442,42 @@
 
         const btn = document.getElementById('mainBtn');
         const promptEl = document.getElementById('prompt');
-        const prompt = promptEl ? promptEl.value.trim() : '';
+        const rawPrompt = promptEl ? promptEl.value.trim() : '';
+
+        // 自动注入 LoRA 触发词到 prompt 前面
+        function collectLoraPathsForTrigger() {
+            const paths = [];
+            const containerIds = ['loras-container', 'img-loras-container'];
+            for (const cid of containerIds) {
+                const container = document.getElementById(cid);
+                if (!container) continue;
+                container.querySelectorAll('.lora-entry').forEach(entry => {
+                    const sel = entry.querySelector('.lora-select');
+                    if (sel && sel.value) paths.push(sel.value);
+                });
+            }
+            return [...new Set(paths)];
+        }
+
+        function injectLoraTriggers(basePrompt, loraPaths) {
+            if (!loraPaths || loraPaths.length === 0) return basePrompt;
+            const triggers = [];
+            for (const p of loraPaths) {
+                const lora = availableLoras.find(l => l.path === p);
+                if (lora && lora.trigger_words && lora.trigger_words.length > 0) {
+                    for (const tw of lora.trigger_words) {
+                        if (tw && !basePrompt.includes(tw)) {
+                            triggers.push(tw);
+                        }
+                    }
+                }
+            }
+            if (triggers.length === 0) return basePrompt;
+            return triggers.join(', ') + ', ' + basePrompt;
+        }
+
+        const loraPathsForTrigger = collectLoraPathsForTrigger();
+        const prompt = injectLoraTriggers(rawPrompt, loraPathsForTrigger);
 
         function batchHasUsablePrompt() {
             if (prompt) return true;

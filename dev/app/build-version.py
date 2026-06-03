@@ -494,6 +494,14 @@ def build_exe():
         pyinstaller_args.extend(["--add-data", f"{str(pj_file)};."])
         print(f"  已添加项目配置 (project.json)")
 
+    # 嵌入 ui/backend/patches 资源到 EXE（用于版本切换时自动同步）
+    for res_name in ("ui", "backend", "patches"):
+        res_dir = ROOT_DIR / "resources" / res_name
+        if res_dir.exists():
+            pyinstaller_args.extend(["--add-data", f"{str(res_dir)};resources/{res_name}"])
+            file_count = sum(1 for _ in res_dir.rglob("*") if _.is_file())
+            print(f"  已嵌入 {res_name}/ ({file_count} 个文件)")
+
     if version_file_path.exists():
         pyinstaller_args.extend(["--version-file", str(version_file_path)])
         print(f"  已添加版本信息")

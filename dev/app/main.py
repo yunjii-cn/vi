@@ -682,6 +682,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal, QTimer, QRectF, pyqtProperty, QProcess, QPropertyAnimation
 from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QLinearGradient, QPen, QPalette
+from PyQt6.QtSvg import QSvgRenderer
 
 
 def get_version_from_filename():
@@ -1604,7 +1605,44 @@ def _get_lora_trigger_words(filename: str) -> str:
     tw = _LORA_TRIGGER_WORDS.get(filename, [])
     if tw:
         return ", ".join(tw)
-    return ""
+
+_MODEL_EXAMPLES: dict[str, str] = {
+    "ltx-2.3-22b-distilled.safetensors": "A beautiful sunset over the ocean, cinematic lighting, 4K",
+    "ltx-2.3-22b-distilled-fp8.safetensors": "A cat walking on a rooftop, photorealistic, detailed",
+    "ltx-2.3-spatial-upscaler-x2-1.0.safetensors": "（高清放大专用，配合视频生成使用）",
+    "ltx-2-19b-distilled-lora-384.safetensors": "（Pro模式专用，提升视频生成质量）",
+    "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors": "（视频迁移控制专用，支持深度/姿态/参考图）",
+    "90sAnimationStyle.safetensors": "A girl walking in a park, 90s animation style, retro cartoon",
+    "Cinematic_sci-fi-cyberpunk.safetensors": "A futuristic city at night, sci-fi, cyberpunk, cinematic, neon lights",
+    "Claymation.safetensors": "A dog playing with a ball, claymation, clay animation, stop motion",
+    "CozyFelt.safetensors": "A warm living room with a cat, cozy felt, felt craft, soft texture",
+    "FantasyPuppetStyle.safetensors": "A knight fighting a dragon, fantasy puppet, puppet style, theatrical",
+    "Fantasy_Anime.safetensors": "A magical forest with glowing butterflies, fantasy anime, magical anime",
+    "Fantasy_Painterly.safetensors": "A castle on a hilltop, painterly, fantasy painting, oil painting style",
+    "Fantasy_Realism.safetensors": "A dragon flying over mountains, fantasy realism, magical realism, detailed",
+    "LTX2.3_Crisp_Enhance.safetensors": "A portrait of a woman, crisp, sharp, detailed, high definition",
+    "LTX2.3_Soft_Enhance.safetensors": "A dreamy landscape, soft, gentle, dreamy, ethereal light",
+    "Luxe_Sensual.safetensors": "A luxury car interior, luxe, sensual, luxury, golden light",
+    "PaperCutOutStyle.safetensors": "A garden with flowers, paper cut, paper craft, papercut, layered",
+    "Pixar_Toon.safetensors": "A funny character dancing, pixar style, 3d cartoon, pixar toon",
+    "Post_Apocalyptic.safetensors": "A survivor walking through ruins, post-apocalyptic, wasteland, desolate",
+    "Wild_West.safetensors": "A cowboy riding a horse, wild west, cowboy, western, desert",
+    "Z-Iamge-人像美学.safetensors": "一位女性在自然光下的肖像，柔和光影，肤色细腻",
+    "Z-Image-Fun-Lora-Distill-8-Steps-2603-ComfyUI.safetensors": "（8步快速生成，适合预览和批量生成）",
+    "Z-image-眼睛细节增强-DetailedEyes-LoRA_V2.safetensors": "A close-up portrait, detailed eyes, vivid eye color",
+    "Z-image-高清人像.safetensors": "一位男性在影棚中的高清人像，细节丰富，肤色自然",
+    "ZIB-电影光Chiaroscuro and Cinematic Lighting Style.safetensors": "A dramatic portrait, chiaroscuro, cinematic lighting, strong shadows",
+    "ZIT-伦勃朗光线rembrandt_ZIT_tyler_x_harris.safetensors": "A classical portrait, rembrandt lighting, triangle light on cheek",
+    "ZIT-影棚摄影photolab_v2.safetensors": "A professional headshot, photolab, studio photography, clean background",
+    "ZIT-电影光Cinematic Chiaroscuro Lighting.safetensors": "A mysterious figure in shadows, cinematic chiaroscuro, dramatic",
+    "ZIT-电影黑暗MschCine26_V1.safetensors": "A dark alley at night, dark cinematic, low key lighting, moody",
+    "z-Image-3D卡通_V1.safetensors": "A cute character waving, 3d cartoon, rendered, colorful",
+    "z-image 极致氛围光影LORA_V1.0.safetensors": "黄昏时分的城市天际线，极致氛围光影，金色阳光",
+    "z-image-女帝-ben_nd.safetensors": "一位高贵冷艳的女性，女帝风格，威严气场",
+    "z-image-极致写实.safetensors": "一张照片级的城市街景，极致写实，真实感",
+    "z-image-细节增强v2.safetensors": "一朵花的微距特写，细节增强，纹理清晰",
+    "z-image_小情绪_v1.1.safetensors": "一位少女若有所思的表情，小情绪，细腻情感",
+}
 
 TORCH_VERSION_CONSTRAINT = ">=2.5,<3.0"
 
@@ -3872,7 +3910,14 @@ class ServiceCard(QFrame):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
 
-        self.restart_btn = QPushButton("🔄 重启")
+        self.restart_btn = QPushButton(" 重启")
+        restart_icon_svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>'
+        pm = QPixmap(14, 14)
+        pm.fill(QColor(0, 0, 0, 0))
+        painter = QPainter(pm)
+        QSvgRenderer(restart_icon_svg).render(painter)
+        painter.end()
+        self.restart_btn.setIcon(QIcon(pm))
         self.restart_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: #1565C0; color: #FFFFFF;
@@ -3884,7 +3929,24 @@ class ServiceCard(QFrame):
         self.restart_btn.clicked.connect(lambda: self.restart_clicked.emit(self.service_id))
         btn_row.addWidget(self.restart_btn)
 
-        self.open_btn = QPushButton("🌐 打开")
+        if self.service_id == "backend":
+            self.open_btn = QPushButton(" 信息")
+            info_icon_svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>'
+            pm_open = QPixmap(14, 14)
+            pm_open.fill(QColor(0, 0, 0, 0))
+            painter_open = QPainter(pm_open)
+            QSvgRenderer(info_icon_svg).render(painter_open)
+            painter_open.end()
+            self.open_btn.setIcon(QIcon(pm_open))
+        else:
+            self.open_btn = QPushButton(" 打开")
+            ext_icon_svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>'
+            pm_open = QPixmap(14, 14)
+            pm_open.fill(QColor(0, 0, 0, 0))
+            painter_open = QPainter(pm_open)
+            QSvgRenderer(ext_icon_svg).render(painter_open)
+            painter_open.end()
+            self.open_btn.setIcon(QIcon(pm_open))
         self.open_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {self.service_info["color"]}; color: #FFFFFF;
@@ -3917,7 +3979,14 @@ class ServiceCard(QFrame):
         self.port_spin.setVisible(False)
         btn_row.addWidget(self.port_spin)
 
-        self.port_edit_btn = QPushButton("✏ 修改")
+        self.port_edit_btn = QPushButton(" 修改")
+        edit_icon_svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#CCCCCC" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>'
+        pm_edit = QPixmap(14, 14)
+        pm_edit.fill(QColor(0, 0, 0, 0))
+        painter_edit = QPainter(pm_edit)
+        QSvgRenderer(edit_icon_svg).render(painter_edit)
+        painter_edit.end()
+        self.port_edit_btn.setIcon(QIcon(pm_edit))
         self.port_edit_btn.setFixedSize(56, 30)
         self.port_edit_btn.setStyleSheet("""
             QPushButton {
@@ -4621,6 +4690,81 @@ class MainWindow(QMainWindow):
 
         if not self._data_dir:
             self._data_dir = self._exe_data_dir or os.path.join(self._project_root, "data")
+
+        # EXE模式：检测并同步版本资源
+        self._sync_resources_version()
+
+    def _sync_resources_version(self):
+        """EXE启动时检测 app/resources/ 版本，不匹配则从 _MEIPASS 提取覆盖。
+        
+        机制：
+        - app/resources/.version 记录当前资源版本
+        - app/resources/.updating 存在说明上次更新中断，强制重新提取
+        - 幂等操作：重复提取无副作用
+        - 只覆盖 ui/backend/patches，保留 venv/python/uv 等共享目录
+        """
+        if not getattr(sys, 'frozen', False):
+            return
+        if not hasattr(sys, '_MEIPASS') or not sys._MEIPASS:
+            return
+
+        resources_dir = self._app_resources
+        if not resources_dir:
+            return
+
+        version_file = os.path.join(resources_dir, ".version")
+        updating_file = os.path.join(resources_dir, ".updating")
+
+        # 读取当前资源版本
+        current_res_version = ""
+        try:
+            with open(version_file, "r", encoding="utf-8") as f:
+                current_res_version = f.read().strip()
+        except Exception:
+            pass
+
+        # 版本匹配且无中断标记，无需同步
+        if current_res_version == VERSION and not os.path.exists(updating_file):
+            return
+
+        # 需要同步：从 _MEIPASS 提取 ui/backend/patches
+        meipass = sys._MEIPASS
+        os.makedirs(resources_dir, exist_ok=True)
+
+        # 写入更新中标记
+        try:
+            with open(updating_file, "w", encoding="utf-8") as f:
+                f.write(VERSION)
+        except Exception:
+            pass
+
+        _IGNORE_PATTERNS = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
+
+        for res_name in ("ui", "backend", "patches"):
+            src = os.path.join(meipass, "resources", res_name)
+            dst = os.path.join(resources_dir, res_name)
+            if not os.path.isdir(src):
+                continue
+            try:
+                if os.path.exists(dst):
+                    shutil.rmtree(dst, ignore_errors=True)
+                shutil.copytree(src, dst, ignore=_IGNORE_PATTERNS)
+            except Exception:
+                # 提取失败，.updating 保留，下次启动重试
+                return
+
+        # 提取成功，写入版本标记
+        try:
+            with open(version_file, "w", encoding="utf-8") as f:
+                f.write(VERSION)
+        except Exception:
+            pass
+
+        # 删除更新中标记
+        try:
+            os.remove(updating_file)
+        except Exception:
+            pass
 
     def _get_app_dir(self):
         return self._app_dir
@@ -5415,6 +5559,7 @@ class MainWindow(QMainWindow):
         content_row.addWidget(deploy_log_frame, 6)
 
         layout.addLayout(content_row, 1)
+        self._env_page_widget = page
         self.page_stack.addWidget(page)
 
     def _build_models_page(self):
@@ -5441,8 +5586,15 @@ class MainWindow(QMainWindow):
         """)
         dir_row.addWidget(self._model_dir_combo, 1)
 
-        self._remove_dir_btn = QPushButton("🗑 删除")
+        self._remove_dir_btn = QPushButton(" 删除")
         self._remove_dir_btn.setFixedWidth(55)
+        rm_icon_svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#888888" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>'
+        pm_rm = QPixmap(12, 12)
+        pm_rm.fill(QColor(0, 0, 0, 0))
+        painter_rm = QPainter(pm_rm)
+        QSvgRenderer(rm_icon_svg).render(painter_rm)
+        painter_rm.end()
+        self._remove_dir_btn.setIcon(QIcon(pm_rm))
         self._remove_dir_btn.setStyleSheet("""
             QPushButton { background-color: transparent; border: 1px solid #555555; border-radius: 4px; color: #888888; font-size: 10px; padding: 4px 6px; }
             QPushButton:hover { background-color: #C62828; border-color: #E53935; color: #FFFFFF; }
@@ -5452,7 +5604,14 @@ class MainWindow(QMainWindow):
         self._remove_dir_btn.clicked.connect(self._remove_selected_model_dir)
         dir_row.addWidget(self._remove_dir_btn)
 
-        add_dir_btn = QPushButton("📁 添加目录")
+        add_dir_btn = QPushButton(" 添加目录")
+        add_icon_svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>'
+        pm_add = QPixmap(12, 12)
+        pm_add.fill(QColor(0, 0, 0, 0))
+        painter_add = QPainter(pm_add)
+        QSvgRenderer(add_icon_svg).render(painter_add)
+        painter_add.end()
+        add_dir_btn.setIcon(QIcon(pm_add))
         add_dir_btn.setStyleSheet("QPushButton { background-color: #C62828; color: #FFFFFF; border: 1px solid #E53935; border-radius: 4px; padding: 4px 12px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: #E53935; }")
         add_dir_btn.clicked.connect(self._add_model_dir)
         dir_row.addWidget(add_dir_btn)
@@ -5478,9 +5637,58 @@ class MainWindow(QMainWindow):
         self._model_dir_combo.currentIndexChanged.connect(lambda: self._update_remove_dir_btn_state())
         self._populate_model_dir_combo()
 
+        # ── 主内容区：左侧分类筛选 + 右侧表格 ──
+        content_splitter = QHBoxLayout()
+        content_splitter.setSpacing(0)
+
+        # 左侧分类筛选栏
+        self._model_category_list = QListWidget()
+        self._model_category_list.setFixedWidth(130)
+        self._model_category_list.setStyleSheet("""
+            QListWidget {
+                background-color: #1A1A1A; border: 1px solid #333333; border-radius: 6px;
+                padding: 4px; outline: none;
+            }
+            QListWidget::item {
+                padding: 8px 10px; border-radius: 4px; color: #AAAAAA; font-size: 11px;
+                margin: 1px 2px;
+            }
+            QListWidget::item:selected {
+                background-color: #C62828; color: #FFFFFF; font-weight: bold;
+            }
+            QListWidget::item:hover {
+                background-color: #252525; color: #FFFFFF;
+            }
+        """)
+        self._model_category_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._model_category_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+
+        categories = [
+            ("全部模型", "all"),
+            ("基础模型", "基础模型"),
+            ("LoRA", "LoRA"),
+            ("控制模型", "控制模型"),
+            ("高清放大", "高清放大"),
+            ("文本编码器", "文本编码器"),
+            ("图像生成", "图像生成"),
+            ("语音合成", "语音合成"),
+        ]
+        for name, key in categories:
+            item = QListWidgetItem(name)
+            item.setData(Qt.ItemDataRole.UserRole, key)
+            self._model_category_list.addItem(item)
+        self._model_category_list.setCurrentRow(0)
+        self._model_category_filter = "all"
+        self._model_category_list.currentItemChanged.connect(self._on_model_category_changed)
+        content_splitter.addWidget(self._model_category_list)
+
+        # 右侧：表格 + 详情面板
+        right_panel = QVBoxLayout()
+        right_panel.setSpacing(0)
+
         self._model_table = QTableWidget()
-        self._model_table.setColumnCount(9)
-        self._model_table.setHorizontalHeaderLabels(["", "模型名称", "描述", "触发词", "分类", "标签", "大小", "状态", "操作"])
+        self._model_table.setColumnCount(8)
+        self._model_table.setHorizontalHeaderLabels(["", "模型名称", "描述", "分类", "标签", "大小", "状态", "操作"])
         self._model_table.setStyleSheet("""
             QTableWidget { background-color: #111113; border: 1px solid #333333; border-radius: 6px; gridline-color: #222222; font-size: 12px; color: #DDDDDD; }
             QTableWidget::item { padding: 4px 6px; border-bottom: 1px solid #222222; border: none; outline: none; }
@@ -5502,19 +5710,18 @@ class MainWindow(QMainWindow):
         self._model_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
         self._model_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
         self._model_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Interactive)
-        self._model_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Interactive)
-        self._model_table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
+        self._model_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
         self._model_table.setColumnWidth(0, 40)
         self._model_table.setColumnWidth(1, 300)
-        self._model_table.setColumnWidth(3, 120)
-        self._model_table.setColumnWidth(4, 80)
-        self._model_table.setColumnWidth(5, 50)
-        self._model_table.setColumnWidth(6, 65)
-        self._model_table.setColumnWidth(7, 90)
-        self._model_table.setColumnWidth(8, 140)
+        self._model_table.setColumnWidth(3, 80)
+        self._model_table.setColumnWidth(4, 50)
+        self._model_table.setColumnWidth(5, 65)
+        self._model_table.setColumnWidth(6, 90)
+        self._model_table.setColumnWidth(7, 140)
         self._model_table.verticalHeader().setVisible(False)
         self._model_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._model_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self._model_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._model_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._model_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._model_sort_col = -1
         self._model_sort_asc = True
@@ -5523,6 +5730,10 @@ class MainWindow(QMainWindow):
         self._model_table.cellEntered.connect(self._on_model_row_hover)
         self._model_table.installEventFilter(self)
         self._hover_row = -1
+        self._model_detail_row = -1  # 当前展开详情的行
+
+        # 点击行展开详情
+        self._model_table.cellClicked.connect(self._on_model_row_clicked)
 
         self._select_all_cb = QCheckBox("全选")
         self._select_all_cb.setStyleSheet("QCheckBox { color: #AAAAAA; font-size: 11px; spacing: 4px; background: transparent; } QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #555555; border-radius: 3px; background-color: #252525; } QCheckBox::indicator:checked { background-color: #C62828; border-color: #E53935; }")
@@ -5531,14 +5742,38 @@ class MainWindow(QMainWindow):
         self._model_table.setHorizontalHeaderItem(0, QTableWidgetItem(""))
         self._model_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
 
-        layout.addWidget(self._model_table, 1)
+        right_panel.addWidget(self._model_table, 1)
+
+        # 详情面板（默认隐藏）
+        self._model_detail_panel = QFrame()
+        self._model_detail_panel.setObjectName("_model_detail")
+        self._model_detail_panel.setStyleSheet("""
+            QFrame { background-color: #1E1E1E; border: 1px solid #333333; border-radius: 6px; }
+            QLabel { background: transparent; }
+        """)
+        self._model_detail_layout = QHBoxLayout(self._model_detail_panel)
+        self._model_detail_layout.setContentsMargins(15, 10, 15, 10)
+        self._model_detail_layout.setSpacing(15)
+        self._model_detail_panel.setVisible(False)
+        right_panel.addWidget(self._model_detail_panel)
+
+        content_splitter.addLayout(right_panel, 1)
+
+        layout.addLayout(content_splitter, 1)
 
         self._populate_model_table()
 
         btn_row = QHBoxLayout()
         btn_row.addWidget(self._select_all_cb)
         btn_row.addSpacing(10)
-        self._batch_download_btn = QPushButton("⬇ 批量下载")
+        self._batch_download_btn = QPushButton(" 批量下载")
+        dl_icon_svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'
+        pm_dl = QPixmap(14, 14)
+        pm_dl.fill(QColor(0, 0, 0, 0))
+        painter_dl = QPainter(pm_dl)
+        QSvgRenderer(dl_icon_svg).render(painter_dl)
+        painter_dl.end()
+        self._batch_download_btn.setIcon(QIcon(pm_dl))
         self._batch_download_btn.setStyleSheet("""
             QPushButton { background-color: #1B5E20; color: #FFFFFF; border: 1px solid #2E7D32; border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: bold; }
             QPushButton:hover { background-color: #2E7D32; }
@@ -5546,7 +5781,14 @@ class MainWindow(QMainWindow):
         self._batch_download_btn.clicked.connect(self._batch_download_models)
         btn_row.addWidget(self._batch_download_btn)
 
-        self._batch_edit_btn = QPushButton("✏ 批量编辑")
+        self._batch_edit_btn = QPushButton(" 批量编辑")
+        edit_icon_svg2 = b'<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>'
+        pm_ed2 = QPixmap(14, 14)
+        pm_ed2.fill(QColor(0, 0, 0, 0))
+        painter_ed2 = QPainter(pm_ed2)
+        QSvgRenderer(edit_icon_svg2).render(painter_ed2)
+        painter_ed2.end()
+        self._batch_edit_btn.setIcon(QIcon(pm_ed2))
         self._batch_edit_btn.setStyleSheet("""
             QPushButton { background-color: #1B5E20; color: #FFFFFF; border: 1px solid #2E7D32; border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: bold; }
             QPushButton:hover { background-color: #2E7D32; }
@@ -5554,7 +5796,14 @@ class MainWindow(QMainWindow):
         self._batch_edit_btn.clicked.connect(self._batch_edit_models)
         btn_row.addWidget(self._batch_edit_btn)
 
-        check_btn = QPushButton("🔍 检测完整性")
+        check_btn = QPushButton(" 检测完整性")
+        check_icon_svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>'
+        pm_chk = QPixmap(14, 14)
+        pm_chk.fill(QColor(0, 0, 0, 0))
+        painter_chk = QPainter(pm_chk)
+        QSvgRenderer(check_icon_svg).render(painter_chk)
+        painter_chk.end()
+        check_btn.setIcon(QIcon(pm_chk))
         check_btn.setStyleSheet("""
             QPushButton { background-color: #C62828; color: #FFFFFF; border: 1px solid #E53935; border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: bold; }
             QPushButton:hover { background-color: #E53935; }
@@ -5562,13 +5811,175 @@ class MainWindow(QMainWindow):
         check_btn.clicked.connect(self._check_model_integrity)
         btn_row.addWidget(check_btn)
 
-        refresh_btn = QPushButton("🔄 同步更新")
+        refresh_btn = QPushButton(" 同步更新")
+        refresh_icon_svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>'
+        pm_ref = QPixmap(14, 14)
+        pm_ref.fill(QColor(0, 0, 0, 0))
+        painter_ref = QPainter(pm_ref)
+        QSvgRenderer(refresh_icon_svg).render(painter_ref)
+        painter_ref.end()
+        refresh_btn.setIcon(QIcon(pm_ref))
         refresh_btn.setStyleSheet("QPushButton { background-color: #1565C0; color: #FFFFFF; border: 1px solid #1976D2; border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: bold; } QPushButton:hover { background-color: #1976D2; }")
         refresh_btn.clicked.connect(self._sync_model_updates)
         btn_row.addWidget(refresh_btn)
 
         layout.addLayout(btn_row)
         self.page_stack.addWidget(page)
+
+    def _on_model_category_changed(self, current, previous):
+        if current:
+            self._model_category_filter = current.data(Qt.ItemDataRole.UserRole)
+            self._apply_model_sort_and_render()
+
+    def _on_model_row_clicked(self, row, col):
+        """点击行展开/收起详情面板"""
+        if row < 0 or row >= len(self._model_rows):
+            self._model_detail_panel.setVisible(False)
+            self._model_detail_row = -1
+            return
+        if self._model_detail_row == row:
+            # 再次点击同一行，收起详情
+            self._model_detail_panel.setVisible(False)
+            self._model_detail_row = -1
+            return
+        self._model_detail_row = row
+        r = self._model_rows[row]
+        self._show_model_detail(r)
+
+    def _show_model_detail(self, r):
+        """在详情面板中显示模型详细信息"""
+        # 清空旧内容
+        while self._model_detail_layout.count():
+            item = self._model_detail_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            if item.layout():
+                while item.layout().count():
+                    child = item.layout().takeAt(0)
+                    if child.widget():
+                        child.widget().deleteLater()
+
+        # 左侧：模型图标
+        icon_label = QLabel()
+        icon_svg_map = {
+            "基础模型": b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#C62828" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M7 12h10M12 7v10"/></svg>',
+            "LoRA": b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#FF9800" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>',
+            "控制模型": b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#2196F3" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>',
+            "高清放大": b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#4CAF50" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>',
+            "文本编码器": b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#9C27B0" stroke-width="1.5"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>',
+            "图像生成": b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#E91E63" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
+            "语音合成": b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#00BCD4" stroke-width="1.5"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>',
+        }
+        category = r.get("category", "")
+        svg_data = icon_svg_map.get(category, icon_svg_map.get("基础模型"))
+        pm_icon = QPixmap(64, 64)
+        pm_icon.fill(QColor(0, 0, 0, 0))
+        painter_icon = QPainter(pm_icon)
+        painter_icon.setRenderHint(QPainter.RenderHint.Antialiasing)
+        QSvgRenderer(svg_data).render(painter_icon)
+        painter_icon.end()
+        icon_label.setPixmap(pm_icon)
+        icon_label.setFixedSize(64, 64)
+        self._model_detail_layout.addWidget(icon_label)
+
+        # 右侧：详细信息
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(4)
+
+        # 名称
+        name_lbl = QLabel(r.get("name", ""))
+        name_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFFFFF; border: none;")
+        info_layout.addWidget(name_lbl)
+
+        # 描述
+        desc = r.get("description", "")
+        if desc:
+            desc_lbl = QLabel(desc)
+            desc_lbl.setWordWrap(True)
+            desc_lbl.setStyleSheet("font-size: 11px; color: #CCCCCC; border: none;")
+            info_layout.addWidget(desc_lbl)
+
+        # 详细信息第一行：分类 + 标签
+        detail_row1 = QHBoxLayout()
+        detail_row1.setSpacing(12)
+
+        cat_lbl = QLabel(f"分类: {category}")
+        cat_lbl.setStyleSheet("font-size: 10px; color: #888888; border: none;")
+        detail_row1.addWidget(cat_lbl)
+
+        tag = r.get("tag", "")
+        if tag:
+            tag_lbl = QLabel(f"标签: {tag}")
+            tag_color = "#E53935" if tag == "必需" else "#FF9800" if tag == "可选" else "#888888"
+            tag_lbl.setStyleSheet(f"font-size: 10px; color: {tag_color}; border: none; font-weight: bold;")
+            detail_row1.addWidget(tag_lbl)
+
+        detail_row1.addStretch()
+        info_layout.addLayout(detail_row1)
+
+        # 详细信息第二行：大小 + 状态
+        detail_row2 = QHBoxLayout()
+        detail_row2.setSpacing(12)
+
+        size_gb = r.get("size_gb", 0)
+        if size_gb > 0:
+            size_lbl = QLabel(f"大小: {size_gb:.1f} GB")
+            size_lbl.setStyleSheet("font-size: 10px; color: #888888; border: none;")
+            detail_row2.addWidget(size_lbl)
+
+        status = r.get("status", "")
+        status_color = r.get("status_color", "#DDDDDD")
+        status_lbl = QLabel(f"状态: {status}")
+        status_lbl.setStyleSheet(f"font-size: 10px; color: {status_color}; border: none; font-weight: bold;")
+        detail_row2.addWidget(status_lbl)
+
+        detail_row2.addStretch()
+        info_layout.addLayout(detail_row2)
+
+        # 触发词
+        tw = r.get("trigger_words", "")
+        if tw:
+            tw_lbl = QLabel(f"触发词: {tw}")
+            tw_lbl.setWordWrap(True)
+            tw_lbl.setStyleSheet("font-size: 10px; color: #42A5F5; border: none;")
+            info_layout.addWidget(tw_lbl)
+
+        # 示例提示词（如果有）
+        example = _MODEL_EXAMPLES.get(r.get("filename", "") or r.get("name", ""), "")
+        if example:
+            ex_lbl = QLabel(f"示例提示词: {example}")
+            ex_lbl.setWordWrap(True)
+            ex_lbl.setStyleSheet("font-size: 10px; color: #66BB6A; border: none;")
+            info_layout.addWidget(ex_lbl)
+
+        # 仓库信息
+        repo = r.get("repo_id", "")
+        if repo:
+            repo_lbl = QLabel(f"来源: {repo}")
+            repo_lbl.setStyleSheet("font-size: 10px; color: #666666; border: none;")
+            info_layout.addWidget(repo_lbl)
+
+        info_layout.addStretch()
+        self._model_detail_layout.addLayout(info_layout, 1)
+
+        # 关闭按钮
+        close_btn = QPushButton(" 收起")
+        close_icon_svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#888888" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>'
+        pm_close = QPixmap(12, 12)
+        pm_close.fill(QColor(0, 0, 0, 0))
+        painter_close = QPainter(pm_close)
+        QSvgRenderer(close_icon_svg).render(painter_close)
+        painter_close.end()
+        close_btn.setIcon(QIcon(pm_close))
+        close_btn.setFixedSize(60, 28)
+        close_btn.setStyleSheet("""
+            QPushButton { background-color: #333333; color: #AAAAAA; border: 1px solid #444444; border-radius: 4px; font-size: 10px; }
+            QPushButton:hover { background-color: #444444; color: #FFFFFF; }
+        """)
+        close_btn.clicked.connect(lambda: (self._model_detail_panel.setVisible(False), setattr(self, '_model_detail_row', -1)))
+        self._model_detail_layout.addWidget(close_btn)
+
+        self._model_detail_panel.setVisible(True)
 
     def _classify_model(self, model_id, info):
         fname = info.get("file", "").lower()
@@ -5820,6 +6231,24 @@ class MainWindow(QMainWindow):
 
         self._apply_model_sort_and_render()
 
+    def _update_category_counts(self):
+        """更新左侧分类栏的模型数量显示"""
+        if not hasattr(self, '_model_category_list') or not hasattr(self, '_model_rows'):
+            return
+        cat_counts = {}
+        for r in self._model_rows:
+            cat = r.get("category", "其他")
+            cat_counts[cat] = cat_counts.get(cat, 0) + 1
+        total = len(self._model_rows)
+        for i in range(self._model_category_list.count()):
+            item = self._model_category_list.item(i)
+            key = item.data(Qt.ItemDataRole.UserRole)
+            if key == "all":
+                item.setText(f"全部模型 ({total})")
+            else:
+                count = cat_counts.get(key, 0)
+                item.setText(f"{key} ({count})")
+
     def _toggle_select_all_models(self, state):
         checked = state == Qt.CheckState.Checked.value if isinstance(state, int) else bool(state)
         if hasattr(self, '_model_checkboxes'):
@@ -5827,7 +6256,7 @@ class MainWindow(QMainWindow):
                 cb.setChecked(checked)
 
     def _on_model_header_clicked(self, col):
-        if col == 0 or col == 7:
+        if col == 0 or col == 6:
             return
         if self._model_sort_col == col:
             self._model_sort_asc = not self._model_sort_asc
@@ -5847,15 +6276,13 @@ class MainWindow(QMainWindow):
                 elif col == 2:
                     return row.get("description", "").lower()
                 elif col == 3:
-                    return row.get("trigger_words", "").lower()
-                elif col == 4:
                     return row.get("category", "").lower()
-                elif col == 5:
+                elif col == 4:
                     tag_order = {"必需": 0, "可选": 1, "本地": 2}
                     return tag_order.get(row.get("tag", ""), 9)
-                elif col == 6:
+                elif col == 5:
                     return row.get("size_gb", 0)
-                elif col == 7:
+                elif col == 6:
                     status_order = {"已下载": 0, "完整": 0, "本地": 0, "不完整": 1, "未下载": 2}
                     return status_order.get(row.get("status", ""), 9)
                 return ""
@@ -5871,13 +6298,22 @@ class MainWindow(QMainWindow):
         if not hasattr(self, '_model_rows'):
             return
 
-        base_labels = ["", "模型名称", "描述", "触发词", "分类", "标签", "大小", "状态", "操作"]
-        if 1 <= self._model_sort_col <= 7:
+        # 分类筛选
+        filtered_rows = self._model_rows
+        if hasattr(self, '_model_category_filter') and self._model_category_filter != "all":
+            cat = self._model_category_filter
+            filtered_rows = [r for r in self._model_rows if r.get("category", "") == cat]
+
+        # 更新分类栏计数
+        self._update_category_counts()
+
+        base_labels = ["", "模型名称", "描述", "分类", "标签", "大小", "状态", "操作"]
+        if 1 <= self._model_sort_col <= 6:
             arrow = " ▲" if self._model_sort_asc else " ▼"
             base_labels[self._model_sort_col] = base_labels[self._model_sort_col] + arrow
         self._model_table.setHorizontalHeaderLabels(base_labels)
 
-        for row, r in enumerate(self._model_rows):
+        for row, r in enumerate(filtered_rows):
             self._model_table.insertRow(row)
 
             cb = QCheckBox()
@@ -5893,34 +6329,31 @@ class MainWindow(QMainWindow):
             name_item = QTableWidgetItem(r.get("name", ""))
             self._model_table.setItem(row, 1, name_item)
 
+            # 描述中融入触发词信息
             desc_text = r.get("description", "")
+            tw = r.get("trigger_words", "")
+            if tw:
+                desc_text = f"[触发词: {tw}] {desc_text}" if desc_text else f"[触发词: {tw}]"
             desc_item = QTableWidgetItem(desc_text)
             desc_item.setForeground(QColor("#999999"))
             if desc_text:
                 desc_item.setToolTip(desc_text)
             self._model_table.setItem(row, 2, desc_item)
 
-            tw_text = r.get("trigger_words", "")
-            tw_item = QTableWidgetItem(tw_text)
-            tw_item.setForeground(QColor("#42A5F5"))
-            if tw_text:
-                tw_item.setToolTip(tw_text)
-            self._model_table.setItem(row, 3, tw_item)
-
-            self._model_table.setItem(row, 4, QTableWidgetItem(r.get("category", "")))
+            self._model_table.setItem(row, 3, QTableWidgetItem(r.get("category", "")))
 
             tag_item = QTableWidgetItem(r.get("tag", ""))
             if r.get("tag") == "必需":
                 tag_item.setForeground(QColor("#E53935"))
-            self._model_table.setItem(row, 5, tag_item)
+            self._model_table.setItem(row, 4, tag_item)
 
             size_gb = r.get("size_gb", 0)
-            self._model_table.setItem(row, 6, QTableWidgetItem(f"{size_gb:.1f} GB" if size_gb > 0 else ""))
+            self._model_table.setItem(row, 5, QTableWidgetItem(f"{size_gb:.1f} GB" if size_gb > 0 else ""))
 
             status_text = f"{r.get('status_icon', '')} {r.get('status', '')}"
             status_item = QTableWidgetItem(status_text)
             status_item.setForeground(QColor(r.get("status_color", "#DDDDDD")))
-            self._model_table.setItem(row, 7, status_item)
+            self._model_table.setItem(row, 6, status_item)
 
             ops_widget = QWidget()
             ops_layout = QHBoxLayout(ops_widget)
@@ -5954,7 +6387,7 @@ class MainWindow(QMainWindow):
                 ops_layout.addWidget(rm_btn)
 
             ops_layout.addStretch()
-            self._model_table.setCellWidget(row, 8, ops_widget)
+            self._model_table.setCellWidget(row, 7, ops_widget)
 
         for r in range(self._model_table.rowCount()):
             self._model_table.setRowHeight(r, 32)
@@ -6860,14 +7293,10 @@ class MainWindow(QMainWindow):
                     lbl.setStyleSheet("font-family: Consolas; font-size: 9pt; color: #555; border: none;")
                     detail_layout.addWidget(lbl)
                 if changes:
-                    for ch in changes[:3]:
+                    for ch in changes:
                         lbl = QLabel(f"· {ch}")
                         lbl.setWordWrap(True)
                         lbl.setStyleSheet("font-size: 8pt; color: #777; border: none;")
-                        detail_layout.addWidget(lbl)
-                    if len(changes) > 3:
-                        lbl = QLabel(f"  +{len(changes)-3}项更多...")
-                        lbl.setStyleSheet("font-size: 8pt; color: #444; border: none;")
                         detail_layout.addWidget(lbl)
                 else:
                     lbl = QLabel("暂无修改记录")
@@ -6953,17 +7382,6 @@ class MainWindow(QMainWindow):
                 cur_label = QLabel("● 当前")
                 cur_label.setStyleSheet("font-size: 8pt; color: #4CAF50; border: none; font-weight: bold;")
                 header_layout.addWidget(cur_label)
-            else:
-                switch_btn = QPushButton("🔄 切换")
-                switch_btn.setFixedSize(55, 20)
-                switch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                switch_btn.setStyleSheet(
-                    "QPushButton { background-color: #1e1e1e; color: #aaa; border: none; border-radius: 3px; font-size: 8pt; }"
-                    "QPushButton:hover { background-color: #2a2a2a; color: #fff; }"
-                )
-                commit_hash = commit.get("sha", "")[:8] if commit.get("sha", "") else commit.get("hash", "")
-                switch_btn.clicked.connect(lambda checked, h=commit_hash: self._switch_git_commit(h))
-                header_layout.addWidget(switch_btn)
             card_layout.addWidget(header)
             if expanded:
                 detail = QFrame()
@@ -7656,31 +8074,6 @@ class MainWindow(QMainWindow):
         cmd = f'ping -n 3 127.0.0.1 >nul & start "" "{entry_exe}"'
         subprocess.Popen(cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
         self.close()
-
-    def _switch_git_commit(self, commit_hash):
-        if not self._is_git_repo():
-            self._log("× 不是 Git 仓库，无法切换版本", "err")
-            return
-        r = self._run_git("stash")
-        stashed = r["ok"] and "Saved" in r["stdout"]
-        r = self._run_git("checkout", commit_hash, timeout=60)
-        if not r["ok"]:
-            self._log(f"× 切换失败: {r['stderr'][:200]}", "err")
-            if stashed:
-                self._run_git("stash", "pop")
-            return
-        if stashed:
-            self._run_git("stash", "pop")
-        # Restart the application via entry exe
-        dev_dir = _find_dev_dir()
-        entry_exe = os.path.join(dev_dir, f"{BRAND_NAME}.exe")
-        if os.path.exists(entry_exe):
-            cmd = f'ping -n 3 127.0.0.1 >nul & start "" "{entry_exe}"'
-            subprocess.Popen(cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            self.close()
-        else:
-            self._log(f"✅ 已切换到 commit {commit_hash}，请重启软件", "info")
-            self._refresh_git_history()
 
     def _show_update_log(self):
         versions_json_path = os.path.join(self._app_dir, "versions.json") if self._app_dir else ""
@@ -8661,6 +9054,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_auto_deploy_prompted') and self._auto_deploy_prompted:
             return
         self._auto_deploy_prompted = True
+        # 首次启动：跳转到部署页并显示引导提示
+        self._switch_page(1)
+        self._show_newbie_guide()
         self._one_click_deploy()
 
     def _save_env_check_result(self):
@@ -10266,8 +10662,93 @@ if __name__ == '__main__':
             self._start_frontend()
 
     def _open_service(self, sid):
-        url = SERVICES[sid]["url"]
-        self._open_url_in_browser(url)
+        if sid == "backend":
+            self._show_engine_info()
+        else:
+            url = SERVICES[sid]["url"]
+            self._open_url_in_browser(url)
+
+    def _show_engine_info(self):
+        """Show engine details dialog for the backend service."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("核心引擎信息")
+        dlg.setMinimumWidth(480)
+        dlg.setStyleSheet("""
+            QDialog { background-color: #1E1E1E; color: #E0E0E0; }
+            QGroupBox {
+                color: #FFFFFF; font-weight: bold; font-size: 13px;
+                border: 1px solid #444444; border-radius: 6px;
+                margin-top: 12px; padding-top: 16px;
+            }
+            QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; }
+            QLabel { color: #CCCCCC; font-size: 12px; background: transparent; }
+        """)
+        layout = QVBoxLayout(dlg)
+        layout.setSpacing(8)
+
+        # --- Engine Info ---
+        grp1 = QGroupBox("引擎信息")
+        g1 = QFormLayout(grp1)
+        g1.setSpacing(6)
+        g1.addRow("名称:", QLabel("LTX Video 引擎"))
+        g1.addRow("版本:", QLabel(VERSION))
+        g1.addRow("端口:", QLabel(str(SERVICES.get("backend", {}).get("port", "—"))))
+        api_url = f"http://127.0.0.1:{SERVICES.get('backend', {}).get('port', 3000)}"
+        g1.addRow("API 地址:", QLabel(api_url))
+        running = self._svc_running.get("backend", False)
+        status_lbl = QLabel("✅ 运行中" if running else "⏹ 已停止")
+        status_lbl.setStyleSheet("color: #4CAF50;" if running else "color: #F44336;")
+        g1.addRow("状态:", status_lbl)
+        layout.addWidget(grp1)
+
+        # --- Hardware ---
+        grp2 = QGroupBox("硬件信息")
+        g2 = QFormLayout(grp2)
+        g2.setSpacing(6)
+        gpu_name = "—"
+        vram_str = "—"
+        try:
+            import torch
+            if torch.cuda.is_available():
+                gpu_name = torch.cuda.get_device_name(0)
+                vram_bytes = torch.cuda.get_device_properties(0).total_mem
+                vram_str = f"{vram_bytes / (1024**3):.1f} GB"
+            else:
+                gpu_name = "无 CUDA 设备"
+        except ImportError:
+            gpu_name = "PyTorch 未安装"
+        except Exception as e:
+            gpu_name = f"检测失败: {e}"
+        g2.addRow("GPU:", QLabel(gpu_name))
+        g2.addRow("显存:", QLabel(vram_str))
+        layout.addWidget(grp2)
+
+        # --- Model Status ---
+        grp3 = QGroupBox("模型状态")
+        g3 = QFormLayout(grp3)
+        g3.setSpacing(6)
+        model_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models")
+        file_count = 0
+        if os.path.isdir(model_dir):
+            for root, dirs, files in os.walk(model_dir):
+                file_count += len(files)
+        g3.addRow("模型目录:", QLabel(model_dir))
+        g3.addRow("文件数量:", QLabel(str(file_count)))
+        layout.addWidget(grp3)
+
+        # Close button
+        close_btn = QPushButton("关闭")
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #333333; color: #FFFFFF;
+                border: 1px solid #555555; border-radius: 6px;
+                padding: 8px 24px; font-size: 13px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #444444; }
+        """)
+        close_btn.clicked.connect(dlg.accept)
+        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        dlg.exec()
 
     def _open_usage_guide(self):
         dlg = UsageGuideDialog(self)
@@ -10832,6 +11313,79 @@ if __name__ == '__main__':
             self._speed_after_deploy = False
             self._speed_deploy_source = None
 
+    def _show_newbie_guide(self):
+        """首次启动时在部署页顶部显示新手引导提示"""
+        if hasattr(self, '_newbie_guide_frame') and self._newbie_guide_frame:
+            self._newbie_guide_frame.setVisible(True)
+            return
+        self._newbie_guide_frame = QFrame()
+        self._newbie_guide_frame.setStyleSheet("""
+            QFrame { background-color: #1A237E; border: 1px solid #3949AB; border-radius: 8px; }
+        """)
+        guide_layout = QVBoxLayout(self._newbie_guide_frame)
+        guide_layout.setContentsMargins(16, 12, 16, 12)
+        guide_layout.setSpacing(6)
+
+        title_lbl = QLabel("👋 欢迎使用云集智能视频创意站！")
+        title_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFFFFF; border: none;")
+        guide_layout.addWidget(title_lbl)
+
+        steps_lbl = QLabel(
+            "首次使用需要完成环境部署，请按以下步骤操作：\n"
+            "  ① 点击下方「一键部署维护」按钮，等待自动安装完成\n"
+            "  ② 部署完成后，点击底部「运行服务」页面\n"
+            "  ③ 点击「启动全部」，浏览器将自动打开操作界面\n"
+            "  ④ 在浏览器中输入文字描述，即可生成AI视频"
+        )
+        steps_lbl.setStyleSheet("font-size: 12px; color: #BBDEFB; border: none;")
+        steps_lbl.setWordWrap(True)
+        guide_layout.addWidget(steps_lbl)
+
+        tip_lbl = QLabel("💡 提示：部署过程需要下载约 10GB 文件，请确保网络稳定和磁盘空间充足")
+        tip_lbl.setStyleSheet("font-size: 11px; color: #90CAF9; border: none;")
+        tip_lbl.setWordWrap(True)
+        guide_layout.addWidget(tip_lbl)
+
+        # 插入到部署页顶部
+        if hasattr(self, '_env_page_widget'):
+            env_layout = self._env_page_widget.layout()
+            if env_layout:
+                env_layout.insertWidget(0, self._newbie_guide_frame)
+
+    def _show_deploy_success_guide(self):
+        """部署完成后显示引导提示，引导用户去启动服务"""
+        guide_frame = QFrame()
+        guide_frame.setStyleSheet("""
+            QFrame { background-color: #1B5E20; border: 1px solid #2E7D32; border-radius: 8px; }
+        """)
+        guide_layout = QHBoxLayout(guide_frame)
+        guide_layout.setContentsMargins(16, 10, 16, 10)
+
+        msg_lbl = QLabel("✅ 部署完成！点击下方按钮切换到「运行服务」页面，然后点击「启动全部」即可开始使用")
+        msg_lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #C8E6C9; border: none;")
+        msg_lbl.setWordWrap(True)
+        guide_layout.addWidget(msg_lbl, 1)
+
+        go_btn = QPushButton("→ 前往启动服务")
+        go_btn.setStyleSheet("""
+            QPushButton { background-color: #2E7D32; color: #FFFFFF; border: none; border-radius: 6px; padding: 8px 20px; font-size: 13px; font-weight: bold; }
+            QPushButton:hover { background-color: #388E3C; }
+        """)
+        go_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        go_btn.clicked.connect(lambda: self._switch_page(0))
+        guide_layout.addWidget(go_btn)
+
+        # 插入到部署页顶部（新手引导下方）
+        if hasattr(self, '_env_page_widget'):
+            env_layout = self._env_page_widget.layout()
+            if env_layout:
+                insert_idx = 0
+                if hasattr(self, '_newbie_guide_frame') and self._newbie_guide_frame and self._newbie_guide_frame.isVisible():
+                    insert_idx = 1
+                env_layout.insertWidget(insert_idx, guide_frame)
+                # 5秒后自动隐藏
+                QTimer.singleShot(30000, lambda: guide_frame.setVisible(False))
+
     def _one_click_deploy(self):
         self.btn_one_click_deploy.setEnabled(False)
         selected = "auto"
@@ -10924,6 +11478,11 @@ if __name__ == '__main__':
             """)
             self.deploy_progress_label.setText("√ 部署完成")
             self._log("√ 部署维护完成！所有环境已就绪", "ok")
+            # 隐藏新手引导提示
+            if hasattr(self, '_newbie_guide_frame') and self._newbie_guide_frame:
+                self._newbie_guide_frame.setVisible(False)
+            # 部署完成提示：引导用户启动服务
+            self._show_deploy_success_guide()
         else:
             self.deploy_progress_bar.setStyleSheet("""
                 QProgressBar { background-color: rgba(26,26,26,180); border: 1px solid rgba(239,83,80,80); border-radius: 5px; }
