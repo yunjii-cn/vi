@@ -11773,83 +11773,101 @@ def main():
 
         app_resources = os.path.join(install_root, "app", "resources")
         if not os.path.isdir(app_resources) or not os.path.isdir(os.path.join(app_resources, "backend")):
-            QApplication.setHighDpiScaleFactorRoundingPolicy(
-                Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
-            )
-            _app = QApplication(sys.argv)
-            _app.setStyle('Fusion')
-            _dlg = QDialog()
-            _dlg.setWindowTitle("云集智能视频创意站 - 首次启动")
-            _dlg.setFixedSize(480, 280)
-            _dlg.setStyleSheet("QDialog { background-color: #1A1A1A; }")
-            _dlg.setWindowFlags(_dlg.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
-            _layout = QVBoxLayout(_dlg)
-            _layout.setContentsMargins(30, 25, 30, 20)
-            _layout.setSpacing(12)
-            _title = QLabel("🚀 首次启动，正在准备核心文件...")
-            _title.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
-            _title.setStyleSheet("color: #FFFFFF; border: none;")
-            _title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            _layout.addWidget(_title)
-            _progress = QProgressBar()
-            _progress.setRange(0, 0)
-            _progress.setFixedHeight(20)
-            _progress.setStyleSheet(
-                "QProgressBar { background-color: #2A2A2A; border: 1px solid #444; border-radius: 10px; text-align: center; color: #AAA; }"
-                "QProgressBar::chunk { background-color: #4CAF50; border-radius: 9px; }"
-            )
-            _layout.addWidget(_progress)
-            _status = QLabel("正在从远程仓库下载核心文件...")
-            _status.setStyleSheet("color: #AAAAAA; font-size: 10pt; border: none;")
-            _status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            _layout.addWidget(_status)
-            _detail = QLabel("将同时尝试 GitHub 和 Gitee，使用最快的源")
-            _detail.setStyleSheet("color: #666666; font-size: 9pt; border: none;")
-            _detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            _layout.addWidget(_detail)
-            _layout.addStretch()
-            _dlg.show()
-            _app.processEvents()
+            # 优先从EXE内部释放嵌入资源，无需网络下载
+            meipass = getattr(sys, '_MEIPASS', '')
+            if meipass:
+                try:
+                    os.makedirs(app_resources, exist_ok=True)
+                    _IGNORE_PATTERNS = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
+                    for res_name in ("ui", "backend", "patches"):
+                        src = os.path.join(meipass, "resources", res_name)
+                        dst = os.path.join(app_resources, res_name)
+                        if os.path.isdir(src):
+                            if os.path.exists(dst):
+                                shutil.rmtree(dst, ignore_errors=True)
+                            shutil.copytree(src, dst, ignore=_IGNORE_PATTERNS)
+                except Exception as e:
+                    print(f"[main] 从EXE释放资源失败: {e}")
 
-            bootstrap_result = [None]
-
-            def do_bootstrap():
-                ok, msg = _bootstrap_download_resources(install_root)
-                bootstrap_result[0] = (ok, msg)
-
-            bt = threading.Thread(target=do_bootstrap, daemon=True)
-            bt.start()
-
-            while bt.is_alive():
-                _app.processEvents()
-                bt.join(timeout=0.05)
-
-            _dlg.close()
-
-            ok, msg = bootstrap_result[0]
-            if not ok:
-                import ctypes
-                ctypes.windll.user32.MessageBoxW(
-                    0,
-                    f"核心文件下载失败：\n{msg}\n\n"
-                    "请检查网络连接后重试。\n"
-                    "也可以手动从以下地址下载：\n"
-                    "https://github.com/yunjii-cn/vi/releases",
-                    "云集智能视频创意站 - 启动失败",
-                    0x10
-                )
-                sys.exit(1)
-
-            app_resources = os.path.join(install_root, "app", "resources")
+            # 如果EXE内部释放后仍缺少资源，再尝试网络下载
             if not os.path.isdir(os.path.join(app_resources, "backend")):
-                import ctypes
-                ctypes.windll.user32.MessageBoxW(
-                    0,
-                    "核心文件下载后验证失败，请重新启动程序重试。",
-                    "云集智能视频创意站 - 启动失败",
-                    0x10
+                QApplication.setHighDpiScaleFactorRoundingPolicy(
+                    Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
                 )
-                sys.exit(1)
+                _app = QApplication(sys.argv)
+                _app.setStyle('Fusion')
+                _dlg = QDialog()
+                _dlg.setWindowTitle("云集智能视频创意站 - 首次启动")
+                _dlg.setFixedSize(480, 280)
+                _dlg.setStyleSheet("QDialog { background-color: #1A1A1A; }")
+                _dlg.setWindowFlags(_dlg.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+                _layout = QVBoxLayout(_dlg)
+                _layout.setContentsMargins(30, 25, 30, 20)
+                _layout.setSpacing(12)
+                _title = QLabel("🚀 首次启动，正在准备核心文件...")
+                _title.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
+                _title.setStyleSheet("color: #FFFFFF; border: none;")
+                _title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                _layout.addWidget(_title)
+                _progress = QProgressBar()
+                _progress.setRange(0, 0)
+                _progress.setFixedHeight(20)
+                _progress.setStyleSheet(
+                    "QProgressBar { background-color: #2A2A2A; border: 1px solid #444; border-radius: 10px; text-align: center; color: #AAA; }"
+                    "QProgressBar::chunk { background-color: #4CAF50; border-radius: 9px; }"
+                )
+                _layout.addWidget(_progress)
+                _status = QLabel("正在从远程仓库下载核心文件...")
+                _status.setStyleSheet("color: #AAAAAA; font-size: 10pt; border: none;")
+                _status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                _layout.addWidget(_status)
+                _detail = QLabel("将同时尝试 GitHub 和 Gitee，使用最快的源")
+                _detail.setStyleSheet("color: #666666; font-size: 9pt; border: none;")
+                _detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                _layout.addWidget(_detail)
+                _layout.addStretch()
+                _dlg.show()
+                _app.processEvents()
+
+                bootstrap_result = [None]
+
+                def do_bootstrap():
+                    ok, msg = _bootstrap_download_resources(install_root)
+                    bootstrap_result[0] = (ok, msg)
+
+                bt = threading.Thread(target=do_bootstrap, daemon=True)
+                bt.start()
+
+                while bt.is_alive():
+                    _app.processEvents()
+                    bt.join(timeout=0.05)
+
+                _dlg.close()
+
+                ok, msg = bootstrap_result[0]
+                if not ok:
+                    import ctypes
+                    ctypes.windll.user32.MessageBoxW(
+                        0,
+                        f"核心文件下载失败：\n{msg}\n\n"
+                        "请检查网络连接后重试。\n"
+                        "也可以手动从以下地址下载：\n"
+                        "https://github.com/yunjii-cn/vi/releases",
+                        "云集智能视频创意站 - 启动失败",
+                        0x10
+                    )
+                    sys.exit(1)
+
+                app_resources = os.path.join(install_root, "app", "resources")
+                if not os.path.isdir(os.path.join(app_resources, "backend")):
+                    import ctypes
+                    ctypes.windll.user32.MessageBoxW(
+                        0,
+                        "核心文件下载后验证失败，请重新启动程序重试。",
+                        "云集智能视频创意站 - 启动失败",
+                        0x10
+                    )
+                    sys.exit(1)
 
     try:
         import ctypes

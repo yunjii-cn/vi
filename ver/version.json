@@ -1,12 +1,20 @@
 {
-  "latest": "2026.06.03.1600",
+  "latest": "2026.06.03.1620",
   "release_date": "2026-06-03",
-  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.03.1600",
-  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.03.1600",
+  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.03.1620",
+  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.03.1620",
   "changes": [
-    "简化构建输出-EXE直接输出到dev/dist"
+    "修复首次启动资源释放-优先从EXE内部提取"
   ],
   "versions": [
+    {
+      "version": "2026.06.03.1620",
+      "date": "2026-06-03 16:21",
+      "changes": [
+        "修复首次启动资源释放-优先从EXE内部提取"
+      ],
+      "filename": "云集智能视频创意站-v2026.06.03.1620.exe"
+    },
     {
       "version": "2026.06.03.1600",
       "date": "2026-06-03 16:02",
