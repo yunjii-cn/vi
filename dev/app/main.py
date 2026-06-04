@@ -2980,7 +2980,8 @@ for dep_name, spec in VERSION_LOCKS.items():
             torch_env.pop("UV_DEFAULT_INDEX", None)
             torch_env.pop("UV_INDEX", None)
             torch_env.pop("PYTHONHOME", None)
-            # 同时使用CUDA索引和国内PyPI镜像，让UV自动选择可用源
+            # 首次尝试：CUDA索引为主，PyPI镜像为辅
+            # first-index 确保torch系列从CUDA索引获取（避免安装CPU版本）
             result = self._retry_run(
                 [uv_exe, "pip", "install", "--python", python_exe,
                  f"torch{TORCH_VERSION_CONSTRAINT}",
@@ -2988,13 +2989,13 @@ for dep_name, spec in VERSION_LOCKS.items():
                  f"torchaudio{TORCHAUDIO_VERSION_CONSTRAINT}",
                  "--default-index", torch_index,
                  "--index", self._resolved_mirrors["pip"],
-                 "--index-strategy", "unsafe-first-match"],
+                 "--index-strategy", "first-index"],
                 label=f"PyTorch ({cuda_variant or 'CUDA'})",
                 max_retries=2,
                 capture_output=True, text=True, timeout=1800, env=torch_env
             )
             if isinstance(result, str):
-                self.log.emit("  △ 首次安装失败，尝试仅使用CUDA索引重试...", "warn")
+                self.log.emit("  △ 混合索引安装失败，尝试仅使用CUDA索引...", "warn")
                 fallback_env = torch_env.copy()
                 result = self._retry_run(
                     [uv_exe, "pip", "install", "--python", python_exe,
