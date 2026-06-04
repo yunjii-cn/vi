@@ -796,7 +796,7 @@ def _get_check_icon_path():
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setPen(QPen(QColor("#E53935"), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+    p.setPen(QPen(QColor("#FF0000"), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
     p.drawLine(3, 8, 6, 12)
     p.drawLine(6, 12, 13, 4)
     p.end()
@@ -819,11 +819,11 @@ def _red_check_checkbox_style():
             border: 1px solid #555555; background-color: #1A1A1A;
         }}
         QCheckBox::indicator:checked {{
-            background-color: #1A1A1A; border-color: #E53935;
+            background-color: #1A1A1A; border-color: #FF0000;
             image: url({icon_path});
         }}
         QCheckBox::indicator:hover {{
-            border-color: #E53935;
+            border-color: #FF0000;
         }}
     """
 
@@ -836,7 +836,7 @@ SERVICES = {
         "port": DEFAULT_BACKEND_PORT,
         "url": f"http://127.0.0.1:{DEFAULT_BACKEND_PORT}",
         "icon": "⚙️",
-        "color": "#E53935",
+        "color": "#FF0000",
         "desc": "LTX-2.3 视频生成引擎",
     },
     "frontend": {
@@ -4322,11 +4322,11 @@ class ServiceCard(QFrame):
         self.port_cancel_btn.setFixedSize(56, 30)
         self.port_cancel_btn.setStyleSheet("""
             QPushButton {
-                background-color: #C62828; color: #FFFFFF;
-                border: 1px solid #E53935; border-radius: 4px;
+                background-color: #CC0000; color: #FFFFFF;
+                border: 1px solid #FF0000; border-radius: 4px;
                 font-size: 12px; font-weight: bold;
             }
-            QPushButton:hover { background-color: #E53935; }
+            QPushButton:hover { background-color: #FF0000; }
         """)
         self.port_cancel_btn.setVisible(False)
         btn_row.addWidget(self.port_cancel_btn)
@@ -4470,7 +4470,7 @@ class SplashScreen(QSplashScreen):
         fill_w = bar_w * min(self._progress, 1.0)
         if fill_w > 0:
             grad = QLinearGradient(bar_x, bar_y, bar_x + fill_w, bar_y)
-            grad.setColorAt(0, QColor("#E53935"))
+            grad.setColorAt(0, QColor("#FF0000"))
             grad.setColorAt(1, QColor("#FF7043"))
             painter.setBrush(grad)
             painter.drawRoundedRect(QRectF(bar_x, bar_y, fill_w, bar_h), 5, 5)
@@ -5101,8 +5101,8 @@ class MainWindow(QMainWindow):
                 padding: 10px 18px; font-size: 13px;
             }
             QPushButton:hover { background-color: #333333; border-color: #444444; }
-            QPushButton:checked { background-color: #E53935; border-color: #E53935; color: #FFFFFF; }
-            QPushButton:checked:hover { background-color: #C62828; }
+            QPushButton:checked { background-color: #FF0000; border-color: #FF0000; color: #FFFFFF; }
+            QPushButton:checked:hover { background-color: #CC0000; }
         """
 
         self.btn_home = QPushButton("🚀 运行服务")
@@ -5346,11 +5346,11 @@ class MainWindow(QMainWindow):
         self.btn_start_all = QPushButton("▶ 一键启动")
         self.btn_start_all.setStyleSheet("""
             QPushButton {
-                background-color: #C62828; color: #FFFFFF;
-                border: 1px solid #E53935; border-radius: 8px;
+                background-color: #CC0000; color: #FFFFFF;
+                border: 1px solid #FF0000; border-radius: 8px;
                 padding: 14px 0; font-size: 15px; font-weight: bold;
             }
-            QPushButton:hover { background-color: #E53935; }
+            QPushButton:hover { background-color: #FF0000; }
             QPushButton:disabled { background-color: #1A1A1A; color: #555555; border-color: #222222; }
         """)
         self.btn_start_all.clicked.connect(self._start_all)
@@ -5483,11 +5483,11 @@ class MainWindow(QMainWindow):
         self.btn_one_click_deploy.setFixedSize(120, 34)
         self.btn_one_click_deploy.setStyleSheet("""
             QPushButton {
-                background-color: #C62828; color: #FFFFFF;
-                border: 1px solid #E53935; border-radius: 8px;
+                background-color: #CC0000; color: #FFFFFF;
+                border: 1px solid #FF0000; border-radius: 8px;
                 padding: 6px 12px; font-size: 12px; font-weight: bold;
             }
-            QPushButton:hover { background-color: #E53935; }
+            QPushButton:hover { background-color: #FF0000; }
             QPushButton:disabled { background-color: #1A1A1A; color: #555555; border-color: #222222; }
         """)
         self.btn_one_click_deploy.clicked.connect(self._one_click_deploy)
@@ -5894,7 +5894,7 @@ class MainWindow(QMainWindow):
             QComboBox { background-color: #252525; color: #FFFFFF; border: 1px solid #333333; border-radius: 4px; padding: 6px 28px 6px 10px; font-size: 11px; min-width: 300px; }
             QComboBox::drop-down { border: none; width: 20px; }
             QComboBox::down-arrow { image: none; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 5px solid #888888; }
-            QComboBox QAbstractItemView { background-color: #252525; border: 1px solid #333333; selection-background-color: #C62828; }
+            QComboBox QAbstractItemView { background-color: #252525; border: 1px solid #333333; selection-background-color: #CC0000; }
         """)
         dir_row.addWidget(self._model_dir_combo, 1)
 
@@ -5909,7 +5909,7 @@ class MainWindow(QMainWindow):
         self._remove_dir_btn.setIcon(QIcon(pm_rm))
         self._remove_dir_btn.setStyleSheet("""
             QPushButton { background-color: transparent; border: 1px solid #555555; border-radius: 4px; color: #888888; font-size: 10px; padding: 4px 6px; }
-            QPushButton:hover { background-color: #C62828; border-color: #E53935; color: #FFFFFF; }
+            QPushButton:hover { background-color: #CC0000; border-color: #FF0000; color: #FFFFFF; }
             QPushButton:disabled { color: #444444; border-color: #333333; }
         """)
         self._remove_dir_btn.setToolTip("删除选中的自定义目录")
@@ -5924,7 +5924,7 @@ class MainWindow(QMainWindow):
         QSvgRenderer(add_icon_svg).render(painter_add)
         painter_add.end()
         add_dir_btn.setIcon(QIcon(pm_add))
-        add_dir_btn.setStyleSheet("QPushButton { background-color: #C62828; color: #FFFFFF; border: 1px solid #E53935; border-radius: 4px; padding: 4px 12px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: #E53935; }")
+        add_dir_btn.setStyleSheet("QPushButton { background-color: #CC0000; color: #FFFFFF; border: 1px solid #FF0000; border-radius: 4px; padding: 4px 12px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: #FF0000; }")
         add_dir_btn.clicked.connect(self._add_model_dir)
         dir_row.addWidget(add_dir_btn)
 
@@ -5937,7 +5937,7 @@ class MainWindow(QMainWindow):
             QComboBox { background-color: #252525; color: #FFFFFF; border: 1px solid #333333; border-radius: 4px; padding: 4px 24px 4px 8px; font-size: 11px; min-width: 130px; }
             QComboBox::drop-down { border: none; width: 20px; }
             QComboBox::down-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 4px solid #888888; }
-            QComboBox QAbstractItemView { background-color: #252525; border: 1px solid #333333; selection-background-color: #C62828; }
+            QComboBox QAbstractItemView { background-color: #252525; border: 1px solid #333333; selection-background-color: #CC0000; }
         """)
         self.model_source_combo.addItem("HF-Mirror (国内)", "hf_mirror")
         self.model_source_combo.addItem("HuggingFace (官方)", "hf_official")
@@ -5972,7 +5972,7 @@ class MainWindow(QMainWindow):
                 margin: 2px 3px;
             }
             QListWidget::item:selected {
-                background-color: #C62828; color: #FFFFFF; font-weight: bold;
+                background-color: #CC0000; color: #FFFFFF; font-weight: bold;
             }
             QListWidget::item:hover {
                 background-color: #252525; color: #FFFFFF;
@@ -6007,13 +6007,13 @@ class MainWindow(QMainWindow):
             QTableWidget { background-color: #111113; border: 1px solid #333333; border-radius: 6px; gridline-color: #222222; font-size: 12px; color: #DDDDDD; }
             QTableWidget::item { padding: 4px 6px; border-bottom: 1px solid #222222; border: none; outline: none; background: transparent; }
             QTableWidget::item:hover { background-color: #2A2A2E; border: none; outline: none; }
-            QTableWidget::item:selected { background-color: #C62828; color: #FFFFFF; border: none; outline: none; }
-            QTableWidget::item:focus { background-color: #C62828; color: #FFFFFF; outline: none; border: none; }
+            QTableWidget::item:selected { background-color: #CC0000; color: #FFFFFF; border: none; outline: none; }
+            QTableWidget::item:focus { background-color: #CC0000; color: #FFFFFF; outline: none; border: none; }
             QHeaderView::section { background-color: #1A1A1A; color: #AAAAAA; border: none; border-bottom: 2px solid #333333; border-right: 1px solid #222222; padding: 6px 8px; font-size: 11px; font-weight: bold; }
             QHeaderView::section:hover { background-color: #252525; color: #FFFFFF; }
             QCheckBox { spacing: 4px; }
             QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #555555; border-radius: 3px; background-color: #252525; }
-            QCheckBox::indicator:checked { background-color: #C62828; border-color: #E53935; }
+            QCheckBox::indicator:checked { background-color: #CC0000; border-color: #FF0000; }
             QCheckBox::indicator:hover { border-color: #888888; }
             QLabel { background: transparent; }
         """)
@@ -6052,7 +6052,7 @@ class MainWindow(QMainWindow):
         self._model_table.cellClicked.connect(self._on_model_row_clicked)
 
         self._select_all_cb = QCheckBox("全选")
-        self._select_all_cb.setStyleSheet("QCheckBox { color: #AAAAAA; font-size: 11px; spacing: 4px; background: transparent; } QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #555555; border-radius: 3px; background-color: #252525; } QCheckBox::indicator:checked { background-color: #C62828; border-color: #E53935; }")
+        self._select_all_cb.setStyleSheet("QCheckBox { color: #AAAAAA; font-size: 11px; spacing: 4px; background: transparent; } QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #555555; border-radius: 3px; background-color: #252525; } QCheckBox::indicator:checked { background-color: #CC0000; border-color: #FF0000; }")
         self._select_all_cb.stateChanged.connect(self._toggle_select_all_models)
 
         self._model_table.setHorizontalHeaderItem(0, QTableWidgetItem(""))
@@ -6106,8 +6106,8 @@ class MainWindow(QMainWindow):
         painter_chk.end()
         check_btn.setIcon(QIcon(pm_chk))
         check_btn.setStyleSheet("""
-            QPushButton { background-color: #C62828; color: #FFFFFF; border: 1px solid #E53935; border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: bold; }
-            QPushButton:hover { background-color: #E53935; }
+            QPushButton { background-color: #CC0000; color: #FFFFFF; border: 1px solid #FF0000; border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: bold; }
+            QPushButton:hover { background-color: #FF0000; }
         """)
         check_btn.clicked.connect(self._check_model_integrity)
         btn_row.addWidget(check_btn)
@@ -6184,7 +6184,7 @@ class MainWindow(QMainWindow):
 
         # 左侧图标
         icon_svg_map = {
-            "视频模型": b'<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#C62828" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M7 12h10M12 7v10"/></svg>',
+            "视频模型": b'<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#CC0000" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M7 12h10M12 7v10"/></svg>',
             "图像模型": b'<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#E91E63" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
             "视频LoRA": b'<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#FF9800" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>',
             "图像LoRA": b'<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#FF5722" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>',
@@ -6233,7 +6233,7 @@ class MainWindow(QMainWindow):
         tag = r.get("tag", "")
         if tag:
             tag_lbl = QLabel(f"标签: {tag}")
-            tag_color = "#E53935" if tag == "必需" else "#FF9800" if tag == "可选" else "#888888"
+            tag_color = "#FF0000" if tag == "必需" else "#FF9800" if tag == "可选" else "#888888"
             tag_lbl.setStyleSheet(f"font-size: 10px; color: {tag_color}; background: transparent; border: none; font-weight: bold;")
             meta_row.addWidget(tag_lbl)
 
@@ -6427,7 +6427,7 @@ class MainWindow(QMainWindow):
                 "size_gb": size_gb,
                 "status": "已下载" if downloaded else "未下载",
                 "status_icon": "√" if downloaded else "×",
-                "status_color": "#66BB6A" if downloaded else "#EF5350",
+                "status_color": "#66BB6A" if downloaded else "#FF0000",
                 "model_id": rm.get("model_id", ""),
                 "local_path": rm.get("local_path", ""),
                 "downloaded": downloaded,
@@ -6543,7 +6543,7 @@ class MainWindow(QMainWindow):
             else:
                 status = "未下载"
                 status_icon = "×"
-                status_color = "#EF5350"
+                status_color = "#FF0000"
 
             self._model_rows.append({
                 "name": info.get("file", model_id),
@@ -6739,7 +6739,7 @@ class MainWindow(QMainWindow):
 
             tag_item = QTableWidgetItem(r.get("tag", ""))
             if r.get("tag") == "必需":
-                tag_item.setForeground(QColor("#E53935"))
+                tag_item.setForeground(QColor("#FF0000"))
             self._model_table.setItem(row, 4, tag_item)
 
             size_gb = r.get("size_gb", 0)
@@ -6956,7 +6956,7 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(cancel_btn)
 
         save_btn = QPushButton("💾 保存")
-        save_btn.setStyleSheet("QPushButton { background-color: #C62828; color: white; border: none; border-radius: 6px; padding: 8px 20px; font-size: 13px; font-weight: bold; } QPushButton:hover { background-color: #E53935; }")
+        save_btn.setStyleSheet("QPushButton { background-color: #CC0000; color: white; border: none; border-radius: 6px; padding: 8px 20px; font-size: 13px; font-weight: bold; } QPushButton:hover { background-color: #FF0000; }")
         save_btn.clicked.connect(dlg.accept)
         btn_layout.addWidget(save_btn)
 
@@ -7295,7 +7295,7 @@ class MainWindow(QMainWindow):
         self._ver_source_combo.setStyleSheet(
             "QComboBox { background-color: #252525; color: #AAAAAA; border: 1px solid #333333; border-radius: 4px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; padding: 2px 6px; }"
             "QComboBox::drop-down { border: none; }"
-            "QComboBox QAbstractItemView { background-color: #252525; color: #AAAAAA; selection-background-color: #C62828; }"
+            "QComboBox QAbstractItemView { background-color: #252525; color: #AAAAAA; selection-background-color: #CC0000; }"
         )
         for key, src in UPDATE_SOURCES.items():
             self._ver_source_combo.addItem(src["name"], key)
@@ -7340,8 +7340,8 @@ class MainWindow(QMainWindow):
         self._ver_tab_stable_btn.setFixedSize(100, 32)
         self._ver_tab_stable_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._ver_tab_stable_btn.setStyleSheet(
-            "QPushButton { background-color: #C62828; color: #FFFFFF; border: none; border-radius: 6px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; font-weight: bold; }"
-            "QPushButton:hover { background-color: #E53935; }"
+            "QPushButton { background-color: #CC0000; color: #FFFFFF; border: none; border-radius: 6px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; font-weight: bold; }"
+            "QPushButton:hover { background-color: #FF0000; }"
         )
         self._ver_tab_stable_btn.clicked.connect(lambda: self._switch_ver_tab("stable"))
         tab_layout.addWidget(self._ver_tab_stable_btn)
@@ -7415,8 +7415,8 @@ class MainWindow(QMainWindow):
             return
         self._ver_active_tab = tab
         active_style = (
-            "QPushButton { background-color: #C62828; color: #FFFFFF; border: none; border-radius: 6px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; font-weight: bold; }"
-            "QPushButton:hover { background-color: #E53935; }"
+            "QPushButton { background-color: #CC0000; color: #FFFFFF; border: none; border-radius: 6px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; font-weight: bold; }"
+            "QPushButton:hover { background-color: #FF0000; }"
         )
         inactive_style = (
             "QPushButton { background-color: #333; color: #AAAAAA; border: 1px solid #444; border-radius: 6px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; font-weight: bold; }"
@@ -7780,8 +7780,8 @@ class MainWindow(QMainWindow):
                 switch_btn.setFixedSize(56, 28)
                 switch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 switch_btn.setStyleSheet(
-                    "QPushButton { background-color: #C62828; color: #fff; border: none; border-radius: 5px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; font-weight: bold; }"
-                    "QPushButton:hover { background-color: #E53935; }"
+                    "QPushButton { background-color: #CC0000; color: #fff; border: none; border-radius: 5px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; font-weight: bold; }"
+                    "QPushButton:hover { background-color: #FF0000; }"
                 )
                 exe_path = exe_info["path"]
                 git_commit = v.get("git_commit", "")
@@ -7852,8 +7852,8 @@ class MainWindow(QMainWindow):
             cancel_btn.setFixedSize(48, 22)
             cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             cancel_btn.setStyleSheet(
-                "QPushButton { background-color: #C62828; color: #fff; border: none; border-radius: 4px; font-family: 'Microsoft YaHei UI', sans-serif; font-size: 7pt; font-weight: bold; }"
-                "QPushButton:hover { background-color: #E53935; }"
+                "QPushButton { background-color: #CC0000; color: #fff; border: none; border-radius: 4px; font-family: 'Microsoft YaHei UI', sans-serif; font-size: 7pt; font-weight: bold; }"
+                "QPushButton:hover { background-color: #FF0000; }"
             )
             pr_layout.addWidget(cancel_btn)
 
@@ -9023,7 +9023,7 @@ class MainWindow(QMainWindow):
         progress.setValue(0)
         progress.setStyleSheet("""
             QProgressBar { background-color: #222222; border: 1px solid #333333; border-radius: 4px; height: 20px; text-align: center; color: #FFFFFF; font-size: 10px; }
-            QProgressBar::chunk { background-color: #C62828; border-radius: 3px; }
+            QProgressBar::chunk { background-color: #CC0000; border-radius: 3px; }
         """)
         dlg_layout.addWidget(progress)
 
@@ -9571,9 +9571,9 @@ class MainWindow(QMainWindow):
                 cancel_btn = QPushButton("✖ 取消")
                 cancel_btn.setFixedHeight(24)
                 cancel_btn.setStyleSheet("""
-                    QPushButton { background-color: #B71C1C; color: white; border: none; border-radius: 3px;
+                    QPushButton { background-color: #CC0000; color: white; border: none; border-radius: 3px;
                         padding: 3px 8px; font-size: 10px; }
-                    QPushButton:hover { background-color: #E53935; }
+                    QPushButton:hover { background-color: #FF0000; }
                     QPushButton:pressed { background-color: #7f0000; }
                 """)
                 cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -10192,7 +10192,7 @@ class MainWindow(QMainWindow):
             ss = val_lbl.styleSheet()
             if "#66BB6A" in ss:
                 st = "ok"
-            elif "#EF5350" in ss:
+            elif "#FF0000" in ss:
                 st = "err"
             elif "#FFA726" in ss:
                 st = "warn"
@@ -10243,7 +10243,7 @@ class MainWindow(QMainWindow):
         color = {
             "ok": "#66BB6A",
             "warn": "#FFA726",
-            "err": "#EF5350",
+            "err": "#FF0000",
             "pending": "#42A5F5",
         }.get(status, "#42A5F5")
         val_lbl.setStyleSheet(f"font-size: 9px; color: {color}; background: transparent;")
@@ -10639,7 +10639,7 @@ for d in deps:
             self._quick_detect_btn.setEnabled(True)
             self._full_detect_btn.setEnabled(True)
             self._env_check_summary.setText("⚠ Python 环境未找到，无法检测运行时依赖")
-            self._env_check_summary.setStyleSheet("font-size: 9px; color: #EF5350; background: transparent; padding-top: 4px;")
+            self._env_check_summary.setStyleSheet("font-size: 9px; color: #FF0000; background: transparent; padding-top: 4px;")
 
     def _start_runtime_detect(self):
         widget_keys = set(self._env_check_widgets.keys())
@@ -10656,7 +10656,7 @@ for d in deps:
         issue_count = 0
         for key, (val_lbl, fix_btn) in self._env_check_widgets.items():
             ss = val_lbl.styleSheet()
-            if "#EF5350" in ss or "#FFA726" in ss:
+            if "#FF0000" in ss or "#FFA726" in ss:
                 issue_count += 1
         if issue_count > 0:
             if issue_count >= 5:
@@ -10895,7 +10895,7 @@ for d in deps:
 
     def _log(self, msg, level="info", tag="APP"):
         ts = datetime.now().strftime("%H:%M:%S")
-        colors = {"info": "#B0B0C0", "ok": "#66BB6A", "warn": "#FFA726", "error": "#EF5350", "err": "#EF5350"}
+        colors = {"info": "#B0B0C0", "ok": "#66BB6A", "warn": "#FFA726", "error": "#FF0000", "err": "#FF0000"}
         c = colors.get(level, "#B0B0C0")
         self.log_text.append(f"<span style='color:#666688'>[{ts}]</span> <span style='color:{c}'>{msg}</span>")
         self._write_debug_log(msg, level, tag)
@@ -11129,7 +11129,7 @@ for d in deps:
                 if not line:
                     continue
                 is_error = "[FE-ERROR]" in line
-                color = "#EF5350" if is_error else "#FFA726"
+                color = "#FF0000" if is_error else "#FFA726"
                 ts = datetime.now().strftime("%H:%M:%S")
                 self.log_text.append(
                     f"<span style='color:#666688'>[{ts}]</span> "
@@ -11824,7 +11824,7 @@ if __name__ == '__main__':
         g1.addRow("API 地址:", QLabel(api_url))
         running = self._svc_running.get("backend", False)
         status_lbl = QLabel("✅ 运行中" if running else "⏹ 已停止")
-        status_lbl.setStyleSheet("color: #4CAF50;" if running else "color: #F44336;")
+        status_lbl.setStyleSheet("color: #4CAF50;" if running else "color: #FF0000;")
         g1.addRow("状态:", status_lbl)
         layout.addWidget(grp1)
 
@@ -12477,7 +12477,7 @@ if __name__ == '__main__':
         self._newbie_guide_frame.setStyleSheet("""
             #newbieGuideFrame {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #B71C1C, stop:1 #7F0000);
+                    stop:0 #CC0000, stop:1 #990000);
                 border: none;
                 border-radius: 6px;
             }
@@ -12666,14 +12666,14 @@ if __name__ == '__main__':
         self._update_newbie_guide()
 
     def _append_deploy_log(self, msg, level):
-        color_map = {"ok": "#66BB6A", "err": "#EF5350", "warn": "#FFA726", "info": "#CCCCCC"}
+        color_map = {"ok": "#66BB6A", "err": "#FF0000", "warn": "#FFA726", "info": "#CCCCCC"}
         color = color_map.get(level, "#CCCCCC")
         self.deploy_log_text.append(f'<span style="color:{color}">{msg}</span>')
         self._write_debug_log(msg, level)
 
     def _replace_deploy_log(self, msg, level):
         """替换日志最后一行（用于下载进度条实时更新）"""
-        color_map = {"ok": "#66BB6A", "err": "#EF5350", "warn": "#FFA726", "info": "#CCCCCC"}
+        color_map = {"ok": "#66BB6A", "err": "#FF0000", "warn": "#FFA726", "info": "#CCCCCC"}
         color = color_map.get(level, "#CCCCCC")
         doc = self.deploy_log_text.document()
         cursor = self.deploy_log_text.textCursor()
@@ -12704,7 +12704,7 @@ if __name__ == '__main__':
         else:
             self.deploy_progress_bar.setStyleSheet("""
                 QProgressBar { background-color: rgba(26,26,26,180); border: 1px solid rgba(239,83,80,80); border-radius: 5px; }
-                QProgressBar::chunk { background-color: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #C62828,stop:1 #EF5350); border-radius: 4px; }
+                QProgressBar::chunk { background-color: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #CC0000,stop:1 #FF0000); border-radius: 4px; }
             """)
             self.deploy_progress_label.setText(f"× 部署失败")
             self._log(f"× 部署失败: {msg}", "err")
