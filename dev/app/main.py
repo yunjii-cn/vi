@@ -7277,7 +7277,7 @@ class MainWindow(QMainWindow):
 
         current_card = QFrame()
         current_card.setStyleSheet(
-            "QFrame { background-color: #141e14; border: 1px solid #1e3a1e; border-radius: 8px; }"
+            "QFrame { background-color: #1A1A1A; border: 1px solid #333333; border-radius: 8px; }"
         )
         current_card.setContentsMargins(0, 0, 0, 0)
         cc_layout = QVBoxLayout(current_card)
@@ -7286,16 +7286,16 @@ class MainWindow(QMainWindow):
         cc_top = QHBoxLayout()
         cc_top.setSpacing(10)
         cc_ver = QLabel(f"当前版本  v{VERSION}")
-        cc_ver.setStyleSheet("font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif; font-size: 11pt; font-weight: bold; color: #4CAF50; border: none;")
+        cc_ver.setStyleSheet("font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif; font-size: 11pt; font-weight: bold; color: #DDDDDD; border: none;")
         cc_top.addWidget(cc_ver)
         cc_top.addStretch()
 
         self._ver_source_combo = QComboBox()
         self._ver_source_combo.setFixedWidth(110)
         self._ver_source_combo.setStyleSheet(
-            "QComboBox { background-color: #1a2a1a; color: #8aaa8a; border: 1px solid #2a4a2a; border-radius: 4px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; padding: 2px 6px; }"
+            "QComboBox { background-color: #252525; color: #AAAAAA; border: 1px solid #333333; border-radius: 4px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; padding: 2px 6px; }"
             "QComboBox::drop-down { border: none; }"
-            "QComboBox QAbstractItemView { background-color: #1a2a1a; color: #8aaa8a; selection-background-color: #2a4a2a; }"
+            "QComboBox QAbstractItemView { background-color: #252525; color: #AAAAAA; selection-background-color: #C62828; }"
         )
         for key, src in UPDATE_SOURCES.items():
             self._ver_source_combo.addItem(src["name"], key)
@@ -7315,22 +7315,22 @@ class MainWindow(QMainWindow):
         cc_layout.addLayout(cc_top)
         self._ver_current_desc_label = QLabel("")
         self._ver_current_desc_label.setWordWrap(True)
-        self._ver_current_desc_label.setStyleSheet("font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; color: #8aaa8a; border: none;")
+        self._ver_current_desc_label.setStyleSheet("font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; color: #AAAAAA; border: none;")
         cc_layout.addWidget(self._ver_current_desc_label)
         cc_detail_row = QHBoxLayout()
         cc_detail_row.setSpacing(16)
         self._ver_current_build_label = QLabel("")
-        self._ver_current_build_label.setStyleSheet("font-size: 8pt; color: #5a7a5a; border: none;")
+        self._ver_current_build_label.setStyleSheet("font-size: 8pt; color: #666; border: none;")
         cc_detail_row.addWidget(self._ver_current_build_label)
         self._ver_current_commit_label = QLabel("")
-        self._ver_current_commit_label.setStyleSheet("font-family: Consolas; font-size: 8pt; color: #5a7a5a; border: none;")
+        self._ver_current_commit_label.setStyleSheet("font-family: Consolas; font-size: 8pt; color: #666; border: none;")
         cc_detail_row.addWidget(self._ver_current_commit_label)
         cc_detail_row.addStretch()
         cc_layout.addLayout(cc_detail_row)
         layout.addWidget(current_card)
 
         tab_bar = QFrame()
-        tab_bar.setStyleSheet("background-color: #1e1e1e; border: none;")
+        tab_bar.setStyleSheet("background-color: #1A1A1A; border: none;")
         tab_bar.setFixedHeight(44)
         tab_layout = QHBoxLayout(tab_bar)
         tab_layout.setContentsMargins(10, 5, 10, 5)
@@ -7377,8 +7377,8 @@ class MainWindow(QMainWindow):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setStyleSheet(
-            "QScrollArea { background-color: #0D0D0D; border: none; }"
-            "QScrollBar:vertical { background-color: #0D0D0D; width: 8px; border: none; }"
+            "QScrollArea { background-color: #111113; border: none; }"
+            "QScrollBar:vertical { background-color: #111113; width: 8px; border: none; }"
             "QScrollBar::handle:vertical { background-color: #333; border-radius: 4px; min-height: 30px; }"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"
         )
@@ -7700,17 +7700,17 @@ class MainWindow(QMainWindow):
             exe_info = v.get("exe_info")
 
             if is_current:
-                row_bg = "#141e14"
-                border_color = "#1e3a1e"
+                row_bg = "#1A1A1A"
+                border_color = "#333333"
             elif is_remote_new:
-                row_bg = "#12121e"
-                border_color = "#1e2a3e"
+                row_bg = "#1A1A1A"
+                border_color = "#333333"
             elif is_available:
                 row_bg = "#141414"
-                border_color = "#1e1e1e"
+                border_color = "#222222"
             else:
-                row_bg = "#0f0f0f"
-                border_color = "#181818"
+                row_bg = "#111113"
+                border_color = "#1A1A1A"
 
             card = QFrame()
             card.setProperty("card_bg", row_bg)
@@ -7728,7 +7728,7 @@ class MainWindow(QMainWindow):
             row_layout.setContentsMargins(14, 8, 14, 8)
             row_layout.setSpacing(10)
 
-            ver_color = "#4CAF50" if is_current else ("#42A5F5" if is_remote_new else ("#CCCCCC" if is_available else "#666"))
+            ver_color = "#FFFFFF" if is_current else ("#DDDDDD" if is_remote_new else ("#CCCCCC" if is_available else "#666"))
             ver_label = QLabel(f"v{ver}")
             ver_label.setMinimumWidth(120)
             ver_label.setStyleSheet(f"font-family: 'Segoe UI', Consolas, monospace; font-size: 10pt; font-weight: bold; color: {ver_color}; border: none;")
@@ -7762,11 +7762,11 @@ class MainWindow(QMainWindow):
             status_label = QLabel(status_text if status_text else "—")
             status_label.setMinimumWidth(60)
             if is_current:
-                status_label.setStyleSheet("font-family: 'Segoe UI', sans-serif; font-size: 8pt; color: #4CAF50; border: none;")
+                status_label.setStyleSheet("font-family: 'Segoe UI', sans-serif; font-size: 8pt; color: #DDDDDD; border: none; font-weight: bold;")
             elif is_remote_new:
-                status_label.setStyleSheet("font-family: 'Segoe UI', sans-serif; font-size: 8pt; color: #42A5F5; border: none;")
+                status_label.setStyleSheet("font-family: 'Segoe UI', sans-serif; font-size: 8pt; color: #AAAAAA; border: none;")
             elif is_available:
-                status_label.setStyleSheet("font-family: 'Segoe UI', sans-serif; font-size: 8pt; color: #999; border: none;")
+                status_label.setStyleSheet("font-family: 'Segoe UI', sans-serif; font-size: 8pt; color: #888; border: none;")
             else:
                 status_label.setStyleSheet("font-family: 'Segoe UI', sans-serif; font-size: 8pt; color: #555; border: none;")
             row_layout.addWidget(status_label)

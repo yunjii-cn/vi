@@ -1,10 +1,18 @@
 {
-  "latest": "2026.06.05.0706",
+  "latest": "2026.06.05.0721",
   "release_date": "2026-06-05",
   "changes": [
-    "内联下载进度条+按钮简化+状态标签优化"
+    "软件更新页面配色统一为暗黑风格"
   ],
   "versions": [
+    {
+      "version": "2026.06.05.0721",
+      "date": "2026-06-05 07:22",
+      "changes": [
+        "软件更新页面配色统一为暗黑风格"
+      ],
+      "filename": "云集智能视频创意站-v2026.06.05.0721.exe"
+    },
     {
       "version": "2026.06.05.0706",
       "date": "2026-06-05 07:07",
@@ -262,6 +270,6 @@
       ]
     }
   ],
-  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.05.0706",
-  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.05.0706"
+  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.05.0721",
+  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.05.0721"
 }
