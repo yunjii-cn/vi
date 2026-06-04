@@ -2573,16 +2573,13 @@ class DeployWorker(QThread):
                 capture_output=True, text=True, timeout=15
             )
             if result.returncode != 0:
-                err = result.stderr.strip()[:200] if result.stderr else ""
-                self.log.emit(f"  PyTorch 验证失败: {err}", "warn")
                 return False
             lines = result.stdout.strip().split('\n')
             if len(lines) >= 2 and 'False' in lines[1]:
                 self.log.emit(f"  △ PyTorch {lines[0].strip()} 已安装但无 CUDA 支持", "warn")
                 return False
             return True
-        except Exception as e:
-            self.log.emit(f"  PyTorch 验证异常: {e}", "warn")
+        except Exception:
             return False
 
     def _check_deps_ok(self):
@@ -2976,38 +2973,37 @@ for dep_name, spec in VERSION_LOCKS.items():
             except Exception:
                 pass
             self.env_update.emit("pytorch", "↻ PyTorch 安装中...", "pending", False)
+            self.log.emit("  安装 PyTorch (CUDA)，包较大请耐心等待...", "info")
             torch_env = os.environ.copy()
             torch_env.pop("UV_INDEX_URL", None)
             torch_env.pop("UV_EXTRA_INDEX_URL", None)
             torch_env.pop("UV_DEFAULT_INDEX", None)
             torch_env.pop("UV_INDEX", None)
             torch_env.pop("PYTHONHOME", None)
+            # 同时使用CUDA索引和国内PyPI镜像，让UV自动选择可用源
             result = self._retry_run(
                 [uv_exe, "pip", "install", "--python", python_exe,
                  f"torch{TORCH_VERSION_CONSTRAINT}",
                  f"torchvision{TORCHVISION_VERSION_CONSTRAINT}",
                  f"torchaudio{TORCHAUDIO_VERSION_CONSTRAINT}",
                  "--default-index", torch_index,
-                 "--index-strategy", "first-index",
-                 "--no-cache"],
+                 "--index", self._resolved_mirrors["pip"],
+                 "--index-strategy", "unsafe-first-match"],
                 label=f"PyTorch ({cuda_variant or 'CUDA'})",
                 max_retries=2,
                 capture_output=True, text=True, timeout=1800, env=torch_env
             )
             if isinstance(result, str):
-                self.log.emit("  △ CUDA 索引安装失败，尝试带PyPI镜像重试...", "warn")
+                self.log.emit("  △ 首次安装失败，尝试仅使用CUDA索引重试...", "warn")
                 fallback_env = torch_env.copy()
-                fallback_env["UV_INDEX"] = self._resolved_mirrors["pip"]
                 result = self._retry_run(
                     [uv_exe, "pip", "install", "--python", python_exe,
                      f"torch{TORCH_VERSION_CONSTRAINT}",
                      f"torchvision{TORCHVISION_VERSION_CONSTRAINT}",
                      f"torchaudio{TORCHAUDIO_VERSION_CONSTRAINT}",
                      "--default-index", torch_index,
-                     "--index", self._resolved_mirrors["pip"],
-                     "--index-strategy", "first-index",
-                     "--no-cache"],
-                    label=f"PyTorch ({cuda_variant or 'CUDA'}+PyPI fallback)",
+                     "--index-strategy", "first-index"],
+                    label=f"PyTorch ({cuda_variant or 'CUDA'} only-index)",
                     max_retries=2,
                     capture_output=True, text=True, timeout=1800, env=fallback_env
                 )
