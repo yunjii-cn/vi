@@ -1,12 +1,24 @@
 {
-  "latest": "2026.06.04.1119",
+  "latest": "2026.06.04.1448",
   "release_date": "2026-06-04",
-  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.04.1119",
-  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.04.1119",
+  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.04.1448",
+  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.04.1448",
   "changes": [
-    "增加自部署桌面快捷方式功能"
+    "修复UV下载镜像源选择",
+    "修复自部署app路径",
+    "去掉新手引导红色背景"
   ],
   "versions": [
+    {
+      "version": "2026.06.04.1448",
+      "date": "2026-06-04 14:49",
+      "changes": [
+        "修复UV下载镜像源选择",
+        "修复自部署app路径",
+        "去掉新手引导红色背景"
+      ],
+      "filename": "云集智能视频创意站-v2026.06.04.1448.exe"
+    },
     {
       "version": "2026.06.04.1119",
       "date": "2026-06-04 11:21",

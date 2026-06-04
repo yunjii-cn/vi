@@ -11881,27 +11881,51 @@ if __name__ == '__main__':
 
     def _build_uv_urls(self, source_key):
         src = MIRROR_SOURCES.get(source_key, MIRROR_SOURCES["tsinghua"])
-        urls = []
+        # 优先使用用户选择的镜像源配置的URL列表
+        urls = list(src.get("uv_urls", []))
+        # 根据测速结果将可用的GH镜像提到前面
+        priority_urls = []
+        remaining_urls = []
+        gh_mirror_names = {}
         if self._speed_gh_ok.get("ghfast"):
-            urls.append(("https://ghfast.top/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHFast镜像"))
+            gh_mirror_names["GHFast"] = True
         if self._speed_gh_ok.get("ghproxy"):
-            urls.append(("https://gh-proxy.com/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GH-Proxy镜像"))
+            gh_mirror_names["GH-Proxy"] = True
         if self._speed_gh_ok.get("ghgo"):
-            urls.append(("https://ghgo.xyz/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHGo镜像"))
-        urls.append(("https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GitHub"))
-        return urls
+            gh_mirror_names["GHGo"] = True
+        for url, name in urls:
+            is_gh_mirror = any(k in name for k in gh_mirror_names)
+            if is_gh_mirror and gh_mirror_names.get(next((k for k in gh_mirror_names if k in name), ""), False):
+                priority_urls.append((url, name))
+            elif name == "GitHub直连":
+                remaining_urls.append((url, name))
+            else:
+                remaining_urls.append((url, name))
+        return priority_urls + remaining_urls
 
     def _build_ltx_urls(self, source_key):
         src = MIRROR_SOURCES.get(source_key, MIRROR_SOURCES["tsinghua"])
-        urls = []
+        # 优先使用用户选择的镜像源配置的URL列表
+        urls = list(src.get("ltx_urls", []))
+        # 根据测速结果将可用的GH镜像提到前面
+        priority_urls = []
+        remaining_urls = []
+        gh_mirror_names = {}
         if self._speed_gh_ok.get("ghfast"):
-            urls.append(("https://ghfast.top/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHFast镜像"))
+            gh_mirror_names["GHFast"] = True
         if self._speed_gh_ok.get("ghproxy"):
-            urls.append(("https://gh-proxy.com/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GH-Proxy镜像"))
+            gh_mirror_names["GH-Proxy"] = True
         if self._speed_gh_ok.get("ghgo"):
-            urls.append(("https://ghgo.xyz/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHGo镜像"))
-        urls.append(("https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GitHub"))
-        return urls
+            gh_mirror_names["GHGo"] = True
+        for url, name in urls:
+            is_gh_mirror = any(k in name for k in gh_mirror_names)
+            if is_gh_mirror and gh_mirror_names.get(next((k for k in gh_mirror_names if k in name), ""), False):
+                priority_urls.append((url, name))
+            elif name == "GitHub直连":
+                remaining_urls.append((url, name))
+            else:
+                remaining_urls.append((url, name))
+        return priority_urls + remaining_urls
 
     def _on_speed_test_done(self):
         fastest = "tsinghua"
@@ -11946,10 +11970,9 @@ if __name__ == '__main__':
         # 品牌红主题：渐变背景 + 左侧激活红装饰条
         self._newbie_guide_frame.setStyleSheet("""
             #newbieGuideFrame {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #cc0000, stop:1 #a00000);
+                background-color: #1A1A1A;
                 border: none;
-                border-left: 4px solid #ff0000;
+                border-left: 4px solid #E53935;
                 border-radius: 6px;
             }
         """)
@@ -11990,7 +12013,7 @@ if __name__ == '__main__':
         # 动态内容标签
         self._newbie_content = QLabel()
         self._newbie_content.setStyleSheet(
-            "font-size: 12px; color: #FFD6D6; background: transparent; border: none; line-height: 1.6;"
+            "font-size: 12px; color: #CCCCCC; background: transparent; border: none; line-height: 1.6;"
         )
         self._newbie_content.setWordWrap(True)
         guide_layout.addWidget(self._newbie_content)
@@ -11998,7 +12021,7 @@ if __name__ == '__main__':
         # 提示标签
         self._newbie_tip = QLabel()
         self._newbie_tip.setStyleSheet(
-            "font-size: 11px; color: #FF9E9E; background: transparent; border: none;"
+            "font-size: 11px; color: #AAAAAA; background: transparent; border: none;"
         )
         self._newbie_tip.setWordWrap(True)
         guide_layout.addWidget(self._newbie_tip)
@@ -12401,10 +12424,9 @@ def main():
     if _IS_FROZEN:
         _validate_exe_filename()
 
-        install_root = _find_install_root()
+        # 使用 _find_dev_dir 确保资源释放到自部署目录内
+        install_root = _find_dev_dir()
         exe_dir = os.path.abspath(os.path.dirname(sys.executable))
-        if install_root is None:
-            install_root = exe_dir
 
         if install_root != exe_dir:
             exe_name = os.path.basename(sys.executable)
