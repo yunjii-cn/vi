@@ -2205,7 +2205,20 @@ class DeployWorker(QThread):
                 req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
                 # 竞速阶段：短超时快速判断连通性
                 with urllib.request.urlopen(req, timeout=15) as resp:
-                    # 成功建立连接，检查是否已有胜出者
+                    # 验证响应有效性：检查Content-Length或读取首段数据
+                    content_length = resp.headers.get("Content-Length")
+                    if content_length and int(content_length) < 1024:
+                        # 小于1KB的响应可能是错误页面，跳过
+                        with lock:
+                            results[name] = (False, f"响应过小({content_length}B)，可能是错误页面")
+                        return
+                    # 读取首段数据验证不是HTML错误页
+                    first_chunk = resp.read(8192)
+                    if first_chunk and b"<html" in first_chunk[:512].lower():
+                        with lock:
+                            results[name] = (False, "返回HTML错误页面")
+                        return
+                    # 成功建立有效连接，检查是否已有胜出者
                     if winner_event.is_set():
                         self._safe_remove(temp_path)
                         return
@@ -2217,8 +2230,9 @@ class DeployWorker(QThread):
                         winner[0] = name
                     winner_event.set()
                     self.log.emit(f"  √ {lbl} 竞速胜出，开始下载...", "info")
-                    # 继续下载完整文件
+                    # 继续下载完整文件（首段数据已读取）
                     with open(temp_path, 'wb') as f:
+                        f.write(first_chunk)
                         while True:
                             if self._should_stop:
                                 break
@@ -2264,14 +2278,12 @@ class DeployWorker(QThread):
             for name, (ok, err) in results.items():
                 if ok:
                     return name, None
-            # 全部失败，回退到顺序重试
-            self.log.emit(f"  △ 竞速下载全部失败，回退顺序重试...", "warn")
-            for url, name in url_name_pairs:
-                if self._should_stop:
-                    return None, "已取消"
-                lbl = f"{label_prefix} ({name})" if label_prefix else name
-                if self._download_with_retry(url, save_path, lbl):
-                    return name, None
+            # 全部失败，对剩余源重新竞速
+            remaining = [(url, name) for url, name in url_name_pairs
+                         if name not in results or not results[name][0]]
+            if remaining:
+                self.log.emit(f"  △ 竞速下载全部失败，重新竞速重试...", "warn")
+                return self._download_racing(remaining, save_path, label_prefix)
             return None, "所有下载源均失败"
 
         # 有胜出者，等待其下载完成
@@ -2287,16 +2299,12 @@ class DeployWorker(QThread):
             if ok:
                 return name, None
 
-        # 回退顺序重试
-        self.log.emit(f"  △ 胜出源 {w} 下载失败，回退顺序重试...", "warn")
-        for url, name in url_name_pairs:
-            if self._should_stop:
-                return None, "已取消"
-            if name == w:
-                continue
-            lbl = f"{label_prefix} ({name})" if label_prefix else name
-            if self._download_with_retry(url, save_path, lbl):
-                return name, None
+        # 对剩余源重新竞速
+        remaining = [(url, name) for url, name in url_name_pairs
+                     if name != w and (name not in results or not results[name][0])]
+        if remaining:
+            self.log.emit(f"  △ 胜出源 {w} 下载失败，重新竞速其他源...", "warn")
+            return self._download_racing(remaining, save_path, label_prefix)
         return None, "所有下载源均失败"
 
     def _deploy_all(self):
