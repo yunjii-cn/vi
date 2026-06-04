@@ -1,12 +1,20 @@
 {
-  "latest": "2026.06.04.1736",
+  "latest": "2026.06.04.1805",
   "release_date": "2026-06-04",
-  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.04.1736",
-  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.04.1736",
+  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.04.1805",
+  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.04.1805",
   "changes": [
-    "修复自部署后不自动启动新EXE"
+    "修复首次运行app目录释放到自部署目录外"
   ],
   "versions": [
+    {
+      "version": "2026.06.04.1805",
+      "date": "2026-06-04 18:06",
+      "changes": [
+        "修复首次运行app目录释放到自部署目录外"
+      ],
+      "filename": "云集智能视频创意站-v2026.06.04.1805.exe"
+    },
     {
       "version": "2026.06.04.1736",
       "date": "2026-06-04 17:37",

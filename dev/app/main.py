@@ -12539,6 +12539,8 @@ def main():
         if os.path.isdir(deploy_dir) and os.path.isfile(os.path.join(deploy_dir, LOCK_FILE)):
             install_root = deploy_dir
         elif install_root is None:
+            # 首次运行，尚未自部署：不在这里释放资源
+            # _self_deploy() 会在 deploy_dir/app/resources 下正确释放
             install_root = exe_dir
 
         if install_root != exe_dir:
@@ -12569,7 +12571,11 @@ def main():
                     pass
 
         app_resources = os.path.join(install_root, "app", "resources")
-        if not os.path.isdir(app_resources) or not os.path.isdir(os.path.join(app_resources, "backend")):
+        # 首次运行（尚未自部署）时跳过资源释放，由 _self_deploy() 处理
+        _already_deployed = os.path.isfile(os.path.join(install_root, LOCK_FILE))
+        if not _already_deployed and install_root == exe_dir:
+            pass  # _self_deploy() 会在 deploy_dir 下正确释放资源
+        elif not os.path.isdir(app_resources) or not os.path.isdir(os.path.join(app_resources, "backend")):
             # 优先从EXE内部释放嵌入资源，无需网络下载
             meipass = getattr(sys, '_MEIPASS', '')
             if meipass:
