@@ -1,12 +1,20 @@
 {
-  "latest": "2026.06.04.1905",
+  "latest": "2026.06.04.2052",
   "release_date": "2026-06-04",
-  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.04.1905",
-  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.04.1905",
+  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.04.2052",
+  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.04.2052",
   "changes": [
-    "优化新手引导分步提示"
+    "修复PyTorch验证超时问题"
   ],
   "versions": [
+    {
+      "version": "2026.06.04.2052",
+      "date": "2026-06-04 20:53",
+      "changes": [
+        "修复PyTorch验证超时问题"
+      ],
+      "filename": "云集智能视频创意站-v2026.06.04.2052.exe"
+    },
     {
       "version": "2026.06.04.1905",
       "date": "2026-06-04 19:07",

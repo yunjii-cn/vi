@@ -2578,7 +2578,7 @@ class DeployWorker(QThread):
         try:
             result = hidden_run(
                 [python_exe, "-c", "import torch; print(torch.__version__); print(torch.cuda.is_available())"],
-                capture_output=True, text=True, timeout=15
+                capture_output=True, text=True, timeout=30
             )
             if result.returncode != 0:
                 return False
@@ -3017,10 +3017,12 @@ for dep_name, spec in VERSION_LOCKS.items():
             if isinstance(result, str):
                 raise Exception(f"PyTorch 安装失败: {result}，PyTorch 包较大(约2GB)，请确保网络稳定")
 
+            # 等待文件系统同步，PyTorch首次导入需加载大量DLL
+            import time; time.sleep(3)
             if not self._check_torch_ok():
                 diag = hidden_run(
                     [python_exe, "-c", "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.__file__)"],
-                    capture_output=True, text=True, timeout=10
+                    capture_output=True, text=True, timeout=30
                 )
                 diag_info = diag.stdout.strip()[:200] if diag.returncode == 0 else "无法导入 torch"
                 raise Exception(f"PyTorch 安装后验证失败，当前状态: {diag_info}")
