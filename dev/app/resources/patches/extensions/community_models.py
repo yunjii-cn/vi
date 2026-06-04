@@ -276,7 +276,7 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
     "z-image-turbo": ModelRegistryEntry(
         model_id="z-image-turbo",
         name="Z-Image-Turbo",
-        description="图像生成模型（AI图像生成功能必需）",
+        description="图像生成模型（AI图像生成功能必需，8步高质量生成）",
         source="official",
         repo_id="Tongyi-MAI/Z-Image-Turbo",
         filename="Z-Image-Turbo",
@@ -286,8 +286,8 @@ _BUILTIN_REGISTRY: dict[str, ModelRegistryEntry] = {
         min_vram_gb=8,
         recommended_tiers=["ultra", "high", "medium"],
         pipeline_mode="supporting",
-        tags=["official", "supporting", "image-gen"],
-        model_category="supporting",
+        tags=["official", "image-gen", "recommended"],
+        model_category="checkpoint",
         is_folder=True,
         usage_scenario="AI图像生成：文生图、图生图",
         trigger_word="",
@@ -644,17 +644,38 @@ def _check_model_exists(entry: ModelRegistryEntry, models_dir: Path) -> bool:
     return target.exists()
 
 
+def _build_filename_index(models_dirs: list[Path]) -> dict[str, str]:
+    """递归扫描所有模型目录，构建 filename → local_path 索引"""
+    index: dict[str, str] = {}
+    for md in models_dirs:
+        try:
+            for dirpath, _dirnames, filenames in os.walk(md):
+                for fn in filenames:
+                    if fn not in index:
+                        index[fn] = str(Path(dirpath) / fn)
+        except OSError:
+            pass
+    return index
+
+
 def _get_registry_status() -> list[dict[str, Any]]:
     models_dirs = _get_models_dirs()
+    # 构建递归文件索引，支持junction子目录中的模型
+    file_index = _build_filename_index(models_dirs)
     results = []
     for entry in _merged_registry.values():
         exists = False
         local_path = None
+        # 先检查顶层目录
         for md in models_dirs:
             if _check_model_exists(entry, md):
                 exists = True
                 local_path = str((md / entry.filename).resolve())
                 break
+        # 顶层未找到，在递归索引中查找（包括junction子目录）
+        if not exists and not entry.is_folder and entry.filename in file_index:
+            exists = True
+            local_path = file_index[entry.filename]
 
         results.append({
             "model_id": entry.model_id,

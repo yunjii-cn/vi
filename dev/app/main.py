@@ -134,6 +134,62 @@ def _create_hardlink(src, dst):
         return False
 
 
+def _create_desktop_shortcut(entry_exe):
+    """在桌面创建快捷方式，确保唯一性（避免版本切换积累）"""
+    if sys.platform != 'win32':
+        return False
+    try:
+        import ctypes
+        CSIDL_DESKTOP = 0x0000
+        buf = ctypes.create_unicode_buffer(260)
+        ctypes.windll.shell32.SHGetFolderPathW(None, CSIDL_DESKTOP, None, 0, buf)
+        desktop = buf.value
+        if not desktop:
+            return False
+
+        shortcut_path = os.path.join(desktop, f"{BRAND_NAME}.lnk")
+
+        # 先删除已有快捷方式，确保唯一
+        if os.path.exists(shortcut_path):
+            try:
+                os.remove(shortcut_path)
+            except Exception:
+                pass
+
+        work_dir = os.path.dirname(entry_exe)
+
+        # 写临时PS1脚本创建快捷方式（避免路径中的引号转义问题）
+        ps1_content = (
+            f'$ws = New-Object -ComObject WScript.Shell\n'
+            f'$sc = $ws.CreateShortcut("{shortcut_path}")\n'
+            f'$sc.TargetPath = "{entry_exe}"\n'
+            f'$sc.WorkingDirectory = "{work_dir}"\n'
+            f'$sc.IconLocation = "{entry_exe},0"\n'
+            f'$sc.Save()\n'
+        )
+
+        ps1_path = os.path.join(os.environ.get('TEMP', '.'), '_yunji_shortcut.ps1')
+        with open(ps1_path, 'w', encoding='utf-8-sig') as f:
+            f.write(ps1_content)
+
+        subprocess.run(
+            ['powershell', '-NoProfile', '-NonInteractive',
+             '-ExecutionPolicy', 'Bypass', '-File', ps1_path],
+            capture_output=True,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=10
+        )
+
+        try:
+            os.remove(ps1_path)
+        except Exception:
+            pass
+
+        return os.path.exists(shortcut_path)
+    except Exception:
+        return False
+
+
 def _find_dev_dir():
     if getattr(sys, 'frozen', False):
         exe_dir = os.path.dirname(os.path.abspath(sys.executable))
@@ -1016,22 +1072,40 @@ MIRROR_SOURCES = {
         "pip_extra": "https://download.pytorch.org/whl/cu128",
         "pip_fallback": "https://pypi.org/simple/",
         "uv_urls": [
-            ("https://ghfast.top/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHFast镜像"),
-            ("https://gh-proxy.com/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GH-Proxy镜像"),
-            ("https://ghgo.xyz/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHGo镜像"),
-            ("https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GitHub"),
+            ("https://ghproxy.net/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHProxy.net"),
+            ("https://ghfast.top/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHFast"),
+            ("https://gh-proxy.com/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GH-Proxy"),
+            ("https://ghgo.xyz/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHGo"),
+            ("https://mirror.ghproxy.com/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "Mirror.GHProxy"),
+            ("https://ghps.cc/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHPS"),
+            ("https://gh.api.99988866.xyz/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GH-99988866"),
+            ("https://kkgithub.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "KKGitHub"),
+            ("https://bgithub.xyz/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "BGitHub"),
+            ("https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GitHub直连"),
         ],
         "ltx_urls": [
-            ("https://ghfast.top/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHFast镜像"),
-            ("https://gh-proxy.com/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GH-Proxy镜像"),
-            ("https://ghgo.xyz/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHGo镜像"),
-            ("https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GitHub"),
+            ("https://ghproxy.net/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHProxy.net"),
+            ("https://ghfast.top/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHFast"),
+            ("https://gh-proxy.com/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GH-Proxy"),
+            ("https://ghgo.xyz/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHGo"),
+            ("https://mirror.ghproxy.com/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "Mirror.GHProxy"),
+            ("https://ghps.cc/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHPS"),
+            ("https://gh.api.99988866.xyz/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GH-99988866"),
+            ("https://kkgithub.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "KKGitHub"),
+            ("https://bgithub.xyz/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "BGitHub"),
+            ("https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GitHub直连"),
         ],
         "ltx2_urls": [
-            ("https://ghfast.top/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GHFast镜像"),
-            ("https://gh-proxy.com/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GH-Proxy镜像"),
-            ("https://ghgo.xyz/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GHGo镜像"),
-            ("https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GitHub"),
+            ("https://ghproxy.net/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GHProxy.net"),
+            ("https://ghfast.top/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GHFast"),
+            ("https://gh-proxy.com/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GH-Proxy"),
+            ("https://ghgo.xyz/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GHGo"),
+            ("https://mirror.ghproxy.com/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "Mirror.GHProxy"),
+            ("https://ghps.cc/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GHPS"),
+            ("https://gh.api.99988866.xyz/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GH-99988866"),
+            ("https://kkgithub.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "KKGitHub"),
+            ("https://bgithub.xyz/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "BGitHub"),
+            ("https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GitHub直连"),
         ],
         "hf_endpoint": "https://hf-mirror.com",
         "test_host": "pypi.tuna.tsinghua.edu.cn",
@@ -1043,22 +1117,40 @@ MIRROR_SOURCES = {
         "pip_extra": "https://download.pytorch.org/whl/cu128",
         "pip_fallback": "https://pypi.org/simple/",
         "uv_urls": [
-            ("https://ghfast.top/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHFast镜像"),
-            ("https://gh-proxy.com/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GH-Proxy镜像"),
-            ("https://ghgo.xyz/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHGo镜像"),
-            ("https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GitHub"),
+            ("https://ghproxy.net/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHProxy.net"),
+            ("https://ghfast.top/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHFast"),
+            ("https://gh-proxy.com/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GH-Proxy"),
+            ("https://ghgo.xyz/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHGo"),
+            ("https://mirror.ghproxy.com/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "Mirror.GHProxy"),
+            ("https://ghps.cc/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHPS"),
+            ("https://gh.api.99988866.xyz/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GH-99988866"),
+            ("https://kkgithub.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "KKGitHub"),
+            ("https://bgithub.xyz/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "BGitHub"),
+            ("https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GitHub直连"),
         ],
         "ltx_urls": [
-            ("https://ghfast.top/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHFast镜像"),
-            ("https://gh-proxy.com/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GH-Proxy镜像"),
-            ("https://ghgo.xyz/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHGo镜像"),
-            ("https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GitHub"),
+            ("https://ghproxy.net/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHProxy.net"),
+            ("https://ghfast.top/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHFast"),
+            ("https://gh-proxy.com/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GH-Proxy"),
+            ("https://ghgo.xyz/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHGo"),
+            ("https://mirror.ghproxy.com/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "Mirror.GHProxy"),
+            ("https://ghps.cc/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHPS"),
+            ("https://gh.api.99988866.xyz/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GH-99988866"),
+            ("https://kkgithub.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "KKGitHub"),
+            ("https://bgithub.xyz/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "BGitHub"),
+            ("https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GitHub直连"),
         ],
         "ltx2_urls": [
-            ("https://ghfast.top/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GHFast镜像"),
-            ("https://gh-proxy.com/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GH-Proxy镜像"),
-            ("https://ghgo.xyz/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GHGo镜像"),
-            ("https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GitHub"),
+            ("https://ghproxy.net/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GHProxy.net"),
+            ("https://ghfast.top/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GHFast"),
+            ("https://gh-proxy.com/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GH-Proxy"),
+            ("https://ghgo.xyz/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GHGo"),
+            ("https://mirror.ghproxy.com/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "Mirror.GHProxy"),
+            ("https://ghps.cc/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GHPS"),
+            ("https://gh.api.99988866.xyz/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GH-99988866"),
+            ("https://kkgithub.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "KKGitHub"),
+            ("https://bgithub.xyz/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "BGitHub"),
+            ("https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GitHub直连"),
         ],
         "hf_endpoint": "https://hf-mirror.com",
         "test_host": "mirrors.aliyun.com",
@@ -1070,19 +1162,34 @@ MIRROR_SOURCES = {
         "pip_extra": "https://download.pytorch.org/whl/cu128",
         "pip_fallback": "https://pypi.org/simple/",
         "uv_urls": [
-            ("https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GitHub"),
-            ("https://ghfast.top/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHFast镜像"),
-            ("https://gh-proxy.com/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GH-Proxy镜像"),
+            ("https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GitHub直连"),
+            ("https://ghproxy.net/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHProxy.net"),
+            ("https://ghfast.top/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHFast"),
+            ("https://gh-proxy.com/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GH-Proxy"),
+            ("https://mirror.ghproxy.com/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "Mirror.GHProxy"),
+            ("https://ghps.cc/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHPS"),
+            ("https://kkgithub.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "KKGitHub"),
+            ("https://bgithub.xyz/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "BGitHub"),
         ],
         "ltx_urls": [
-            ("https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GitHub"),
-            ("https://ghfast.top/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHFast镜像"),
-            ("https://gh-proxy.com/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GH-Proxy镜像"),
+            ("https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GitHub直连"),
+            ("https://ghproxy.net/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHProxy.net"),
+            ("https://ghfast.top/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHFast"),
+            ("https://gh-proxy.com/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GH-Proxy"),
+            ("https://mirror.ghproxy.com/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "Mirror.GHProxy"),
+            ("https://ghps.cc/https://github.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "GHPS"),
+            ("https://kkgithub.com/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "KKGitHub"),
+            ("https://bgithub.xyz/Lightricks/ltx-desktop/archive/refs/tags/v{ver}.zip", "BGitHub"),
         ],
         "ltx2_urls": [
-            ("https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GitHub"),
-            ("https://ghfast.top/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GHFast镜像"),
-            ("https://gh-proxy.com/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GH-Proxy镜像"),
+            ("https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GitHub直连"),
+            ("https://ghproxy.net/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GHProxy.net"),
+            ("https://ghfast.top/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GHFast"),
+            ("https://gh-proxy.com/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GH-Proxy"),
+            ("https://mirror.ghproxy.com/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "Mirror.GHProxy"),
+            ("https://ghps.cc/https://github.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "GHPS"),
+            ("https://kkgithub.com/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "KKGitHub"),
+            ("https://bgithub.xyz/Lightricks/LTX-2/archive/59ca828d5ae24358832ffd7003c2306fbceeba3a.zip", "BGitHub"),
         ],
         "hf_endpoint": "https://huggingface.co",
         "test_host": "pypi.org",
@@ -1140,7 +1247,7 @@ LTX_MODELS = {
         "size_bytes": 29531884062,
         "required": True,
         "desc": "LTX-2.3 蒸馏版 FP8 (推荐，显存友好)",
-        "category": "基础模型",
+        "category": "视频模型",
         "modelscope_id": "Lightricks/LTX-2.3-fp8",
     },
     "ltx-2.3-distilled": {
@@ -1149,7 +1256,7 @@ LTX_MODELS = {
         "size_bytes": 46149345038,
         "required": False,
         "desc": "LTX-2.3 蒸馏版完整精度",
-        "category": "基础模型",
+        "category": "视频模型",
         "modelscope_id": "Lightricks/LTX-2.3",
     },
     "ltx-2.3-distilled-1.1": {
@@ -1158,7 +1265,7 @@ LTX_MODELS = {
         "size_bytes": 46149345038,
         "required": False,
         "desc": "LTX-2.3 蒸馏版 v1.1 (更新版本，质量提升)",
-        "category": "基础模型",
+        "category": "视频模型",
         "modelscope_id": "Lightricks/LTX-2.3",
     },
     "ltx-2.3-dev-fp8": {
@@ -1167,7 +1274,7 @@ LTX_MODELS = {
         "size_bytes": 29145431166,
         "required": False,
         "desc": "LTX-2.3 开发版 FP8 (高质量，需更多显存)",
-        "category": "基础模型",
+        "category": "视频模型",
         "modelscope_id": "Lightricks/LTX-2.3-fp8",
     },
     "ltx-2.3-spatial-upscaler": {
@@ -1197,6 +1304,24 @@ LTX_MODELS = {
         "category": "控制模型",
         "modelscope_id": "Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control",
     },
+    "ltx-2-19b-distilled-lora-384": {
+        "repo": "Lightricks/LTX-2",
+        "file": "ltx-2-19b-distilled-lora-384.safetensors",
+        "size_bytes": 400000000,
+        "required": False,
+        "desc": "Pro模式LoRA (视频生成Pro高质量模式必需，384步推理)",
+        "category": "视频LoRA",
+        "modelscope_id": "Lightricks/LTX-2",
+    },
+    "ltx2.3-22b-ic-lora-cameraman": {
+        "repo": "Lightricks/LTX-2.3-22B_IC-LoRA-Cameraman",
+        "file": "LTX2.3-22B_IC-LoRA-Cameraman_v1_10500.safetensors",
+        "size_bytes": 300000000,
+        "required": False,
+        "desc": "摄影师运镜LoRA (视频迁移-摄像机运镜控制)",
+        "category": "视频LoRA",
+        "modelscope_id": "Lightricks/LTX-2.3-22B_IC-LoRA-Cameraman",
+    },
     "z-image-turbo": {
         "repo": "ByteDance/Z-Image-Turbo",
         "file": "Z-Image-Turbo-BF16.safetensors",
@@ -1212,7 +1337,7 @@ LTX_MODELS = {
         "size_bytes": 124800000,
         "required": False,
         "desc": "90年代经典动画风格 (复古赛璐璐质感)",
-        "category": "LTX视频LoRA",
+        "category": "图像LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
     "Cinematic_sci-fi-cyberpunk": {
@@ -1221,7 +1346,7 @@ LTX_MODELS = {
         "size_bytes": 124800000,
         "required": False,
         "desc": "科幻赛博朋克电影风格 (霓虹灯光，未来都市)",
-        "category": "LTX视频LoRA",
+        "category": "图像LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
     "Claymation": {
@@ -1230,7 +1355,7 @@ LTX_MODELS = {
         "size_bytes": 124800000,
         "required": False,
         "desc": "黏土动画风格 (定格动画黏土质感)",
-        "category": "LTX视频LoRA",
+        "category": "图像LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
     "CozyFelt": {
@@ -1239,7 +1364,7 @@ LTX_MODELS = {
         "size_bytes": 124800000,
         "required": False,
         "desc": "温暖毛毡风格 (手工毛毡布艺纹理)",
-        "category": "LTX视频LoRA",
+        "category": "图像LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
     "FantasyPuppetStyle": {
@@ -1248,7 +1373,7 @@ LTX_MODELS = {
         "size_bytes": 124800000,
         "required": False,
         "desc": "奇幻木偶风格 (提线木偶质感与动态)",
-        "category": "LTX视频LoRA",
+        "category": "图像LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
     "Fantasy_Anime": {
@@ -1257,7 +1382,7 @@ LTX_MODELS = {
         "size_bytes": 124800000,
         "required": False,
         "desc": "奇幻动漫风格 (日式动画精致画面)",
-        "category": "LTX视频LoRA",
+        "category": "图像LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
     "Fantasy_Painterly": {
@@ -1266,7 +1391,7 @@ LTX_MODELS = {
         "size_bytes": 124800000,
         "required": False,
         "desc": "奇幻绘画风格 (油画/水彩手绘笔触)",
-        "category": "LTX视频LoRA",
+        "category": "图像LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
     "Fantasy_Realism": {
@@ -1275,7 +1400,7 @@ LTX_MODELS = {
         "size_bytes": 124800000,
         "required": False,
         "desc": "奇幻写实风格 (写实基础+奇幻元素)",
-        "category": "LTX视频LoRA",
+        "category": "图像LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
     "LTX2.3_Crisp_Enhance": {
@@ -1284,7 +1409,7 @@ LTX_MODELS = {
         "size_bytes": 124800000,
         "required": False,
         "desc": "清晰增强 (提升画面锐度和细节)",
-        "category": "LTX视频LoRA",
+        "category": "视频LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
     "LTX2.3_Soft_Enhance": {
@@ -1293,7 +1418,7 @@ LTX_MODELS = {
         "size_bytes": 124800000,
         "required": False,
         "desc": "柔和增强 (柔光滤镜，梦幻氛围)",
-        "category": "LTX视频LoRA",
+        "category": "视频LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
     "Luxe_Sensual": {
@@ -1302,7 +1427,7 @@ LTX_MODELS = {
         "size_bytes": 124800000,
         "required": False,
         "desc": "奢华感官风格 (高端质感柔光金属反光)",
-        "category": "LTX视频LoRA",
+        "category": "图像LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
     "PaperCutOutStyle": {
@@ -1311,7 +1436,7 @@ LTX_MODELS = {
         "size_bytes": 124800000,
         "required": False,
         "desc": "纸雕剪纸风格 (层叠剪纸立体效果)",
-        "category": "LTX视频LoRA",
+        "category": "图像LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
     "Pixar_Toon": {
@@ -1320,7 +1445,7 @@ LTX_MODELS = {
         "size_bytes": 124800000,
         "required": False,
         "desc": "皮克斯卡通风格 (3D卡通渲染质感)",
-        "category": "LTX视频LoRA",
+        "category": "图像LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
     "Post_Apocalyptic": {
@@ -1329,7 +1454,7 @@ LTX_MODELS = {
         "size_bytes": 124800000,
         "required": False,
         "desc": "末世废土风格 (荒芜废墟，灰暗色调)",
-        "category": "LTX视频LoRA",
+        "category": "图像LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
     "Wild_West": {
@@ -1338,7 +1463,7 @@ LTX_MODELS = {
         "size_bytes": 124800000,
         "required": False,
         "desc": "西部荒野风格 (牛仔荒漠小镇，夕阳旷野)",
-        "category": "LTX视频LoRA",
+        "category": "图像LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
     "Z-Iamge-人像美学": {
@@ -1528,13 +1653,15 @@ LTX_MODELS = {
         "required": True,
         "desc": "Gemma 文本编码器 (本地文本编码必需，约23GB)",
         "is_folder": True,
-        "category": "文本编码器",
+        "category": "辅助模型",
         "modelscope_id": "Lightricks/gemma-3-12b-it-qat-q4_0-unquantized",
     },
 }
 
 _LORA_DESCRIPTIONS: dict[str, str] = {
     "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors": "视频迁移控制模型（视频迁移功能必需，支持深度/姿态/参考图控制）",
+    "ltx-2-19b-distilled-lora-384.safetensors": "Pro模式LoRA（视频生成Pro高质量模式必需，384步推理）",
+    "LTX2.3-22B_IC-LoRA-Cameraman_v1_10500.safetensors": "摄影师运镜LoRA（视频迁移-摄像机运镜控制，模拟专业摄影机运动）",
     "90sAnimationStyle.safetensors": "90年代经典动画风格（复古赛璐璐动画质感，触发词: 90s animation style, retro cartoon）",
     "Cinematic_sci-fi-cyberpunk.safetensors": "科幻赛博朋克电影风格（霓虹灯光、未来都市，触发词: sci-fi, cyberpunk, cinematic）",
     "Claymation.safetensors": "黏土动画风格（定格动画黏土质感，触发词: claymation, clay animation）",
@@ -1581,6 +1708,7 @@ def _get_lora_description(filename: str, is_lora: bool) -> str:
 _LORA_TRIGGER_WORDS: dict[str, list[str]] = {
     "ltx-2-19b-distilled-lora-384.safetensors": [],
     "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors": [],
+    "LTX2.3-22B_IC-LoRA-Cameraman_v1_10500.safetensors": [],
     "90sAnimationStyle.safetensors": ["90s animation style", "retro cartoon"],
     "Cinematic_sci-fi-cyberpunk.safetensors": ["sci-fi", "cyberpunk", "cinematic"],
     "Claymation.safetensors": ["claymation", "clay animation"],
@@ -1629,6 +1757,7 @@ _MODEL_EXAMPLES: dict[str, str] = {
     "ltx-2.3-spatial-upscaler-x2-1.0.safetensors": "（高清放大专用，配合视频生成使用）",
     "ltx-2-19b-distilled-lora-384.safetensors": "（Pro模式专用，提升视频生成质量）",
     "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors": "（视频迁移控制专用，支持深度/姿态/参考图）",
+    "LTX2.3-22B_IC-LoRA-Cameraman_v1_10500.safetensors": "A camera slowly zooming in, cameraman, tracking shot",
     "90sAnimationStyle.safetensors": "A girl walking in a park, 90s animation style, retro cartoon",
     "Cinematic_sci-fi-cyberpunk.safetensors": "A futuristic city at night, sci-fi, cyberpunk, cinematic, neon lights",
     "Claymation.safetensors": "A dog playing with a ball, claymation, clay animation, stop motion",
@@ -4676,6 +4805,11 @@ class MainWindow(QMainWindow):
             self._project_root = dev_dir
             self._exe_data_dir = os.path.join(dev_dir, "data")
             self._exe_temp_dir = os.path.join(dev_dir, "temp")
+
+            # 确保桌面有唯一的快捷方式（延迟执行，不阻塞启动）
+            entry_exe = os.path.join(dev_dir, f"{BRAND_NAME}.exe")
+            if os.path.isfile(entry_exe):
+                QTimer.singleShot(5000, lambda: _create_desktop_shortcut(entry_exe))
         else:
             self._app_dir = os.path.dirname(os.path.abspath(__file__))
             self._project_root = os.path.dirname(self._app_dir)
@@ -5653,22 +5787,28 @@ class MainWindow(QMainWindow):
 
         self._model_dir_combo.currentIndexChanged.connect(lambda: self._update_remove_dir_btn_state())
         self._populate_model_dir_combo()
+        # 启动时同步junction映射
+        self._sync_model_junctions()
 
-        # ── 主内容区：左侧分类筛选 + 右侧表格 ──
-        content_splitter = QHBoxLayout()
-        content_splitter.setSpacing(0)
+        # ── 主内容区：上方分类筛选 + 下方表格 ──
+        content_layout = QVBoxLayout()
+        content_layout.setSpacing(6)
 
-        # 左侧分类筛选栏
+        # 上方分类筛选栏（横向）
         self._model_category_list = QListWidget()
-        self._model_category_list.setFixedWidth(130)
+        self._model_category_list.setFlow(QListWidget.Flow.LeftToRight)
+        self._model_category_list.setWrapping(False)
+        self._model_category_list.setFixedHeight(38)
+        self._model_category_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._model_category_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._model_category_list.setStyleSheet("""
             QListWidget {
                 background-color: #1A1A1A; border: 1px solid #333333; border-radius: 6px;
-                padding: 4px; outline: none;
+                padding: 2px 4px; outline: none;
             }
             QListWidget::item {
-                padding: 8px 10px; border-radius: 4px; color: #AAAAAA; font-size: 11px;
-                margin: 1px 2px;
+                padding: 4px 12px; border-radius: 4px; color: #AAAAAA; font-size: 11px;
+                margin: 2px 3px;
             }
             QListWidget::item:selected {
                 background-color: #C62828; color: #FFFFFF; font-weight: bold;
@@ -5677,18 +5817,17 @@ class MainWindow(QMainWindow):
                 background-color: #252525; color: #FFFFFF;
             }
         """)
-        self._model_category_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._model_category_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
 
         categories = [
             ("全部模型", "all"),
-            ("基础模型", "基础模型"),
-            ("LoRA", "LoRA"),
+            ("视频模型", "视频模型"),
+            ("视频LoRA", "视频LoRA"),
+            ("图像模型", "图像模型"),
+            ("图像LoRA", "图像LoRA"),
             ("控制模型", "控制模型"),
             ("高清放大", "高清放大"),
-            ("文本编码器", "文本编码器"),
-            ("图像生成", "图像生成"),
-            ("语音合成", "语音合成"),
+            ("辅助模型", "辅助模型"),
         ]
         for name, key in categories:
             item = QListWidgetItem(name)
@@ -5697,26 +5836,25 @@ class MainWindow(QMainWindow):
         self._model_category_list.setCurrentRow(0)
         self._model_category_filter = "all"
         self._model_category_list.currentItemChanged.connect(self._on_model_category_changed)
-        content_splitter.addWidget(self._model_category_list)
+        content_layout.addWidget(self._model_category_list)
 
-        # 右侧：表格 + 详情面板
-        right_panel = QVBoxLayout()
-        right_panel.setSpacing(0)
-
+        # 表格
         self._model_table = QTableWidget()
         self._model_table.setColumnCount(8)
         self._model_table.setHorizontalHeaderLabels(["", "模型名称", "描述", "分类", "标签", "大小", "状态", "操作"])
         self._model_table.setStyleSheet("""
             QTableWidget { background-color: #111113; border: 1px solid #333333; border-radius: 6px; gridline-color: #222222; font-size: 12px; color: #DDDDDD; }
-            QTableWidget::item { padding: 4px 6px; border-bottom: 1px solid #222222; border: none; outline: none; }
-            QTableWidget::item:selected { background-color: transparent; color: inherit; border: none; outline: none; }
-            QTableWidget::item:focus { background-color: transparent; outline: none; border: none; }
+            QTableWidget::item { padding: 4px 6px; border-bottom: 1px solid #222222; border: none; outline: none; background: transparent; }
+            QTableWidget::item:hover { background-color: #2A2A2E; border: none; outline: none; }
+            QTableWidget::item:selected { background-color: #C62828; color: #FFFFFF; border: none; outline: none; }
+            QTableWidget::item:focus { background-color: #C62828; color: #FFFFFF; outline: none; border: none; }
             QHeaderView::section { background-color: #1A1A1A; color: #AAAAAA; border: none; border-bottom: 2px solid #333333; border-right: 1px solid #222222; padding: 6px 8px; font-size: 11px; font-weight: bold; }
             QHeaderView::section:hover { background-color: #252525; color: #FFFFFF; }
             QCheckBox { spacing: 4px; }
             QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #555555; border-radius: 3px; background-color: #252525; }
             QCheckBox::indicator:checked { background-color: #C62828; border-color: #E53935; }
             QCheckBox::indicator:hover { border-color: #888888; }
+            QLabel { background: transparent; }
         """)
         self._model_table.horizontalHeader().setSectionsMovable(False)
         self._model_table.horizontalHeader().setStretchLastSection(False)
@@ -5734,7 +5872,7 @@ class MainWindow(QMainWindow):
         self._model_table.setColumnWidth(4, 50)
         self._model_table.setColumnWidth(5, 65)
         self._model_table.setColumnWidth(6, 90)
-        self._model_table.setColumnWidth(7, 140)
+        self._model_table.setColumnWidth(7, 100)
         self._model_table.verticalHeader().setVisible(False)
         self._model_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._model_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -5759,24 +5897,9 @@ class MainWindow(QMainWindow):
         self._model_table.setHorizontalHeaderItem(0, QTableWidgetItem(""))
         self._model_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
 
-        right_panel.addWidget(self._model_table, 1)
+        content_layout.addWidget(self._model_table, 1)
 
-        # 详情面板（默认隐藏）
-        self._model_detail_panel = QFrame()
-        self._model_detail_panel.setObjectName("_model_detail")
-        self._model_detail_panel.setStyleSheet("""
-            QFrame { background-color: #1E1E1E; border: 1px solid #333333; border-radius: 6px; }
-            QLabel { background: transparent; }
-        """)
-        self._model_detail_layout = QHBoxLayout(self._model_detail_panel)
-        self._model_detail_layout.setContentsMargins(15, 10, 15, 10)
-        self._model_detail_layout.setSpacing(15)
-        self._model_detail_panel.setVisible(False)
-        right_panel.addWidget(self._model_detail_panel)
-
-        content_splitter.addLayout(right_panel, 1)
-
-        layout.addLayout(content_splitter, 1)
+        layout.addLayout(content_layout, 1)
 
         self._populate_model_table()
 
@@ -5849,165 +5972,195 @@ class MainWindow(QMainWindow):
             self._apply_model_sort_and_render()
 
     def _on_model_row_clicked(self, row, col):
-        """点击行展开/收起详情面板"""
-        if row < 0 or row >= len(self._model_rows):
-            self._model_detail_panel.setVisible(False)
-            self._model_detail_row = -1
+        """点击行展开/收起详情行"""
+        if row < 0:
             return
-        if self._model_detail_row == row:
-            # 再次点击同一行，收起详情
-            self._model_detail_panel.setVisible(False)
-            self._model_detail_row = -1
+
+        # 如果点击的是详情行本身，忽略
+        if self._model_table.item(row, 0) and self._model_table.item(row, 0).data(Qt.ItemDataRole.UserRole) == "detail":
             return
-        self._model_detail_row = row
-        r = self._model_rows[row]
-        self._show_model_detail(r)
 
-    def _show_model_detail(self, r):
-        """在详情面板中显示模型详细信息"""
-        # 清空旧内容
-        while self._model_detail_layout.count():
-            item = self._model_detail_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-            if item.layout():
-                while item.layout().count():
-                    child = item.layout().takeAt(0)
-                    if child.widget():
-                        child.widget().deleteLater()
+        # 收起旧的详情行
+        old_detail_row = getattr(self, '_model_detail_row', -1)
+        if old_detail_row >= 0:
+            self._collapse_detail_row(old_detail_row)
+            if old_detail_row == row:
+                self._model_detail_row = -1
+                return
+            # 如果旧行在当前行上方，行号已因删除而偏移
+            if old_detail_row < row:
+                row -= 1
 
-        # 左侧：模型图标
-        icon_label = QLabel()
+        self._model_detail_row = row + 1  # 详情行插在数据行下方
+        r = self._model_rows[row] if row < len(self._model_rows) else None
+        if r:
+            self._expand_detail_row(row + 1, r)
+
+    def _collapse_detail_row(self, detail_row):
+        """收起指定位置的详情行"""
+        if detail_row < 0 or detail_row >= self._model_table.rowCount():
+            return
+        item0 = self._model_table.item(detail_row, 0)
+        if item0 and item0.data(Qt.ItemDataRole.UserRole) == "detail":
+            self._model_table.removeRow(detail_row)
+
+    def _expand_detail_row(self, insert_row, r):
+        """在指定位置插入详情行"""
+        self._model_table.insertRow(insert_row)
+
+        # 标记为详情行
+        marker = QTableWidgetItem()
+        marker.setData(Qt.ItemDataRole.UserRole, "detail")
+        self._model_table.setItem(insert_row, 0, marker)
+
+        # 创建详情widget
+        detail_widget = QWidget()
+        detail_widget.setStyleSheet("background-color: #1A1A1A; border: none;")
+
+        detail_layout = QHBoxLayout(detail_widget)
+        detail_layout.setContentsMargins(20, 8, 16, 8)
+        detail_layout.setSpacing(12)
+
+        # 左侧图标
         icon_svg_map = {
-            "基础模型": b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#C62828" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M7 12h10M12 7v10"/></svg>',
-            "LoRA": b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#FF9800" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>',
-            "控制模型": b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#2196F3" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>',
-            "高清放大": b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#4CAF50" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>',
-            "文本编码器": b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#9C27B0" stroke-width="1.5"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>',
-            "图像生成": b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#E91E63" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
-            "语音合成": b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#00BCD4" stroke-width="1.5"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>',
+            "视频模型": b'<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#C62828" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M7 12h10M12 7v10"/></svg>',
+            "图像模型": b'<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#E91E63" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
+            "视频LoRA": b'<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#FF9800" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>',
+            "图像LoRA": b'<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#FF5722" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>',
+            "控制模型": b'<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#2196F3" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>',
+            "高清放大": b'<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#4CAF50" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>',
+            "辅助模型": b'<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9C27B0" stroke-width="1.5"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>',
         }
         category = r.get("category", "")
-        svg_data = icon_svg_map.get(category, icon_svg_map.get("基础模型"))
-        pm_icon = QPixmap(64, 64)
+        svg_data = icon_svg_map.get(category, icon_svg_map.get("视频模型"))
+        icon_label = QLabel()
+        pm_icon = QPixmap(48, 48)
         pm_icon.fill(QColor(0, 0, 0, 0))
         painter_icon = QPainter(pm_icon)
         painter_icon.setRenderHint(QPainter.RenderHint.Antialiasing)
         QSvgRenderer(svg_data).render(painter_icon)
         painter_icon.end()
         icon_label.setPixmap(pm_icon)
-        icon_label.setFixedSize(64, 64)
-        self._model_detail_layout.addWidget(icon_label)
+        icon_label.setFixedSize(48, 48)
+        detail_layout.addWidget(icon_label)
 
-        # 右侧：详细信息
+        # 右侧信息
         info_layout = QVBoxLayout()
-        info_layout.setSpacing(4)
+        info_layout.setSpacing(3)
 
         # 名称
         name_lbl = QLabel(r.get("name", ""))
-        name_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFFFFF; border: none;")
+        name_lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #FFFFFF; background: transparent; border: none;")
         info_layout.addWidget(name_lbl)
 
         # 描述
         desc = r.get("description", "")
         if desc:
-            desc_lbl = QLabel(desc)
+            desc_lbl = QLabel(f"模型介绍：{desc}")
             desc_lbl.setWordWrap(True)
-            desc_lbl.setStyleSheet("font-size: 11px; color: #CCCCCC; border: none;")
+            desc_lbl.setStyleSheet("font-size: 11px; color: #BBBBBB; background: transparent; border: none;")
             info_layout.addWidget(desc_lbl)
 
-        # 详细信息第一行：分类 + 标签
-        detail_row1 = QHBoxLayout()
-        detail_row1.setSpacing(12)
+        # 信息行：分类 | 标签 | 大小 | 状态
+        meta_row = QHBoxLayout()
+        meta_row.setSpacing(20)
 
         cat_lbl = QLabel(f"分类: {category}")
-        cat_lbl.setStyleSheet("font-size: 10px; color: #888888; border: none;")
-        detail_row1.addWidget(cat_lbl)
+        cat_lbl.setStyleSheet("font-size: 10px; color: #888888; background: transparent; border: none;")
+        meta_row.addWidget(cat_lbl)
 
         tag = r.get("tag", "")
         if tag:
             tag_lbl = QLabel(f"标签: {tag}")
             tag_color = "#E53935" if tag == "必需" else "#FF9800" if tag == "可选" else "#888888"
-            tag_lbl.setStyleSheet(f"font-size: 10px; color: {tag_color}; border: none; font-weight: bold;")
-            detail_row1.addWidget(tag_lbl)
-
-        detail_row1.addStretch()
-        info_layout.addLayout(detail_row1)
-
-        # 详细信息第二行：大小 + 状态
-        detail_row2 = QHBoxLayout()
-        detail_row2.setSpacing(12)
+            tag_lbl.setStyleSheet(f"font-size: 10px; color: {tag_color}; background: transparent; border: none; font-weight: bold;")
+            meta_row.addWidget(tag_lbl)
 
         size_gb = r.get("size_gb", 0)
         if size_gb > 0:
             size_lbl = QLabel(f"大小: {size_gb:.1f} GB")
-            size_lbl.setStyleSheet("font-size: 10px; color: #888888; border: none;")
-            detail_row2.addWidget(size_lbl)
+            size_lbl.setStyleSheet("font-size: 10px; color: #888888; background: transparent; border: none;")
+            meta_row.addWidget(size_lbl)
 
         status = r.get("status", "")
         status_color = r.get("status_color", "#DDDDDD")
         status_lbl = QLabel(f"状态: {status}")
-        status_lbl.setStyleSheet(f"font-size: 10px; color: {status_color}; border: none; font-weight: bold;")
-        detail_row2.addWidget(status_lbl)
+        status_lbl.setStyleSheet(f"font-size: 10px; color: {status_color}; background: transparent; border: none; font-weight: bold;")
+        meta_row.addWidget(status_lbl)
 
-        detail_row2.addStretch()
-        info_layout.addLayout(detail_row2)
+        meta_row.addStretch()
+        info_layout.addLayout(meta_row)
 
         # 触发词
         tw = r.get("trigger_words", "")
         if tw:
             tw_lbl = QLabel(f"触发词: {tw}")
             tw_lbl.setWordWrap(True)
-            tw_lbl.setStyleSheet("font-size: 10px; color: #42A5F5; border: none;")
+            tw_lbl.setStyleSheet("font-size: 10px; color: #42A5F5; background: transparent; border: none;")
             info_layout.addWidget(tw_lbl)
 
-        # 示例提示词（如果有）
+        # 示例提示词
         example = _MODEL_EXAMPLES.get(r.get("filename", "") or r.get("name", ""), "")
         if example:
-            ex_lbl = QLabel(f"示例提示词: {example}")
+            ex_lbl = QLabel(f"示例: {example}")
             ex_lbl.setWordWrap(True)
-            ex_lbl.setStyleSheet("font-size: 10px; color: #66BB6A; border: none;")
+            ex_lbl.setStyleSheet("font-size: 10px; color: #66BB6A; background: transparent; border: none;")
             info_layout.addWidget(ex_lbl)
 
-        # 仓库信息
+        # 来源
         repo = r.get("repo_id", "")
         if repo:
             repo_lbl = QLabel(f"来源: {repo}")
-            repo_lbl.setStyleSheet("font-size: 10px; color: #666666; border: none;")
+            repo_lbl.setStyleSheet("font-size: 10px; color: #666666; background: transparent; border: none;")
             info_layout.addWidget(repo_lbl)
 
-        info_layout.addStretch()
-        self._model_detail_layout.addLayout(info_layout, 1)
+        detail_layout.addLayout(info_layout, 1)
 
-        # 关闭按钮
-        close_btn = QPushButton(" 收起")
-        close_icon_svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#888888" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>'
+        # 收起按钮
+        close_up_svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#AAAAAA" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>'
         pm_close = QPixmap(12, 12)
         pm_close.fill(QColor(0, 0, 0, 0))
         painter_close = QPainter(pm_close)
-        QSvgRenderer(close_icon_svg).render(painter_close)
+        QSvgRenderer(close_up_svg).render(painter_close)
         painter_close.end()
+        close_btn = QPushButton(" 收起")
         close_btn.setIcon(QIcon(pm_close))
-        close_btn.setFixedSize(60, 28)
+        close_btn.setFixedSize(72, 28)
         close_btn.setStyleSheet("""
-            QPushButton { background-color: #333333; color: #AAAAAA; border: 1px solid #444444; border-radius: 4px; font-size: 10px; }
+            QPushButton { background-color: #333333; color: #AAAAAA; border: 1px solid #444444; border-radius: 4px; font-size: 9px; }
             QPushButton:hover { background-color: #444444; color: #FFFFFF; }
         """)
-        close_btn.clicked.connect(lambda: (self._model_detail_panel.setVisible(False), setattr(self, '_model_detail_row', -1)))
-        self._model_detail_layout.addWidget(close_btn)
+        close_btn.clicked.connect(lambda: self._collapse_detail_row(getattr(self, '_model_detail_row', -1)) or setattr(self, '_model_detail_row', -1))
+        detail_layout.addWidget(close_btn)
 
-        self._model_detail_panel.setVisible(True)
+        # 设置详情widget到表格
+        self._model_table.setCellWidget(insert_row, 0, detail_widget)
+        # 合并所有列
+        self._model_table.setSpan(insert_row, 0, 1, self._model_table.columnCount())
+        self._model_table.setRowHeight(insert_row, detail_widget.sizeHint().height() + 16 if detail_widget.sizeHint().height() > 50 else 120)
 
     def _classify_model(self, model_id, info):
         fname = info.get("file", "").lower()
-        if "lora" in fname:
-            return "LoRA"
+        category = info.get("category", "")
+        # 优先使用 LTX_MODELS 中已定义的 category
+        if category and category != "其他":
+            return category
+        # 回退：根据文件名推断
         if "upscaler" in fname:
             return "高清放大"
+        if "ic-lora-union" in fname:
+            return "控制模型"
+        if "lora" in fname:
+            # 区分视频LoRA和图像LoRA
+            if "z-image" in fname or "zimage" in fname or "zib-" in fname or "zit-" in fname:
+                return "图像LoRA"
+            return "视频LoRA"
         if "text-encoder" in model_id or "gemma" in fname:
-            return "文本编码器"
+            return "辅助模型"
+        if "z-image" in fname or "zimage" in fname:
+            return "图像模型"
         if "distilled" in fname or "dev" in fname:
-            return "基础模型"
+            return "视频模型"
         return "其他"
 
     def _infer_tag(self, dir_path):
@@ -6018,14 +6171,16 @@ class MainWindow(QMainWindow):
             if safetensors_files:
                 first_file = safetensors_files[0].lower()
                 if 'lora' in first_file:
-                    return "LoRA"
+                    if 'z-image' in first_file or 'zimage' in first_file:
+                        return "图像LoRA"
+                    return "视频LoRA"
                 if 'upscaler' in first_file:
                     return "高清放大"
-                if 'control' in first_file or 'ic-lora' in first_file:
-                    return "Control"
+                if 'control' in first_file or 'ic-lora-union' in first_file:
+                    return "控制模型"
         tag_map = {
-            "lora": "LoRA", "control": "Control", "upscaler": "高清放大",
-            "text-encoder": "文本编码器", "text_encoder": "文本编码器",
+            "lora": "LoRA", "control": "控制模型", "upscaler": "高清放大",
+            "text-encoder": "辅助模型", "text_encoder": "辅助模型",
             "vae": "VAE", "unet": "UNet", "style": "风格LoRA",
             "character": "人物LoRA", "人物": "人物LoRA", "风格": "风格LoRA",
         }
@@ -6067,10 +6222,36 @@ class MainWindow(QMainWindow):
                 continue
             seen_filenames.add(fname)
 
-            category = "基础模型" if "distilled" in fname or "dev" in fname else \
-                       "高清放大" if "upscaler" in fname else \
-                       "文本编码器" if "gemma" in fname or "text-encoder" in rm.get("model_id", "") else \
-                       "控制模型" if "ic-lora" in fname else "其他"
+            # 使用后端的 model_category 字段映射到前端分类
+            mc = rm.get("model_category", "")
+            if mc == "checkpoint":
+                fname_lower = fname.lower()
+                if "z-image" in fname_lower or "zimage" in fname_lower:
+                    category = "图像模型"
+                else:
+                    category = "视频模型"
+            elif mc == "lora":
+                fname_lower = fname.lower()
+                if "ic-lora-union" in fname_lower:
+                    category = "控制模型"
+                elif "z-image" in fname_lower or "zimage" in fname_lower or "zib-" in fname_lower or "zit-" in fname_lower:
+                    category = "图像LoRA"
+                else:
+                    category = "视频LoRA"
+            elif mc == "upscaler":
+                category = "高清放大"
+            elif mc == "supporting":
+                if "text-encoder" in rm.get("model_id", "") or "gemma" in fname.lower():
+                    category = "辅助模型"
+                elif "z-image" in fname.lower() or "zimage" in fname.lower():
+                    category = "图像模型"
+                elif "tts" in fname.lower() or "voxcpm" in fname.lower():
+                    category = "辅助模型"
+                else:
+                    category = "辅助模型"
+            else:
+                # 回退：根据文件名推断
+                category = self._classify_model("", {"file": fname, "model_id": rm.get("model_id", "")})
 
             tag_text = "必需" if rm.get("tags") and "recommended" in rm.get("tags", []) else "可选"
             size_gb = rm.get("size_gb", 0)
@@ -6099,20 +6280,30 @@ class MainWindow(QMainWindow):
             })
 
         for path_str, lm in local_files_map.items():
-            fname = lm.get("name", "")
-            if fname in seen_filenames:
+            lfn = lm.get("filename", "") or lm.get("name", "")
+            if lfn in seen_filenames:
                 continue
-            seen_filenames.add(fname)
+            seen_filenames.add(lfn)
 
             model_type = lm.get("model_type", "checkpoint")
-            cat_text = "LoRA" if model_type == "lora" else "基础模型"
+            fname_lower = lfn.lower()
+            if model_type == "lora":
+                if "z-image" in fname_lower or "zimage" in fname_lower or "zib-" in fname_lower or "zit-" in fname_lower:
+                    cat_text = "图像LoRA"
+                else:
+                    cat_text = "视频LoRA"
+            elif "z-image" in fname_lower or "zimage" in fname_lower:
+                cat_text = "图像模型"
+            else:
+                cat_text = "视频模型"
             size_bytes = lm.get("size_bytes", 0)
             size_gb = size_bytes / 1024 / 1024 / 1024 if size_bytes else 0
-            desc = _get_lora_description(fname, model_type == "lora")
-            tw = _get_lora_trigger_words(fname)
+            display_name = lm.get("name", lfn)
+            desc = _get_lora_description(lfn, model_type == "lora")
+            tw = _get_lora_trigger_words(lfn)
 
             self._model_rows.append({
-                "name": fname,
+                "name": display_name,
                 "description": desc,
                 "trigger_words": tw,
                 "category": cat_text,
@@ -6143,6 +6334,16 @@ class MainWindow(QMainWindow):
         self._model_checkboxes = {}
         self._model_rows = []
         seen_filenames = set()
+
+        # junction映射使自定义目录的文件在主模型目录下可见
+        # 递归扫描主模型目录构建文件索引
+        file_index = {}
+        if self._models_dir and os.path.isdir(self._models_dir):
+            for dirpath, _dirnames, filenames in os.walk(self._models_dir):
+                for fn in filenames:
+                    if fn not in file_index:
+                        file_index[fn] = os.path.join(dirpath, fn)
+
         for model_id, info in LTX_MODELS.items():
             fname = info.get("file", "")
             if fname in seen_filenames:
@@ -6153,8 +6354,13 @@ class MainWindow(QMainWindow):
             tag = "必需" if info.get("required") else "可选"
             size_gb = info["size_bytes"] / 1024 / 1024 / 1024
 
-            model_path = os.path.join(self._models_dir, info["file"])
+            # 先检查顶层，再查递归索引
+            model_path = os.path.join(self._models_dir, info["file"]) if self._models_dir else ""
             exists = os.path.exists(model_path)
+            if not exists and fname in file_index:
+                model_path = file_index[fname]
+                exists = True
+
             expected_bytes = info["size_bytes"]
             if info.get("is_folder", False):
                 if exists and os.path.isdir(model_path):
@@ -6225,7 +6431,16 @@ class MainWindow(QMainWindow):
                     except OSError:
                         fsize = 0
                     is_lora = "lora" in fn.lower() or "lora" in dirpath.lower()
-                    cat_text = "LoRA" if is_lora else "基础模型"
+                    fn_lower = fn.lower()
+                    if is_lora:
+                        if "z-image" in fn_lower or "zimage" in fn_lower or "zib-" in fn_lower or "zit-" in fn_lower:
+                            cat_text = "图像LoRA"
+                        else:
+                            cat_text = "视频LoRA"
+                    elif "z-image" in fn_lower or "zimage" in fn_lower:
+                        cat_text = "图像模型"
+                    else:
+                        cat_text = "视频模型"
                     size_gb = fsize / 1024 / 1024 / 1024 if fsize else 0
                     desc = _get_lora_description(fn, is_lora)
                     tw = _get_lora_trigger_words(fn)
@@ -6310,6 +6525,7 @@ class MainWindow(QMainWindow):
 
     def _render_model_table(self):
         self._stop_download_progress_timer()
+        self._model_detail_row = -1  # 重置详情行
         self._model_table.setRowCount(0)
         self._model_checkboxes = {}
         if not hasattr(self, '_model_rows'):
@@ -6335,6 +6551,7 @@ class MainWindow(QMainWindow):
 
             cb = QCheckBox()
             cb_widget = QWidget()
+            cb_widget.setStyleSheet("background: transparent;")
             cb_layout = QHBoxLayout(cb_widget)
             cb_layout.addWidget(cb)
             cb_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -6373,6 +6590,7 @@ class MainWindow(QMainWindow):
             self._model_table.setItem(row, 6, status_item)
 
             ops_widget = QWidget()
+            ops_widget.setStyleSheet("background: transparent;")
             ops_layout = QHBoxLayout(ops_widget)
             ops_layout.setContentsMargins(4, 2, 4, 2)
             ops_layout.setSpacing(4)
@@ -6383,7 +6601,7 @@ class MainWindow(QMainWindow):
             if source in ("registry", "fallback"):
                 if not downloaded:
                     dl_btn = QPushButton("📥 下载")
-                    dl_btn.setStyleSheet("QPushButton { background-color: #C62828; color: white; border: none; border-radius: 3px; padding: 3px 8px; font-size: 10px; } QPushButton:hover { background-color: #E53935; } QPushButton:pressed { background-color: #B71C1C; }")
+                    dl_btn.setStyleSheet("QPushButton { background-color: #2E7D32; color: white; border: none; border-radius: 3px; padding: 3px 8px; font-size: 10px; } QPushButton:hover { background-color: #388E3C; } QPushButton:pressed { background-color: #1B5E20; }")
                     dl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
                     dl_btn.clicked.connect(lambda checked, m=mid: self._download_model(m))
                     ops_layout.addWidget(dl_btn)
@@ -6413,6 +6631,11 @@ class MainWindow(QMainWindow):
             self._start_download_progress_timer()
 
     def _on_model_row_hover(self, row, col):
+        # 跳过详情行
+        if row >= 0:
+            item0 = self._model_table.item(row, 0)
+            if item0 and item0.data(Qt.ItemDataRole.UserRole) == "detail":
+                return
         if row == self._hover_row:
             return
         old = self._hover_row
@@ -6424,19 +6647,10 @@ class MainWindow(QMainWindow):
                 item = self._model_table.item(old, c)
                 if item:
                     item.setBackground(clear_bg)
-                w = self._model_table.cellWidget(old, c)
-                if w:
-                    w.setAutoFillBackground(False)
             if row >= 0:
                 item = self._model_table.item(row, c)
                 if item:
                     item.setBackground(hover_bg)
-                w = self._model_table.cellWidget(row, c)
-                if w:
-                    w.setAutoFillBackground(True)
-                    pal = w.palette()
-                    pal.setColor(w.backgroundRole(), hover_bg)
-                    w.setPalette(pal)
 
     def eventFilter(self, obj, event):
         if obj is getattr(self, '_model_table', None):
@@ -6448,9 +6662,6 @@ class MainWindow(QMainWindow):
                         item = self._model_table.item(old, c)
                         if item:
                             item.setBackground(QColor("transparent"))
-                        w = self._model_table.cellWidget(old, c)
-                        if w:
-                            w.setAutoFillBackground(False)
         return super().eventFilter(obj, event)
 
     def _delete_local_model_file(self, file_path):
@@ -6652,6 +6863,143 @@ class MainWindow(QMainWindow):
         self.config.set("model_dirs", dirs_config)
         self.config.save()
 
+    # ── Junction映射：将自定义模型目录映射到主模型目录下 ──
+
+    def _get_junction_name(self, source_dir):
+        """根据源目录路径生成junction名称，避免冲突"""
+        base = os.path.basename(source_dir.rstrip("\\/"))
+        if not base:
+            base = "custom"
+        name = base
+        idx = 2
+        while os.path.exists(os.path.join(self._models_dir, name)):
+            # 如果已存在同名junction且指向同一目录，直接用
+            existing = os.path.join(self._models_dir, name)
+            try:
+                target = os.readlink(existing) if os.path.islink(existing) else ""
+                if not target:
+                    # 可能是junction，用Windows API检查
+                    import ctypes
+                    buf = ctypes.create_unicode_buffer(260)
+                    ctypes.windll.kernel32.GetFinalPathNameByHandleW
+                    # 简单方式：检查是否是reparse point
+                    attrs = ctypes.windll.kernel32.GetFileAttributesW(str(existing))
+                    if attrs != 0xFFFFFFFF and (attrs & 0x400):
+                        # 是junction/reparse point，检查目标
+                        try:
+                            real = os.path.realpath(existing)
+                            if os.path.normpath(real) == os.path.normpath(source_dir):
+                                return name
+                        except Exception:
+                            pass
+                elif os.path.normpath(target) == os.path.normpath(source_dir):
+                    return name
+            except Exception:
+                pass
+            name = f"{base}_{idx}"
+            idx += 1
+        return name
+
+    def _create_model_junction(self, source_dir):
+        """在主模型目录下创建junction映射到source_dir"""
+        if not self._models_dir or not os.path.isdir(self._models_dir):
+            return False
+        if not os.path.isdir(source_dir):
+            return False
+        # 如果源目录已经在主模型目录下，不需要映射
+        try:
+            if os.path.normpath(source_dir).startswith(os.path.normpath(self._models_dir)):
+                return True
+        except Exception:
+            pass
+        junction_name = self._get_junction_name(source_dir)
+        junction_path = os.path.join(self._models_dir, junction_name)
+        # 如果junction已存在且指向正确目标，跳过
+        if os.path.exists(junction_path):
+            try:
+                real = os.path.realpath(junction_path)
+                if os.path.normpath(real) == os.path.normpath(source_dir):
+                    return True
+            except Exception:
+                pass
+            # 已存在但不指向正确目标，先删除
+            try:
+                os.rmdir(junction_path)
+            except Exception:
+                return False
+        # 创建junction：用引号包裹路径避免中文/空格编码问题
+        try:
+            import subprocess
+            cmd_str = f'mklink /J "{junction_path}" "{source_dir}"'
+            result = subprocess.run(
+                cmd_str,
+                capture_output=True, timeout=10,
+                shell=True
+            )
+            if result.returncode == 0:
+                self._log(f"  已创建映射: {junction_name} → {source_dir}", "ok")
+                return True
+            else:
+                err_msg = result.stderr.decode('gbk', errors='replace').strip() if result.stderr else f"返回码{result.returncode}"
+                self._log(f"  映射创建失败: {err_msg}", "warn")
+                return False
+        except Exception as e:
+            self._log(f"  映射创建异常: {e}", "warn")
+            return False
+
+    def _remove_model_junction(self, source_dir):
+        """移除主模型目录下指向source_dir的junction"""
+        if not self._models_dir or not os.path.isdir(self._models_dir):
+            return
+        try:
+            for entry in os.listdir(self._models_dir):
+                entry_path = os.path.join(self._models_dir, entry)
+                # 检查是否是junction/reparse point
+                import ctypes
+                attrs = ctypes.windll.kernel32.GetFileAttributesW(str(entry_path))
+                if attrs != 0xFFFFFFFF and (attrs & 0x400):
+                    # 是junction，检查目标
+                    try:
+                        real = os.path.realpath(entry_path)
+                        if os.path.normpath(real) == os.path.normpath(source_dir):
+                            os.rmdir(entry_path)
+                            self._log(f"  已移除映射: {entry}", "ok")
+                            return
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    def _sync_model_junctions(self):
+        """启动时同步junction映射：确保配置中的自定义目录都有映射"""
+        if not self._models_dir or not os.path.isdir(self._models_dir):
+            return
+        dirs_config = self.config.get("model_dirs", [])
+        for d in dirs_config:
+            path = d.get("path", "")
+            if path and os.path.isdir(path) and path != self._models_dir:
+                self._create_model_junction(path)
+        # 清理指向不存在目录的junction
+        try:
+            import ctypes
+            for entry in os.listdir(self._models_dir):
+                entry_path = os.path.join(self._models_dir, entry)
+                attrs = ctypes.windll.kernel32.GetFileAttributesW(str(entry_path))
+                if attrs != 0xFFFFFFFF and (attrs & 0x400):
+                    # 是junction，检查目标是否还存在
+                    try:
+                        real = os.path.realpath(entry_path)
+                        if not os.path.isdir(real):
+                            os.rmdir(entry_path)
+                            self._log(f"  已清理失效映射: {entry}", "ok")
+                    except Exception:
+                        try:
+                            os.rmdir(entry_path)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
     def _remove_selected_model_dir(self):
         if not hasattr(self, '_model_dir_combo'):
             return
@@ -6665,11 +7013,15 @@ class MainWindow(QMainWindow):
             self._log("⚠ 系统默认目录不可移除", "warn")
             return
         removed = dirs_config.pop(idx)
+        removed_path = removed.get("path", "")
         self._save_model_dirs(dirs_config)
+        # 移除对应的junction映射
+        if removed_path:
+            self._remove_model_junction(removed_path)
         self._populate_model_dir_combo()
         self._notify_backend_dirs_changed()
         self._refresh_model_status()
-        self._log(f"√ 已移除目录: {removed.get('path', '')}", "ok")
+        self._log(f"√ 已移除目录: {removed_path}", "ok")
 
     def _add_model_dir(self):
         dir_path = QFileDialog.getExistingDirectory(self, "选择模型目录")
@@ -6682,6 +7034,8 @@ class MainWindow(QMainWindow):
             dirs_config = [{"path": self._models_dir, "label": "默认"}]
         dirs_config.append({"path": dir_path, "label": label})
         self._save_model_dirs(dirs_config)
+        # 创建junction映射到主模型目录
+        self._create_model_junction(dir_path)
         self._populate_model_dir_combo()
         self._notify_backend_dirs_changed()
         self._refresh_model_status()
@@ -7068,11 +7422,11 @@ class MainWindow(QMainWindow):
         git_title.setStyleSheet("font-size: 9pt; font-weight: bold; color: #42A5F5; border: none;")
         git_header_layout.addWidget(git_title)
         git_header_layout.addStretch()
-        refresh_btn = QPushButton("🔄 刷新历史")
-        refresh_btn.setFixedSize(70, 24)
+        refresh_btn = QPushButton("🔄 刷新")
+        refresh_btn.setFixedSize(68, 28)
         refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         refresh_btn.setStyleSheet(
-            "QPushButton { background-color: #2a2a2a; color: #aaa; border: none; border-radius: 4px; font-size: 9pt; }"
+            "QPushButton { background-color: #2a2a2a; color: #aaa; border: none; border-radius: 4px; font-size: 8pt; padding: 2px 4px; }"
             "QPushButton:hover { background-color: #3a3a3a; }"
         )
         refresh_btn.clicked.connect(self._refresh_git_history)
@@ -7353,6 +7707,7 @@ class MainWindow(QMainWindow):
             message = commit.get("message", "")
             author = commit.get("author", "")
             date_str = commit.get("date", commit.get("time", ""))
+            version_tag = commit.get("version", "")
             if date_str and "T" in date_str:
                 date_str = date_str.split("T")[0]
             current_commit = self._get_current_commit()
@@ -7379,13 +7734,17 @@ class MainWindow(QMainWindow):
             sha_label = QLabel(sha)
             sha_label.setStyleSheet(f"font-family: Consolas; font-size: 9pt; font-weight: bold; color: {sha_color}; border: none;")
             header_layout.addWidget(sha_label)
+            if version_tag:
+                ver_label = QLabel(f"v{version_tag}")
+                ver_label.setStyleSheet("font-size: 8pt; color: #FF9800; border: none; font-weight: bold; padding: 1px 4px; background-color: #2a1f00; border-radius: 3px;")
+                header_layout.addWidget(ver_label)
             if date_str:
                 dt_label = QLabel(date_str)
                 dt_label.setStyleSheet("font-family: Consolas; font-size: 9pt; color: #666; border: none;")
                 header_layout.addWidget(dt_label)
             header_layout.addStretch()
             msg_first_line = message.split("\n")[0] if message else ""
-            if len(msg_first_line) > 40:
+            if not expanded and len(msg_first_line) > 40:
                 msg_first_line = msg_first_line[:37] + "..."
             msg_label = QLabel(msg_first_line)
             msg_label.setWordWrap(True)
@@ -7405,16 +7764,50 @@ class MainWindow(QMainWindow):
                 detail.setObjectName("_detail")
                 detail.setStyleSheet(f"background-color: {card_bg}; border: none;")
                 detail_layout = QVBoxLayout(detail)
-                detail_layout.setContentsMargins(10, 0, 10, 6)
+                detail_layout.setContentsMargins(10, 2, 10, 6)
                 detail_layout.setSpacing(2)
-                msg_lines = message.split("\n") if message else []
-                for line in msg_lines[1:]:
-                    line = line.strip()
-                    if line:
-                        lbl = QLabel(f"· {line}")
-                        lbl.setWordWrap(True)
-                        lbl.setStyleSheet("font-size: 8pt; color: #777; border: none;")
-                        detail_layout.addWidget(lbl)
+                # 显示完整commit信息
+                if message:
+                    msg_lines = message.split("\n")
+                    has_rich_info = version_tag and len(msg_lines) > 1
+                    if has_rich_info:
+                        # 有versions.json丰富描述时，第一行是版本标题，后续是变更列表
+                        title_lbl = QLabel(msg_lines[0])
+                        title_lbl.setWordWrap(True)
+                        title_lbl.setStyleSheet("font-size: 8pt; color: #FF9800; border: none; font-weight: bold;")
+                        detail_layout.addWidget(title_lbl)
+                        for line in msg_lines[1:]:
+                            line = line.strip()
+                            if line:
+                                lbl = QLabel(line)
+                                lbl.setWordWrap(True)
+                                lbl.setStyleSheet("font-size: 8pt; color: #999; border: none;")
+                                detail_layout.addWidget(lbl)
+                    else:
+                        # 普通git commit，显示完整信息
+                        full_msg = QLabel(msg_lines[0])
+                        full_msg.setWordWrap(True)
+                        full_msg.setStyleSheet("font-size: 8pt; color: #bbb; border: none;")
+                        detail_layout.addWidget(full_msg)
+                        for line in msg_lines[1:]:
+                            line = line.strip()
+                            if line:
+                                lbl = QLabel(f"· {line}")
+                                lbl.setWordWrap(True)
+                                lbl.setStyleSheet("font-size: 8pt; color: #777; border: none;")
+                                detail_layout.addWidget(lbl)
+                # 显示完整sha
+                full_sha = commit.get("sha", commit.get("hash", ""))
+                if full_sha and len(full_sha) > 8:
+                    sha_detail = QLabel(f"完整哈希: {full_sha}")
+                    sha_detail.setStyleSheet("font-size: 8pt; color: #555; border: none; font-family: Consolas;")
+                    detail_layout.addWidget(sha_detail)
+                # 显示完整日期
+                full_date = commit.get("date", commit.get("time", ""))
+                if full_date:
+                    date_detail = QLabel(f"时间: {full_date}")
+                    date_detail.setStyleSheet("font-size: 8pt; color: #555; border: none;")
+                    detail_layout.addWidget(date_detail)
                 card_layout.addWidget(detail)
             commit_data = commit
             card.clicked_data = commit_data
@@ -7904,14 +8297,40 @@ class MainWindow(QMainWindow):
     def _get_git_history(self, limit=30):
         if not self._is_git_repo():
             return []
-        r = self._run_git("log", f"-{limit}", "--oneline", "--format=%h|%s|%an|%ar", timeout=30)
+        r = self._run_git("log", f"-{limit}", "--format=%h|%s|%an|%ai", timeout=30)
         if not r["ok"]:
             return []
+        # 加载versions.json用于丰富提交描述
+        ver_map = {}
+        try:
+            vpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "versions.json")
+            if os.path.exists(vpath):
+                with open(vpath, "r", encoding="utf-8") as f:
+                    vdata = json.load(f)
+                for v in vdata:
+                    ver_map[v.get("version", "")] = v
+        except Exception:
+            pass
         commits = []
         for line in r["stdout"].splitlines():
             parts = line.strip().split("|", 3)
             if len(parts) >= 4:
-                commits.append({"sha": parts[0], "hash": parts[0], "message": parts[1], "author": parts[2], "date": parts[3], "time": parts[3]})
+                commit = {"sha": parts[0], "hash": parts[0], "message": parts[1], "author": parts[2], "date": parts[3], "time": parts[3]}
+                # 尝试匹配versions.json中的版本描述
+                commit_date = parts[3][:10] if parts[3] else ""  # YYYY-MM-DD
+                for ver, vinfo in ver_map.items():
+                    vdate = vinfo.get("date", "")
+                    vmsg = vinfo.get("message", "")
+                    # 通过日期匹配：git commit日期与版本日期相同，且commit message包含版本关键信息
+                    if vdate and commit_date and vdate == commit_date:
+                        # 用versions.json的丰富描述替换简短的git message
+                        changes = vinfo.get("changes", [])
+                        if changes:
+                            rich_msg = vmsg + "\n" + "\n".join(f"· {c}" for c in changes)
+                            commit["message"] = rich_msg
+                            commit["version"] = ver
+                        break
+                commits.append(commit)
         return commits
 
     def _list_stable_exes(self):
@@ -8045,7 +8464,24 @@ class MainWindow(QMainWindow):
         if not download_url:
             download_url = source.get("download_url_tpl", "").format(filename=filename or "", version=version or "")
         release_page = f"https://github.com/yunjii-cn/vi/releases/tag/v{version}" if version else "https://github.com/yunjii-cn/vi/releases"
-        gitee_release_page = f"https://gitee.com/yunjii/vi/releases/tag/v{version}" if version else "https://gitee.com/yunjii/vi/releases"
+
+        # 尝试应用内下载到 ver/ 目录
+        if download_url and version:
+            ver_dir = os.path.join(self._project_root, "ver") if self._project_root else ""
+            if ver_dir:
+                os.makedirs(ver_dir, exist_ok=True)
+                target_filename = filename if filename else f"{APP_NAME}-v{version}.exe"
+                target_path = os.path.join(ver_dir, target_filename)
+                # 如果已存在则直接切换
+                if os.path.isfile(target_path):
+                    self._log(f"✓ 版本 v{version} 已下载，正在切换...", "ok")
+                    self._switch_to_exe(target_path)
+                    return
+                # 应用内下载
+                self._download_exe_to_ver(download_url, target_path, version, release_page)
+                return
+
+        # 回退：浏览器下载
         try:
             import webbrowser
             if download_url:
@@ -8058,6 +8494,131 @@ class MainWindow(QMainWindow):
                 webbrowser.open(release_page)
             except Exception as e2:
                 self._log(f"× 无法打开下载链接: {e2}", "err")
+
+    def _download_exe_to_ver(self, url, target_path, version, fallback_page):
+        """应用内下载EXE到ver/目录，下载完成后自动切换"""
+        self._log(f"⬇ 正在下载 v{version}...", "info")
+
+        # 创建下载进度对话框
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"下载 v{version}")
+        dlg.setFixedSize(420, 140)
+        dlg.setStyleSheet("QDialog { background-color: #1A1A1A; }")
+        dlg_layout = QVBoxLayout(dlg)
+        dlg_layout.setContentsMargins(16, 12, 16, 12)
+        dlg_layout.setSpacing(8)
+
+        status_label = QLabel(f"正在下载 v{version}...")
+        status_label.setStyleSheet("font-size: 11px; color: #DDDDDD; background: transparent; border: none;")
+        dlg_layout.addWidget(status_label)
+
+        progress = QProgressBar()
+        progress.setRange(0, 100)
+        progress.setValue(0)
+        progress.setStyleSheet("""
+            QProgressBar { background-color: #222222; border: 1px solid #333333; border-radius: 4px; height: 20px; text-align: center; color: #FFFFFF; font-size: 10px; }
+            QProgressBar::chunk { background-color: #C62828; border-radius: 3px; }
+        """)
+        dlg_layout.addWidget(progress)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        cancel_btn = QPushButton("取消")
+        cancel_btn.setStyleSheet("QPushButton { background-color: #333; color: #aaa; border: 1px solid #444; border-radius: 4px; padding: 4px 16px; font-size: 10px; } QPushButton:hover { background-color: #444; color: #fff; }")
+        btn_row.addWidget(cancel_btn)
+        dlg_layout.addLayout(btn_row)
+
+        # 下载状态
+        download_state = {"cancelled": False, "done": False}
+
+        def on_cancel():
+            download_state["cancelled"] = True
+            dlg.reject()
+
+        cancel_btn.clicked.connect(on_cancel)
+
+        dlg.show()
+        QApplication.processEvents()
+
+        # 执行下载
+        import urllib.request
+        tmp_path = target_path + ".downloading"
+
+        def do_download():
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                resp = urllib.request.urlopen(req, timeout=60)
+                total = int(resp.headers.get("Content-Length", 0))
+                downloaded = 0
+                block_size = 65536
+                with open(tmp_path, "wb") as f:
+                    while True:
+                        if download_state["cancelled"]:
+                            break
+                        chunk = resp.read(block_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total > 0:
+                            pct = int(downloaded * 100 / total)
+                            QTimer.singleShot(0, lambda p=pct: progress.setValue(p))
+                            if downloaded % (1024 * 1024) < block_size:
+                                mb = downloaded / (1024 * 1024)
+                                total_mb = total / (1024 * 1024)
+                                QTimer.singleShot(0, lambda m=mb, t=total_mb: status_label.setText(f"正在下载 v{version}... {m:.1f}/{t:.1f} MB"))
+                                QApplication.processEvents()
+
+                if download_state["cancelled"]:
+                    if os.path.isfile(tmp_path):
+                        os.remove(tmp_path)
+                    return
+
+                # 下载完成
+                if os.path.isfile(tmp_path) and os.path.getsize(tmp_path) > 1024 * 1024:
+                    os.replace(tmp_path, target_path)
+                    download_state["done"] = True
+                    QTimer.singleShot(0, lambda: status_label.setText(f"✓ v{version} 下载完成！"))
+                    QTimer.singleShot(0, lambda: progress.setValue(100))
+                    QApplication.processEvents()
+                    import time
+                    time.sleep(0.5)
+                    dlg.accept()
+                    self._log(f"✓ v{version} 下载完成，已保存到 ver/ 目录", "ok")
+                    # 自动切换
+                    QTimer.singleShot(500, lambda: self._switch_to_exe(target_path))
+                else:
+                    if os.path.isfile(tmp_path):
+                        os.remove(tmp_path)
+                    QTimer.singleShot(0, lambda: status_label.setText("× 下载文件异常，请在浏览器下载"))
+                    self._log(f"× v{version} 下载文件异常", "err")
+                    import time
+                    time.sleep(1)
+                    dlg.reject()
+                    # 回退到浏览器
+                    import webbrowser
+                    webbrowser.open(fallback_page)
+            except Exception as e:
+                if os.path.isfile(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
+                QTimer.singleShot(0, lambda: status_label.setText(f"× 下载失败: {e}"))
+                self._log(f"× v{version} 下载失败: {e}", "err")
+                import time
+                time.sleep(1)
+                dlg.reject()
+                # 回退到浏览器
+                try:
+                    import webbrowser
+                    webbrowser.open(fallback_page)
+                except Exception:
+                    pass
+
+        import threading
+        t = threading.Thread(target=do_download, daemon=True)
+        t.start()
 
     def _on_download_update(self):
         if not hasattr(self, '_latest_info') or not self._latest_info:
@@ -8083,13 +8644,56 @@ class MainWindow(QMainWindow):
         if not os.path.exists(exe_path):
             self._log(f"× 版本文件不存在: {exe_path}", "err")
             return
+
+        # 验证EXE文件有效性（大小至少1MB）
+        try:
+            exe_size = os.path.getsize(exe_path)
+            if exe_size < 1024 * 1024:
+                self._log(f"× 版本文件异常（过小: {exe_size} 字节），可能已损坏", "err")
+                return
+        except Exception as e:
+            self._log(f"× 无法读取版本文件: {e}", "err")
+            return
+
         dev_dir = _find_dev_dir()
         entry_exe = os.path.join(dev_dir, f"{BRAND_NAME}.exe")
-        # Update hardlink to point to the new version
-        _create_hardlink(exe_path, entry_exe)
-        # Launch the entry exe
+
+        # 备份当前入口EXE（用于回滚）
+        backup_exe = entry_exe + ".bak"
+        if os.path.isfile(entry_exe):
+            try:
+                shutil.copy2(entry_exe, backup_exe)
+            except Exception:
+                backup_exe = ""
+
+        # 更新硬链接指向新版本
+        success = _create_hardlink(exe_path, entry_exe)
+        if not success:
+            self._log("× 切换版本失败：无法更新启动入口", "err")
+            return
+
+        # 先停止所有服务
+        self._log("⏳ 正在停止服务并切换版本...", "info")
+        try:
+            self._stop_all()
+        except Exception:
+            pass
+
+        # 等待端口释放
+        import time
+        time.sleep(1)
+
+        # 启动新版本
         cmd = f'ping -n 3 127.0.0.1 >nul & start "" "{entry_exe}"'
         subprocess.Popen(cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+
+        # 清理备份
+        if backup_exe and os.path.isfile(backup_exe):
+            try:
+                os.remove(backup_exe)
+            except Exception:
+                pass
+
         self.close()
 
     def _show_update_log(self):
@@ -11339,39 +11943,63 @@ if __name__ == '__main__':
 
         self._newbie_guide_frame = QFrame()
         self._newbie_guide_frame.setObjectName("newbieGuideFrame")
+        # 品牌红主题：渐变背景 + 左侧激活红装饰条
         self._newbie_guide_frame.setStyleSheet("""
-            #newbieGuideFrame { background-color: #1A237E; border: 1px solid #3949AB; border-radius: 8px; }
+            #newbieGuideFrame {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #cc0000, stop:1 #a00000);
+                border: none;
+                border-left: 4px solid #ff0000;
+                border-radius: 6px;
+            }
         """)
         guide_layout = QVBoxLayout(self._newbie_guide_frame)
-        guide_layout.setContentsMargins(16, 10, 16, 10)
-        guide_layout.setSpacing(6)
+        guide_layout.setContentsMargins(20, 12, 16, 12)
+        guide_layout.setSpacing(8)
 
         # 标题行 + 关闭按钮
         header_row = QHBoxLayout()
         self._newbie_title = QLabel("👋 欢迎使用云集智能视频创意站！")
-        self._newbie_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFFFFF; border: none;")
+        self._newbie_title.setStyleSheet(
+            "font-size: 15px; font-weight: bold; color: #FFFFFF; background: transparent; border: none;"
+        )
         header_row.addWidget(self._newbie_title, 1)
 
         close_btn = QPushButton("✕")
-        close_btn.setFixedSize(24, 24)
+        close_btn.setFixedSize(26, 26)
         close_btn.setStyleSheet("""
-            QPushButton { background-color: transparent; color: #90CAF9; border: none; font-size: 14px; font-weight: bold; }
-            QPushButton:hover { color: #FFFFFF; background-color: rgba(255,255,255,30); border-radius: 4px; }
+            QPushButton {
+                background-color: transparent; color: rgba(255,255,255,160);
+                border: none; font-size: 15px; font-weight: bold; border-radius: 4px;
+            }
+            QPushButton:hover {
+                color: #FFFFFF; background-color: rgba(255,255,255,40);
+            }
         """)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.clicked.connect(lambda: self._newbie_guide_frame.setVisible(False))
         header_row.addWidget(close_btn)
         guide_layout.addLayout(header_row)
 
+        # 分隔线
+        separator = QFrame()
+        separator.setFixedHeight(1)
+        separator.setStyleSheet("background: rgba(255,255,255,50); border: none;")
+        guide_layout.addWidget(separator)
+
         # 动态内容标签
         self._newbie_content = QLabel()
-        self._newbie_content.setStyleSheet("font-size: 12px; color: #BBDEFB; border: none;")
+        self._newbie_content.setStyleSheet(
+            "font-size: 12px; color: #FFD6D6; background: transparent; border: none; line-height: 1.6;"
+        )
         self._newbie_content.setWordWrap(True)
         guide_layout.addWidget(self._newbie_content)
 
         # 提示标签
         self._newbie_tip = QLabel()
-        self._newbie_tip.setStyleSheet("font-size: 11px; color: #90CAF9; border: none;")
+        self._newbie_tip.setStyleSheet(
+            "font-size: 11px; color: #FF9E9E; background: transparent; border: none;"
+        )
         self._newbie_tip.setWordWrap(True)
         guide_layout.addWidget(self._newbie_tip)
 
@@ -12047,5 +12675,6 @@ if __name__ == "__main__":
                 except Exception:
                     pass
             raise
+
 
 
