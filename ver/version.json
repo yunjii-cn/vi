@@ -1,14 +1,24 @@
 {
-  "latest": "2026.06.04.1448",
+  "latest": "2026.06.04.1559",
   "release_date": "2026-06-04",
-  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.04.1448",
-  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.04.1448",
+  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.04.1559",
+  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.04.1559",
   "changes": [
-    "修复UV下载镜像源选择",
-    "修复自部署app路径",
-    "去掉新手引导红色背景"
+    "竞速下载机制",
+    "修复PyTorch版本约束",
+    "恢复新手引导红色背景"
   ],
   "versions": [
+    {
+      "version": "2026.06.04.1559",
+      "date": "2026-06-04 16:00",
+      "changes": [
+        "竞速下载机制",
+        "修复PyTorch版本约束",
+        "恢复新手引导红色背景"
+      ],
+      "filename": "云集智能视频创意站-v2026.06.04.1559.exe"
+    },
     {
       "version": "2026.06.04.1448",
       "date": "2026-06-04 14:49",

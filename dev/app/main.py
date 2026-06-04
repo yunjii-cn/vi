@@ -1791,6 +1791,8 @@ _MODEL_EXAMPLES: dict[str, str] = {
 }
 
 TORCH_VERSION_CONSTRAINT = ">=2.5,<3.0"
+TORCHVISION_VERSION_CONSTRAINT = ">=0.20,<1.0"
+TORCHAUDIO_VERSION_CONSTRAINT = ">=2.5,<3.0"
 
 LTX_DESKTOP_VERSION = "1.0.4"
 
@@ -2166,6 +2168,128 @@ class DeployWorker(QThread):
                 self.log.emit(f"    第{attempt}次下载 {label} 失败({last_err})，{2**attempt}秒后重试...", "warn")
                 time.sleep(min(2 ** attempt, 15))
         return False
+
+    def _download_racing(self, url_name_pairs, save_path, label_prefix=""):
+        """竞速下载：同时发起多个连接，第一个成功响应的胜出，其余取消"""
+        import threading
+        import tempfile
+
+        if not url_name_pairs:
+            return None, "无可用下载源"
+
+        if len(url_name_pairs) == 1:
+            url, name = url_name_pairs[0]
+            lbl = f"{label_prefix} ({name})" if label_prefix else name
+            if self._download_with_retry(url, save_path, lbl):
+                return name, None
+            return None, f"{name} 下载失败"
+
+        winner = [None]  # [winner_name]
+        winner_event = threading.Event()
+        results = {}  # name -> (success: bool, error: str)
+        lock = threading.Lock()
+
+        def _try_one(url, name, idx):
+            lbl = f"{label_prefix} ({name})" if label_prefix else name
+            temp_path = save_path + f".r{idx}.tmp"
+            try:
+                self._safe_remove(temp_path)
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                # 竞速阶段：短超时快速判断连通性
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    # 成功建立连接，检查是否已有胜出者
+                    if winner_event.is_set():
+                        self._safe_remove(temp_path)
+                        return
+                    # 标记自己为胜出者
+                    with lock:
+                        if winner[0] is not None:
+                            self._safe_remove(temp_path)
+                            return
+                        winner[0] = name
+                    winner_event.set()
+                    self.log.emit(f"  √ {lbl} 竞速胜出，开始下载...", "info")
+                    # 继续下载完整文件
+                    with open(temp_path, 'wb') as f:
+                        while True:
+                            if self._should_stop:
+                                break
+                            chunk = resp.read(65536)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+                    self._safe_remove(save_path)
+                    try:
+                        os.rename(temp_path, save_path)
+                    except OSError:
+                        import shutil as _shutil
+                        _shutil.copy2(temp_path, save_path)
+                        self._safe_remove(temp_path)
+                    with lock:
+                        results[name] = (True, None)
+                else:
+                    self._safe_remove(temp_path)
+                    with lock:
+                        results[name] = (False, "下载文件为空")
+            except Exception as e:
+                self._safe_remove(temp_path)
+                err = f"网络错误: {e.reason}" if hasattr(e, 'reason') else str(e) if str(e) else type(e).__name__
+                with lock:
+                    results[name] = (False, err)
+
+        # 启动竞速线程
+        threads = []
+        for idx, (url, name) in enumerate(url_name_pairs):
+            t = threading.Thread(target=_try_one, args=(url, name, idx), daemon=True)
+            threads.append(t)
+            t.start()
+
+        # 等待竞速结果（最多15秒判定胜出者）
+        winner_event.wait(timeout=15)
+
+        if winner[0] is None:
+            # 竞速阶段全部超时，等待所有线程完成
+            for t in threads:
+                t.join(timeout=30)
+            # 检查是否有成功的
+            for name, (ok, err) in results.items():
+                if ok:
+                    return name, None
+            # 全部失败，回退到顺序重试
+            self.log.emit(f"  △ 竞速下载全部失败，回退顺序重试...", "warn")
+            for url, name in url_name_pairs:
+                if self._should_stop:
+                    return None, "已取消"
+                lbl = f"{label_prefix} ({name})" if label_prefix else name
+                if self._download_with_retry(url, save_path, lbl):
+                    return name, None
+            return None, "所有下载源均失败"
+
+        # 有胜出者，等待其下载完成
+        for t in threads:
+            t.join(timeout=600)
+
+        w = winner[0]
+        if w in results and results[w][0]:
+            return w, None
+
+        # 胜出者下载失败，尝试其他已完成的
+        for name, (ok, err) in results.items():
+            if ok:
+                return name, None
+
+        # 回退顺序重试
+        self.log.emit(f"  △ 胜出源 {w} 下载失败，回退顺序重试...", "warn")
+        for url, name in url_name_pairs:
+            if self._should_stop:
+                return None, "已取消"
+            if name == w:
+                continue
+            lbl = f"{label_prefix} ({name})" if label_prefix else name
+            if self._download_with_retry(url, save_path, lbl):
+                return name, None
+        return None, "所有下载源均失败"
 
     def _deploy_all(self):
         steps = [
@@ -2717,20 +2841,13 @@ for dep_name, spec in VERSION_LOCKS.items():
         mirrors = self._resolved_mirrors["uv_urls"]
 
         zip_path = os.path.join(uv_dir, "uv.zip")
-        downloaded = False
-        for url, mirror_name in mirrors:
-            if self._should_stop:
-                return self.STEP_STATUS_FAILED
-            self.log.emit(f"  下载 UV ({mirror_name})...", "info")
-            if self._download_with_retry(url, zip_path, f"UV ({mirror_name})"):
-                downloaded = True
-                self.log.emit(f"  √ UV 下载完成 ({mirror_name})", "ok")
-                break
-            else:
-                self.log.emit(f"  △ {mirror_name} 下载失败，尝试下一个镜像源...", "warn")
+        self.log.emit("  下载 UV (竞速选择最快源)...", "info")
+        winner_name, err = self._download_racing(mirrors, zip_path, "UV")
 
-        if not downloaded:
-            raise Exception("所有镜像源均下载失败，请检查网络连接")
+        if winner_name is None:
+            raise Exception(f"UV 下载失败: {err}，请检查网络连接")
+
+        self.log.emit(f"  √ UV 下载完成 ({winner_name})", "ok")
 
         self.log.emit("  解压 UV...", "info")
         try:
@@ -2868,8 +2985,8 @@ for dep_name, spec in VERSION_LOCKS.items():
             result = self._retry_run(
                 [uv_exe, "pip", "install", "--python", python_exe,
                  f"torch{TORCH_VERSION_CONSTRAINT}",
-                 f"torchvision{TORCH_VERSION_CONSTRAINT}",
-                 f"torchaudio{TORCH_VERSION_CONSTRAINT}",
+                 f"torchvision{TORCHVISION_VERSION_CONSTRAINT}",
+                 f"torchaudio{TORCHAUDIO_VERSION_CONSTRAINT}",
                  "--default-index", torch_index,
                  "--index-strategy", "first-index",
                  "--no-cache"],
@@ -2884,8 +3001,8 @@ for dep_name, spec in VERSION_LOCKS.items():
                 result = self._retry_run(
                     [uv_exe, "pip", "install", "--python", python_exe,
                      f"torch{TORCH_VERSION_CONSTRAINT}",
-                     f"torchvision{TORCH_VERSION_CONSTRAINT}",
-                     f"torchaudio{TORCH_VERSION_CONSTRAINT}",
+                     f"torchvision{TORCHVISION_VERSION_CONSTRAINT}",
+                     f"torchaudio{TORCHAUDIO_VERSION_CONSTRAINT}",
                      "--default-index", torch_index,
                      "--index", self._resolved_mirrors["pip"],
                      "--index-strategy", "first-index",
@@ -3484,22 +3601,16 @@ for d in deps:
         os.makedirs(temp_dir, exist_ok=True)
         zip_path = os.path.join(temp_dir, f"ltx-desktop-v{LTX_DESKTOP_VERSION}.zip")
 
-        downloaded = False
-        for url_tpl, mirror_name in self._resolved_mirrors["ltx_urls"]:
-            if self._should_stop:
-                return None
-            url = url_tpl.format(ver=LTX_DESKTOP_VERSION)
-            self.log.emit(f"  下载 LTX Desktop v{LTX_DESKTOP_VERSION} 源码 ({mirror_name})...", "info")
-            if self._download_with_retry(url, zip_path, f"LTX Desktop 源码 ({mirror_name})", max_retries=2):
-                downloaded = True
-                self.log.emit(f"  √ 源码下载完成 ({mirror_name})", "ok")
-                break
-            else:
-                self.log.emit(f"  △ {mirror_name} 下载失败，尝试下一个...", "warn")
+        ltx_urls = [(url_tpl.format(ver=LTX_DESKTOP_VERSION), name)
+                     for url_tpl, name in self._resolved_mirrors["ltx_urls"]]
+        self.log.emit(f"  下载 LTX Desktop v{LTX_DESKTOP_VERSION} 源码 (竞速选择最快源)...", "info")
+        winner_name, err = self._download_racing(ltx_urls, zip_path, "LTX Desktop 源码")
 
-        if not downloaded:
+        if winner_name is None:
             shutil.rmtree(temp_dir, ignore_errors=True)
             return None
+
+        self.log.emit(f"  √ 源码下载完成 ({winner_name})", "ok")
 
         self.log.emit("  从源码包提取后端代码...", "info")
         backend_src = None
@@ -11970,9 +12081,9 @@ if __name__ == '__main__':
         # 品牌红主题：渐变背景 + 左侧激活红装饰条
         self._newbie_guide_frame.setStyleSheet("""
             #newbieGuideFrame {
-                background-color: #1A1A1A;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #B71C1C, stop:1 #7F0000);
                 border: none;
-                border-left: 4px solid #E53935;
                 border-radius: 6px;
             }
         """)
@@ -12013,7 +12124,7 @@ if __name__ == '__main__':
         # 动态内容标签
         self._newbie_content = QLabel()
         self._newbie_content.setStyleSheet(
-            "font-size: 12px; color: #CCCCCC; background: transparent; border: none; line-height: 1.6;"
+            "font-size: 12px; color: #FFD6D6; background: transparent; border: none; line-height: 1.6;"
         )
         self._newbie_content.setWordWrap(True)
         guide_layout.addWidget(self._newbie_content)
@@ -12021,7 +12132,7 @@ if __name__ == '__main__':
         # 提示标签
         self._newbie_tip = QLabel()
         self._newbie_tip.setStyleSheet(
-            "font-size: 11px; color: #AAAAAA; background: transparent; border: none;"
+            "font-size: 11px; color: #FF9E9E; background: transparent; border: none;"
         )
         self._newbie_tip.setWordWrap(True)
         guide_layout.addWidget(self._newbie_tip)
