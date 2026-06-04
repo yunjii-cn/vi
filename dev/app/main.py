@@ -8115,6 +8115,11 @@ class MainWindow(QMainWindow):
                     size_mb = 0
                 exe_versions[current_version] = {"filename": os.path.basename(cur_exe), "path": cur_exe, "version": current_version, "size_mb": size_mb}
         local_versions = self._get_local_version_history()
+
+        # 为远程版本构建下载URL（基于当前源的模板）
+        source = UPDATE_SOURCES.get(winning_source, {})
+        download_tpl = source.get("download_url_tpl", "")
+
         all_versions = []
         seen = set()
         for rinfo in remote_versions_list:
@@ -8124,6 +8129,14 @@ class MainWindow(QMainWindow):
                 continue
             seen.add(ver_num)
             is_new = (ver_num != current_version and ver_num not in exe_versions)
+            # 构建下载URL：优先使用remote_info中的download_url，否则用模板
+            dl_url = rinfo.get("download_url", "")
+            if not dl_url and download_tpl:
+                fn = rinfo.get("filename", f"{APP_NAME}-v{ver_num}.exe")
+                dl_url = download_tpl.format(filename=fn, version=ver_num)
+            rinfo_copy = dict(rinfo)
+            if dl_url:
+                rinfo_copy["download_url"] = dl_url
             all_versions.append({
                 "version": ver_num,
                 "name": rinfo.get("name", f"v{ver_num}"),
@@ -8133,7 +8146,7 @@ class MainWindow(QMainWindow):
                 "available": ver_num in exe_versions,
                 "exe_info": exe_versions.get(ver_num),
                 "is_remote_new": is_new,
-                "remote_info": rinfo,
+                "remote_info": rinfo_copy,
             })
         for v in local_versions:
             ver = v.get("version", "")
@@ -8189,8 +8202,111 @@ class MainWindow(QMainWindow):
             self._ver_info_text = f"✅ 已是最新版本（via {src_name}）"
         self._save_update_cache()
         self._version_data_ready.emit()
+
+        # 异步获取Release列表，合并真实下载链接
+        self._fetch_release_assets(winning_source, all_versions)
+
         if not self._ver_git_data:
             self._fetch_remote_commits()
+
+    def _fetch_release_assets(self, source_key, current_versions):
+        """异步从Release API获取真实下载链接，合并到版本列表"""
+        source = UPDATE_SOURCES.get(source_key, {})
+        releases_url = source.get("releases_url", "")
+        if not releases_url:
+            return
+
+        proc = QProcess(self)
+        proc.setProperty("source_key", source_key)
+        proc.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+
+        def on_done(ec, es):
+            if ec != 0:
+                proc.deleteLater()
+                return
+            try:
+                raw = bytes(proc.readAllStandardOutput()).decode("utf-8", errors="replace")
+                releases = json.loads(raw)
+                if not isinstance(releases, list):
+                    proc.deleteLater()
+                    return
+                # 构建版本号→下载URL映射
+                release_downloads = {}
+                for rel in releases:
+                    tag = rel.get("tag_name", "")
+                    tag_ver = self._normalize_version(tag)
+                    if not tag_ver:
+                        continue
+                    for asset in rel.get("assets", []):
+                        asset_name = asset.get("name", "")
+                        if asset_name.endswith(".exe"):
+                            url = asset.get("browser_download_url", "")
+                            if url:
+                                # 从文件名提取版本号
+                                asset_ver = self._normalize_version(asset_name)
+                                if asset_ver:
+                                    release_downloads[asset_ver] = {
+                                        "download_url": url,
+                                        "filename": asset_name,
+                                        "size": asset.get("size", 0),
+                                    }
+                                # 也用tag版本号映射
+                                if tag_ver not in release_downloads:
+                                    release_downloads[tag_ver] = {
+                                        "download_url": url,
+                                        "filename": asset_name,
+                                        "size": asset.get("size", 0),
+                                    }
+                # 合并到版本列表
+                updated = False
+                for v in self._ver_stable_data:
+                    ver = v.get("version", "")
+                    if ver in release_downloads:
+                        rd = release_downloads[ver]
+                        ri = v.get("remote_info", {})
+                        if not isinstance(ri, dict):
+                            ri = {}
+                        ri["download_url"] = rd["download_url"]
+                        ri["filename"] = rd.get("filename", ri.get("filename", ""))
+                        v["remote_info"] = ri
+                        # 如果之前没有标记为可下载，现在有了
+                        if not v.get("available") and not v.get("is_remote_new"):
+                            v["is_remote_new"] = (ver != VERSION)
+                        updated = True
+                # 添加Release中有但版本列表中没有的版本
+                seen = {v.get("version", "") for v in self._ver_stable_data}
+                for ver, rd in release_downloads.items():
+                    if ver not in seen:
+                        seen.add(ver)
+                        self._ver_stable_data.append({
+                            "version": ver,
+                            "name": rd.get("filename", f"v{ver}"),
+                            "changes": [],
+                            "build_time": "",
+                            "git_commit": "",
+                            "available": False,
+                            "exe_info": None,
+                            "is_remote_new": (ver != VERSION),
+                            "remote_info": {
+                                "download_url": rd["download_url"],
+                                "filename": rd.get("filename", ""),
+                                "version": ver,
+                            },
+                        })
+                        updated = True
+                if updated:
+                    self._ver_stable_data.sort(key=lambda x: x["version"], reverse=True)
+                    self._save_update_cache()
+                    self._version_data_ready.emit()
+            except Exception:
+                pass
+            proc.deleteLater()
+
+        proc.finished.connect(on_done)
+        proc.start("curl.exe", [
+            "-s", "-k", "-L", "--connect-timeout", "8", "-m", "20",
+            "-H", "User-Agent: Mozilla/5.0", releases_url
+        ])
 
     def _fetch_remote_commits(self):
         self._cancel_commits_race_procs()
@@ -8617,14 +8733,25 @@ class MainWindow(QMainWindow):
         version = remote_info.get("version", "")
         if not filename and not version:
             return
-        source_key = getattr(self, '_active_update_source', 'github_mirror')
-        source = UPDATE_SOURCES.get(source_key, UPDATE_SOURCES.get('github_mirror', list(UPDATE_SOURCES.values())[0] if UPDATE_SOURCES else {}))
-        download_url = ""
-        if filename and version:
-            download_url = source.get("download_url_tpl", "").format(filename=filename, version=version)
+        # 优先使用remote_info中的download_url（来自Release API）
+        download_url = remote_info.get("download_url", "")
+        release_page = ""
         if not download_url:
-            download_url = source.get("download_url_tpl", "").format(filename=filename or "", version=version or "")
-        release_page = f"https://github.com/yunjii-cn/vi/releases/tag/v{version}" if version else "https://github.com/yunjii-cn/vi/releases"
+            source_key = getattr(self, '_active_update_source', 'github_mirror')
+            source = UPDATE_SOURCES.get(source_key, UPDATE_SOURCES.get('github_mirror', list(UPDATE_SOURCES.values())[0] if UPDATE_SOURCES else {}))
+            if filename and version:
+                download_url = source.get("download_url_tpl", "").format(filename=filename, version=version)
+            if not download_url:
+                download_url = source.get("download_url_tpl", "").format(filename=filename or "", version=version or "")
+        # 构建Release页面URL
+        if version:
+            source_key = getattr(self, '_active_update_source', 'github_mirror')
+            if source_key == "gitee":
+                release_page = f"https://gitee.com/yunjii/vi/releases/tag/v{version}"
+            else:
+                release_page = f"https://github.com/yunjii-cn/vi/releases/tag/v{version}"
+        else:
+            release_page = "https://github.com/yunjii-cn/vi/releases"
 
         # 尝试应用内下载到 ver/ 目录
         if download_url and version:

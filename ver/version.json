@@ -1,17 +1,20 @@
 {
-  "latest": "2026.06.04",
+  "latest": "2026.06.04.2207",
   "release_date": "2026-06-04",
   "changes": [
-    "自部署后自动创建桌面快捷方式（唯一性保证）",
-    "自部署后自动启动新EXE",
-    "UV/后端下载采用竞速机制，优先使用用户选择的镜像源",
-    "PyTorch安装仅使用CUDA索引，避免安装CPU版本",
-    "新手引导分步提示优化",
-    "下载增加进度条显示",
-    "修复自部署app路径错误",
-    "修复版本约束导致torchvision安装失败"
+    "完善软件更新：整理版本列表+Release",
+    "API获取下载链接+下载优先使用真实URL"
   ],
   "versions": [
+    {
+      "version": "2026.06.04.2207",
+      "date": "2026-06-04 22:08",
+      "changes": [
+        "完善软件更新：整理版本列表+Release",
+        "API获取下载链接+下载优先使用真实URL"
+      ],
+      "filename": "云集智能视频创意站-v2026.06.04.2207.exe"
+    },
     {
       "version": "2026.06.04",
       "date": "2026-06-04",
@@ -106,5 +109,7 @@
         "【前端】UI代理层直接读取媒体文件+流式转发206响应"
       ]
     }
-  ]
+  ],
+  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.04.2207",
+  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.04.2207"
 }

@@ -1,344 +1,101 @@
 [
   {
-    "version": "2026.06.04.2133",
-    "date": "2026-06-04 21:34",
-    "message": "下载增加进度条显示",
+    "version": "2026.06.04.2207",
+    "date": "2026-06-04 22:08",
+    "message": "完善软件更新：整理版本列表+Release",
     "changes": [
-      "下载增加进度条显示"
+      "完善软件更新：整理版本列表+Release",
+      "API获取下载链接+下载优先使用真实URL"
     ],
-    "name": "云集智能视频创意站-v2026.06.04.2133.exe",
+    "name": "云集智能视频创意站-v2026.06.04.2207.exe",
     "download_url": ""
   },
   {
-    "version": "2026.06.04.2109",
-    "date": "2026-06-04 21:10",
-    "message": "修复竞速下载：验证响应有效性+失败后重新竞速",
+    "version": "2026.06.04",
+    "date": "2026-06-04",
+    "filename": "云集智能视频创意站-v2026.06.04.2109.exe",
+    "download_url": "https://gitee.com/yunjii/vi/releases/download/v2026.06.04/%E4%BA%91%E9%9B%86%E6%99%BA%E8%83%BD%E8%A7%86%E9%A2%91%E5%88%9B%E6%84%8F%E7%AB%99-v2026.06.04.2109.exe",
     "changes": [
-      "修复竞速下载：验证响应有效性+失败后重新竞速"
-    ],
-    "name": "云集智能视频创意站-v2026.06.04.2109.exe",
-    "download_url": ""
+      "【启动器】自部署后自动创建桌面快捷方式（唯一性保证）",
+      "【启动器】自部署后自动启动新EXE",
+      "【启动器】UV/后端下载采用竞速机制，优先使用用户选择的镜像源",
+      "【启动器】PyTorch安装仅使用CUDA索引，避免安装CPU版本",
+      "【启动器】新手引导分步提示优化",
+      "【启动器】下载增加进度条显示",
+      "【启动器】修复自部署app路径错误",
+      "【启动器】修复版本约束导致torchvision安装失败"
+    ]
   },
   {
-    "version": "2026.06.04.2052",
-    "date": "2026-06-04 20:53",
-    "message": "修复PyTorch验证超时问题",
-    "changes": [
-      "修复PyTorch验证超时问题"
-    ],
-    "name": "云集智能视频创意站-v2026.06.04.2052.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.06.04.1905",
-    "date": "2026-06-04 19:07",
-    "message": "优化新手引导分步提示",
-    "changes": [
-      "优化新手引导分步提示"
-    ],
-    "name": "云集智能视频创意站-v2026.06.04.1905.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.06.04.1855",
-    "date": "2026-06-04 18:56",
-    "message": "优化新手引导提示",
-    "changes": [
-      "优化新手引导提示",
-      "修复PyTorch安装CPU版本"
-    ],
-    "name": "云集智能视频创意站-v2026.06.04.1855.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.06.04.1830",
-    "date": "2026-06-04 18:31",
-    "message": "修复自部署后新EXE启动失败",
-    "changes": [
-      "修复自部署后新EXE启动失败"
-    ],
-    "name": "云集智能视频创意站-v2026.06.04.1830.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.06.04.1817",
-    "date": "2026-06-04 18:18",
-    "message": "修复PyTorch安装CPU版本问题",
-    "changes": [
-      "修复PyTorch安装CPU版本问题"
-    ],
-    "name": "云集智能视频创意站-v2026.06.04.1817.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.06.04.1805",
-    "date": "2026-06-04 18:06",
-    "message": "修复首次运行app目录释放到自部署目录外",
-    "changes": [
-      "修复首次运行app目录释放到自部署目录外"
-    ],
-    "name": "云集智能视频创意站-v2026.06.04.1805.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.06.04.1736",
-    "date": "2026-06-04 17:37",
-    "message": "修复自部署后不自动启动新EXE",
-    "changes": [
-      "修复自部署后不自动启动新EXE"
-    ],
-    "name": "云集智能视频创意站-v2026.06.04.1736.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.06.04.1708",
-    "date": "2026-06-04 17:10",
-    "message": "修复PyTorch安装策略",
-    "changes": [
-      "修复PyTorch安装策略",
-      "改善验证失败提示"
-    ],
-    "name": "云集智能视频创意站-v2026.06.04.1708.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.06.04.1559",
-    "date": "2026-06-04 16:00",
-    "message": "竞速下载机制",
-    "changes": [
-      "竞速下载机制",
-      "修复PyTorch版本约束",
-      "恢复新手引导红色背景"
-    ],
-    "name": "云集智能视频创意站-v2026.06.04.1559.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.06.04.1448",
-    "date": "2026-06-04 14:49",
-    "message": "修复UV下载镜像源选择",
-    "changes": [
-      "修复UV下载镜像源选择",
-      "修复自部署app路径",
-      "去掉新手引导红色背景"
-    ],
-    "name": "云集智能视频创意站-v2026.06.04.1448.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.06.04.1119",
-    "date": "2026-06-04 11:21",
-    "message": "增加自部署桌面快捷方式功能",
-    "changes": [
-      "增加自部署桌面快捷方式功能"
-    ],
-    "name": "云集智能视频创意站-v2026.06.04.1119.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.06.03.1709",
+    "version": "2026.06.03",
     "date": "2026-06-03",
-    "message": "品牌红主题UI + 模型分类重构 + 新手引导",
+    "filename": "云集智能视频创意站-v2026.06.03.0642.exe",
+    "download_url": "https://gitee.com/yunjii/vi/releases/download/v2026.06.03/%E4%BA%91%E9%9B%86%E6%99%BA%E8%83%BD%E8%A7%86%E9%A2%91%E5%88%9B%E6%84%8F%E7%AB%99-v2026.06.03.0642.exe",
     "changes": [
-      "新手引导改为品牌红渐变主题，消除黑色背景条",
-      "模型分类重构：视频模型/图像模型/视频LoRA/图像LoRA/控制模型/高清放大/辅助模型",
-      "新增2个视频LoRA（Pro模式/运镜控制）和2个图像LoRA（Crisp/Soft增强）",
-      "GitHub镜像源扩充至10个（新增GHPS/KKGitHub/BGitHub）",
-      "模型详情改为表格行内展开，修复详情面板重叠bug",
-      "表格选中行红色背景白色文字",
-      "应用内下载EXE到ver/目录，下载完成自动切换版本",
-      "版本切换增加EXE验证、备份回滚、自动停止服务"
-    ],
-    "name": "云集智能视频创意站-v2026.06.03.1709.exe",
-    "download_url": ""
+      "【前端】高清放大视频上传改为FormData",
+      "【前端】_isImageModel修复排除LoRA",
+      "【前端】LoRA按基模分类筛选",
+      "【后端】新增/system/upload-file端点",
+      "【后端】上传代理流式转发+300s超时",
+      "【启动器】单EXE自部署+版本切换+Git历史+缓存刷新",
+      "【构建】project.json+launcher.py入口重写"
+    ]
   },
   {
-    "version": "2026.06.03.0642",
-    "date": "2026-06-03",
-    "message": "高清放大优化 + 单EXE自部署 + 版本切换",
+    "version": "2026.05.18",
+    "date": "2026-05-18",
+    "filename": "云集智能视频创意站-v2026.05.18.1153.exe",
+    "download_url": "https://gitee.com/yunjii/vi/releases/download/v2026.05.18/%E4%BA%91%E9%9B%86%E6%99%BA%E8%83%BD%E8%A7%86%E9%A2%91%E5%88%9B%E6%84%8F%E7%AB%99-v2026.05.18.1153.exe",
     "changes": [
-      "前端：高清放大视频上传改为FormData，LoRA按基模分类筛选",
-      "后端：新增/system/upload-file端点，上传代理流式转发+300s超时",
-      "启动器：单EXE自部署+版本切换+Git历史+缓存刷新"
-    ],
-    "name": "云集智能视频创意站-v2026.06.03.0642.exe",
-    "download_url": ""
+      "【启动器】修复_populate_version_table中setParent(None)导致ACCESS_VIOLATION崩溃",
+      "【启动器】修复launcher.py的subprocess monkey-patch导致崩溃",
+      "【启动器】软件更新页面重构(当前版本卡片+展开详情+获取开发版)",
+      "【构建】清理PyQt6-Qt6-DLL冲突，降级PyInstaller到6.11.1",
+      "【构建】切换到--onefile模式打包后回归最简配置"
+    ]
   },
   {
-    "version": "2026.05.27.0245",
-    "date": "2026-05-27",
-    "message": "视频迁移预览修复 + Pose模型自动下载",
+    "version": "2026.05.17",
+    "date": "2026-05-17",
+    "filename": "云集智能视频创意站-v2026.05.17.0659.exe",
+    "download_url": "https://gitee.com/yunjii/vi/releases/download/v2026.05.17.0659/%E4%BA%91%E9%9B%86%E6%99%BA%E8%83%BD%E8%A7%86%E9%A2%91%E5%88%9B%E6%84%8F%E7%AB%99-v2026.05.17.0659.exe",
     "changes": [
-      "修复视频迁移视频上传预览图页面刷新后丢失",
-      "修复pose人物检测模型缺失导致全黑视频",
-      "历史资产添加日期时间",
-      "自动下载pose模型person_detector+pose_processor"
-    ],
-    "name": "云集智能视频创意站-v2026.05.27.0245.exe",
-    "download_url": ""
+      "【构建】Python3.12环境重建(解决PyQt6打包兼容性)",
+      "【启动器】软件更新弹窗(远程版本检查+更新日志+内联状态)",
+      "【启动器】模型管理弹窗重构(表格+分类+复选框+多目录)",
+      "【启动器】模型管理UI完善(目录单排展开+全选按钮+描述栏+排序+删除按钮)",
+      "【启动器】SageAttention强制安装",
+      "【启动器】版本列表融合+EXE描述"
+    ]
   },
   {
-    "version": "2026.05.25.1311",
-    "date": "2026-05-25",
-    "message": "LTX2.3模型库完善 + 国内镜像支持",
-    "changes": [
-      "LTX2.3模型库完善，LoRA描述映射",
-      "模型仓库分类优化",
-      "国内镜像支持（清华/阿里云/官方）",
-      "HF-Mirror镜像源"
-    ],
-    "name": "云集智能视频创意站-v2026.05.25.1311.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.05.19.0604",
-    "date": "2026-05-19",
-    "message": "图标嵌入EXE + 数据目录重构",
-    "changes": [
-      "图标嵌入EXE内部，不再外部分发",
-      "重构数据目录为一等公民_data_dir",
-      "移除所有旧路径回退逻辑"
-    ],
-    "name": "云集智能视频创意站-v2026.05.19.0604.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.05.19.0051",
-    "date": "2026-05-19",
-    "message": "软件更新页面完善",
-    "changes": [
-      "软件更新页面完善：对齐参考项目设计",
-      "添加_version_data_ready信号替代QTimer",
-      "修复_switch_to_exe和版本号比较逻辑",
-      "添加build_time显示"
-    ],
-    "name": "云集智能视频创意站-v2026.05.19.0051.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.05.16.2054",
+    "version": "2026.05.16",
     "date": "2026-05-16",
-    "message": "PyInstaller构建优化：579MB→92MB",
+    "filename": "云集智能视频创意站-v2026.05.16.2352.exe",
+    "download_url": "https://gitee.com/yunjii/vi/releases/download/v2026.05.16/%E4%BA%91%E9%9B%86%E6%99%BA%E8%83%BD%E8%A7%86%E9%A2%91%E5%88%9B%E6%84%8F%E7%AB%99-v2026.05.16.2352.exe",
     "changes": [
-      "优化PyInstaller构建参数：精确hidden-import + exclude-module",
-      "运行时依赖从579MB缩减至约92MB",
-      "统一一键构建为build-version.py调用入口"
-    ],
-    "name": "云集智能视频创意站-v2026.05.16.2054.exe",
-    "download_url": ""
+      "【构建】PyInstaller构建优化：579MB→92MB",
+      "【构建】统一一键构建为build-version.py调用入口",
+      "【启动器】新增软件更新栏目",
+      "【启动器】模型管理重构为表格+分类+复选框+多目录",
+      "【启动器】修复QListWidget/QTableWidget/QHeaderView导入缺失",
+      "【前端】修复httpx.ConnectError循环报错+浏览器持久化+emoji图标修复"
+    ]
   },
   {
-    "version": "2026.05.16.0507",
-    "date": "2026-05-16",
-    "message": "软件更新栏目 + 模型管理重构",
-    "changes": [
-      "新增软件更新栏目",
-      "模型管理重构为表格+分类+复选框+多目录",
-      "批量下载 + 获取更新按钮"
-    ],
-    "name": "云集智能视频创意站-v2026.05.16.0507.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.05.15.0252",
-    "date": "2026-05-15",
-    "message": "环境检测 + 部署优化",
-    "changes": [
-      "环境检测不自动检测，显示未检测状态",
-      "快速检测+完整性检测双按钮",
-      "检测结果缓存到JSON文件",
-      "一键部署增加暂停和取消按钮"
-    ],
-    "name": "云集智能视频创意站-v2026.05.15.0252.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.05.14.2104",
-    "date": "2026-05-14",
-    "message": "模型注册表 + 硬件预设方案",
-    "changes": [
-      "新增模型注册表community_models，支持官方和社区量化模型一键下载",
-      "新增硬件环境预设方案，GPU特性检测FP8/SageAttention",
-      "新增环境检测功能：CUDA/PyTorch/cuDNN/Python/ffmpeg版本显示"
-    ],
-    "name": "云集智能视频创意站-v2026.05.14.2104.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.05.13.0622",
-    "date": "2026-05-13",
-    "message": "模块化扩展架构重构",
-    "changes": [
-      "模块化扩展架构重构：3100+行app_factory拆分为21个独立扩展模块",
-      "添加上游版本追踪机制",
-      "三目录纯净整合包结构改造"
-    ],
-    "name": "云集智能视频创意站-v2026.05.13.0622.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.05.12.0330",
+    "version": "2026.05.12",
     "date": "2026-05-12",
-    "message": "Windows单实例管理 + 暗色主题",
+    "filename": "云集智能视频创意站-v2026.05.12.0431.exe",
+    "download_url": "https://gitee.com/yunjii/vi/releases/download/v2026.05.12/%E4%BA%91%E9%9B%86%E6%99%BA%E8%83%BD%E8%A7%86%E9%A2%91%E5%88%9B%E6%84%8F%E7%AB%99-v2026.05.12.0431.exe",
     "changes": [
-      "实现Windows命名事件+Mutex单实例管理",
-      "添加Fusion风格和暗色主题调色板",
-      "修复SplashScreen进度条闪烁",
-      "修复图标加载frozen路径"
-    ],
-    "name": "云集智能视频创意站-v2026.05.12.0330.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.05.11.0238",
-    "date": "2026-05-11",
-    "message": "中文路径支持 + 视频Range请求",
-    "changes": [
-      "修复中文输出目录Errno22：自动转Windows短路径",
-      "添加视频Range请求支持，支持拖动进度条",
-      "UI代理层流式转发",
-      "修复BOM字符导致EXE崩溃"
-    ],
-    "name": "云集智能视频创意站-v2026.05.11.0238.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.05.10.0828",
-    "date": "2026-05-10",
-    "message": "前端代理解决跨域 + 浏览器配置",
-    "changes": [
-      "前端API代理转发解决跨端口问题",
-      "index.js使用同源端口替代硬编码后端端口",
-      "浏览器设置模块，支持国产浏览器检测",
-      "端口可自定义，修改后自动重启服务"
-    ],
-    "name": "云集智能视频创意站-v2026.05.10.0828.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.05.09.1812",
-    "date": "2026-05-09",
-    "message": "UV包管理器 + 部署维护重构",
-    "changes": [
-      "迁移到UV包管理器替代Python嵌入版",
-      "部署维护页面重构：左右布局+部署日志",
-      "新增浏览器设置模块",
-      "模型管理：下载源选择+完整性检测"
-    ],
-    "name": "云集智能视频创意站-v2026.05.09.1812.exe",
-    "download_url": ""
-  },
-  {
-    "version": "2026.05.09.0233",
-    "date": "2026-05-09",
-    "message": "初始版本发布",
-    "changes": [
-      "初始版本-EXE启动器",
-      "PyQt6 GUI框架",
-      "一键部署功能",
-      "模型下载与管理"
-    ],
-    "name": "云集智能视频创意站-v2026.05.09.0233.exe",
-    "download_url": ""
+      "【启动器】实现Windows命名事件+Mutex单实例管理",
+      "【启动器】添加Fusion风格和暗色主题调色板",
+      "【启动器】修复SplashScreen进度条闪烁",
+      "【启动器】修复图标加载frozen路径",
+      "【后端】修复rotary_emb参数未初始化导致核心引擎ACCESS_VIOLATION崩溃",
+      "【后端】修复视频无法播放(添加/outputs/路由并支持Range请求)",
+      "【前端】修复缩略图请求被错误直接返回视频文件",
+      "【前端】UI代理层直接读取媒体文件+流式转发206响应"
+    ]
   }
 ]
