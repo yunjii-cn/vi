@@ -222,8 +222,11 @@ def _self_deploy(exe_dir):
     if already_deployed:
         entry_exe = os.path.join(deploy_dir, f"{BRAND_NAME}.exe")
         if os.path.isfile(entry_exe) and os.path.normpath(src_exe) != os.path.normpath(entry_exe):
-            subprocess.Popen([entry_exe, f"--cleanup={src_exe}"],
-                             creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.Popen(
+                f'ping -n 2 127.0.0.1 >nul & start "" "{entry_exe}" --cleanup="{src_exe}"',
+                shell=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
             os._exit(0)
         return deploy_dir
 
@@ -270,8 +273,13 @@ def _self_deploy(exe_dir):
         _create_hardlink(target_exe, entry_exe)
 
     if os.path.normpath(src_exe) != os.path.normpath(entry_exe):
-        subprocess.Popen([entry_exe, f"--cleanup={src_exe}"],
-                         creationflags=subprocess.CREATE_NO_WINDOW)
+        if os.path.isfile(entry_exe):
+            # 使用 shell=True 确保中文路径正确处理
+            subprocess.Popen(
+                f'ping -n 2 127.0.0.1 >nul & start "" "{entry_exe}" --cleanup="{src_exe}"',
+                shell=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
         os._exit(0)
 
     return deploy_dir

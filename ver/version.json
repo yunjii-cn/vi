@@ -1,12 +1,20 @@
 {
-  "latest": "2026.06.04.1817",
+  "latest": "2026.06.04.1830",
   "release_date": "2026-06-04",
-  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.04.1817",
-  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.04.1817",
+  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.04.1830",
+  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.04.1830",
   "changes": [
-    "修复PyTorch安装CPU版本问题"
+    "修复自部署后新EXE启动失败"
   ],
   "versions": [
+    {
+      "version": "2026.06.04.1830",
+      "date": "2026-06-04 18:31",
+      "changes": [
+        "修复自部署后新EXE启动失败"
+      ],
+      "filename": "云集智能视频创意站-v2026.06.04.1830.exe"
+    },
     {
       "version": "2026.06.04.1817",
       "date": "2026-06-04 18:18",
