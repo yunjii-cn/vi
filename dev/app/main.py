@@ -1997,6 +1997,7 @@ for d in deps:
 class DeployWorker(QThread):
     progress = pyqtSignal(int, str)
     log = pyqtSignal(str, str)
+    log_replace = pyqtSignal(str, str)  # 替换日志最后一行（用于进度条更新）
     finished = pyqtSignal(bool, str)
     env_update = pyqtSignal(str, str, str, bool)
 
@@ -2135,6 +2136,20 @@ class DeployWorker(QThread):
                 return False
         return False
 
+    def _format_progress(self, done, total, label):
+        """格式化下载进度条文本"""
+        if total > 0:
+            pct = done * 100 // total
+            bar_len = 20
+            filled = bar_len * pct // 100
+            bar = "█" * filled + "░" * (bar_len - filled)
+            done_mb = done / (1024 * 1024)
+            total_mb = total / (1024 * 1024)
+            return f"  ↓ {label} [{bar}] {pct:3d}% {done_mb:.1f}/{total_mb:.1f}MB"
+        else:
+            done_mb = done / (1024 * 1024)
+            return f"  ↓ {label} {done_mb:.1f}MB"
+
     def _download_with_retry(self, url, save_path, label, max_retries=None):
         retries = max_retries or self.MAX_RETRIES
         last_err = "未知错误"
@@ -2146,12 +2161,23 @@ class DeployWorker(QThread):
                 self._safe_remove(temp_path)
                 req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
                 with urllib.request.urlopen(req, timeout=30) as resp:
+                    total = int(resp.headers.get("Content-Length", 0))
+                    done = 0
+                    last_pct = -1
                     with open(temp_path, 'wb') as f:
                         while True:
                             chunk = resp.read(65536)
                             if not chunk:
                                 break
                             f.write(chunk)
+                            done += len(chunk)
+                            if total > 0:
+                                pct = done * 100 // total
+                                if pct != last_pct:
+                                    last_pct = pct
+                                    self.log_replace.emit(self._format_progress(done, total, label), "info")
+                            elif done % (5 * 1024 * 1024) < 65536:
+                                self.log_replace.emit(self._format_progress(done, 0, label), "info")
                 if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
                     self._safe_remove(save_path)
                     try:
@@ -2231,6 +2257,9 @@ class DeployWorker(QThread):
                     winner_event.set()
                     self.log.emit(f"  √ {lbl} 竞速胜出，开始下载...", "info")
                     # 继续下载完整文件（首段数据已读取）
+                    total = int(resp.headers.get("Content-Length", 0))
+                    done = len(first_chunk)
+                    last_pct = -1
                     with open(temp_path, 'wb') as f:
                         f.write(first_chunk)
                         while True:
@@ -2240,6 +2269,14 @@ class DeployWorker(QThread):
                             if not chunk:
                                 break
                             f.write(chunk)
+                            done += len(chunk)
+                            if total > 0:
+                                pct = done * 100 // total
+                                if pct != last_pct:
+                                    last_pct = pct
+                                    self.log_replace.emit(self._format_progress(done, total, lbl), "info")
+                            elif done % (5 * 1024 * 1024) < 65536:
+                                self.log_replace.emit(self._format_progress(done, 0, lbl), "info")
                 if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
                     self._safe_remove(save_path)
                     try:
@@ -12248,6 +12285,7 @@ if __name__ == '__main__':
         self._deploy_worker.progress.connect(self._on_deploy_progress)
         self._deploy_worker.log.connect(self._log)
         self._deploy_worker.log.connect(self._append_deploy_log)
+        self._deploy_worker.log_replace.connect(self._replace_deploy_log)
         self._deploy_worker.finished.connect(self._on_deploy_finished)
         self._deploy_worker.env_update.connect(self._on_env_update)
         self._deploy_worker.start()
@@ -12272,6 +12310,7 @@ if __name__ == '__main__':
         self._deploy_worker.progress.connect(self._on_deploy_progress)
         self._deploy_worker.log.connect(self._log)
         self._deploy_worker.log.connect(self._append_deploy_log)
+        self._deploy_worker.log_replace.connect(self._replace_deploy_log)
         self._deploy_worker.finished.connect(self._on_deploy_finished)
         self._deploy_worker.env_update.connect(self._on_env_update)
         self._deploy_worker.start()
@@ -12285,6 +12324,19 @@ if __name__ == '__main__':
         color_map = {"ok": "#66BB6A", "err": "#EF5350", "warn": "#FFA726", "info": "#CCCCCC"}
         color = color_map.get(level, "#CCCCCC")
         self.deploy_log_text.append(f'<span style="color:{color}">{msg}</span>')
+        self._write_debug_log(msg, level)
+
+    def _replace_deploy_log(self, msg, level):
+        """替换日志最后一行（用于下载进度条实时更新）"""
+        color_map = {"ok": "#66BB6A", "err": "#EF5350", "warn": "#FFA726", "info": "#CCCCCC"}
+        color = color_map.get(level, "#CCCCCC")
+        doc = self.deploy_log_text.document()
+        cursor = self.deploy_log_text.textCursor()
+        cursor.movePosition(cursor.End)
+        cursor.movePosition(cursor.StartOfBlock, cursor.KeepAnchor)
+        cursor.removeSelectedText()
+        cursor.insertHtml(f'<span style="color:{color}">{msg}</span>')
+        self.deploy_log_text.setTextCursor(cursor)
         self._write_debug_log(msg, level)
 
     def _on_deploy_finished(self, success, msg):

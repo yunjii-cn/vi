@@ -1,12 +1,20 @@
 {
-  "latest": "2026.06.04.2109",
+  "latest": "2026.06.04.2133",
   "release_date": "2026-06-04",
-  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.04.2109",
-  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.04.2109",
+  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.04.2133",
+  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.04.2133",
   "changes": [
-    "修复竞速下载：验证响应有效性+失败后重新竞速"
+    "下载增加进度条显示"
   ],
   "versions": [
+    {
+      "version": "2026.06.04.2133",
+      "date": "2026-06-04 21:34",
+      "changes": [
+        "下载增加进度条显示"
+      ],
+      "filename": "云集智能视频创意站-v2026.06.04.2133.exe"
+    },
     {
       "version": "2026.06.04.2109",
       "date": "2026-06-04 21:10",
