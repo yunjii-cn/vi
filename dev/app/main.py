@@ -7277,7 +7277,7 @@ class MainWindow(QMainWindow):
 
         current_card = QFrame()
         current_card.setStyleSheet(
-            "QFrame { background-color: #1a2e1a; border: 1px solid #2a4a2a; border-radius: 8px; }"
+            "QFrame { background-color: #141e14; border: 1px solid #1e3a1e; border-radius: 8px; }"
         )
         current_card.setContentsMargins(0, 0, 0, 0)
         cc_layout = QVBoxLayout(current_card)
@@ -7285,18 +7285,15 @@ class MainWindow(QMainWindow):
         cc_layout.setSpacing(4)
         cc_top = QHBoxLayout()
         cc_top.setSpacing(10)
-        ver_icon = QLabel("🚀")
-        ver_icon.setStyleSheet("font-size: 16pt; border: none;")
-        cc_top.addWidget(ver_icon)
         cc_ver = QLabel(f"当前版本  v{VERSION}")
-        cc_ver.setStyleSheet("font-size: 11pt; font-weight: bold; color: #4CAF50; border: none;")
+        cc_ver.setStyleSheet("font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif; font-size: 11pt; font-weight: bold; color: #4CAF50; border: none;")
         cc_top.addWidget(cc_ver)
         cc_top.addStretch()
 
         self._ver_source_combo = QComboBox()
         self._ver_source_combo.setFixedWidth(110)
         self._ver_source_combo.setStyleSheet(
-            "QComboBox { background-color: #1a2a1a; color: #8aaa8a; border: 1px solid #2a4a2a; border-radius: 4px; font-size: 8pt; padding: 2px 6px; }"
+            "QComboBox { background-color: #1a2a1a; color: #8aaa8a; border: 1px solid #2a4a2a; border-radius: 4px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; padding: 2px 6px; }"
             "QComboBox::drop-down { border: none; }"
             "QComboBox QAbstractItemView { background-color: #1a2a1a; color: #8aaa8a; selection-background-color: #2a4a2a; }"
         )
@@ -7306,11 +7303,11 @@ class MainWindow(QMainWindow):
         self._ver_source_combo.currentIndexChanged.connect(self._on_update_source_changed)
         cc_top.addWidget(self._ver_source_combo)
 
-        btn_check_remote = QPushButton("🔍 检查更新")
-        btn_check_remote.setFixedSize(110, 30)
+        btn_check_remote = QPushButton("检查更新")
+        btn_check_remote.setFixedSize(100, 30)
         btn_check_remote.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_check_remote.setStyleSheet(
-            "QPushButton { background-color: #2E7D32; color: #fff; border: none; border-radius: 6px; font-size: 9pt; font-weight: bold; }"
+            "QPushButton { background-color: #2E7D32; color: #fff; border: none; border-radius: 6px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; font-weight: bold; }"
             "QPushButton:hover { background-color: #388E3C; }"
         )
         btn_check_remote.clicked.connect(self._check_remote_versions)
@@ -7318,7 +7315,7 @@ class MainWindow(QMainWindow):
         cc_layout.addLayout(cc_top)
         self._ver_current_desc_label = QLabel("")
         self._ver_current_desc_label.setWordWrap(True)
-        self._ver_current_desc_label.setStyleSheet("font-size: 9pt; color: #8aaa8a; border: none;")
+        self._ver_current_desc_label.setStyleSheet("font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; color: #8aaa8a; border: none;")
         cc_layout.addWidget(self._ver_current_desc_label)
         cc_detail_row = QHBoxLayout()
         cc_detail_row.setSpacing(16)
@@ -7339,22 +7336,22 @@ class MainWindow(QMainWindow):
         tab_layout.setContentsMargins(10, 5, 10, 5)
         tab_layout.setSpacing(4)
 
-        self._ver_tab_stable_btn = QPushButton("📦 软件版本")
-        self._ver_tab_stable_btn.setFixedSize(120, 32)
+        self._ver_tab_stable_btn = QPushButton("软件版本")
+        self._ver_tab_stable_btn.setFixedSize(100, 32)
         self._ver_tab_stable_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._ver_tab_stable_btn.setStyleSheet(
-            "QPushButton { background-color: #C62828; color: #FFFFFF; border: none; border-radius: 6px; font-size: 9pt; font-weight: bold; }"
+            "QPushButton { background-color: #C62828; color: #FFFFFF; border: none; border-radius: 6px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; font-weight: bold; }"
             "QPushButton:hover { background-color: #E53935; }"
         )
         self._ver_tab_stable_btn.clicked.connect(lambda: self._switch_ver_tab("stable"))
         tab_layout.addWidget(self._ver_tab_stable_btn)
 
-        self._ver_tab_git_btn = QPushButton("🔧 开发动态")
-        self._ver_tab_git_btn.setFixedSize(120, 32)
+        self._ver_tab_git_btn = QPushButton("开发动态")
+        self._ver_tab_git_btn.setFixedSize(100, 32)
         self._ver_tab_git_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._ver_tab_git_btn.setStyleSheet(
-            "QPushButton { background-color: #444; color: #FFFFFF; border: none; border-radius: 6px; font-size: 9pt; font-weight: bold; }"
-            "QPushButton:hover { background-color: #555; }"
+            "QPushButton { background-color: #333; color: #AAAAAA; border: 1px solid #444; border-radius: 6px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; font-weight: bold; }"
+            "QPushButton:hover { background-color: #444; color: #ddd; }"
         )
         self._ver_tab_git_btn.clicked.connect(lambda: self._switch_ver_tab("git"))
         tab_layout.addWidget(self._ver_tab_git_btn)
@@ -7365,12 +7362,12 @@ class MainWindow(QMainWindow):
         self._ver_status_label.setStyleSheet("font-size: 8pt; color: #888; border: none;")
         tab_layout.addWidget(self._ver_status_label)
 
-        self._ver_expand_btn = QPushButton("📋 列表模式")
-        self._ver_expand_btn.setFixedSize(95, 28)
+        self._ver_expand_btn = QPushButton("列表模式")
+        self._ver_expand_btn.setFixedSize(80, 28)
         self._ver_expand_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._ver_expand_btn.setStyleSheet(
-            "QPushButton { background-color: #333; color: #ccc; border: 1px solid #444; border-radius: 6px; font-size: 8pt; font-weight: bold; }"
-            "QPushButton:hover { background-color: #444; color: #fff; }"
+            "QPushButton { background-color: #222; color: #999; border: 1px solid #333; border-radius: 5px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; font-weight: bold; }"
+            "QPushButton:hover { background-color: #333; color: #ccc; }"
         )
         self._ver_expand_btn.clicked.connect(self._toggle_expand_all)
         tab_layout.addWidget(self._ver_expand_btn)
@@ -7418,12 +7415,12 @@ class MainWindow(QMainWindow):
             return
         self._ver_active_tab = tab
         active_style = (
-            "QPushButton { background-color: #C62828; color: #FFFFFF; border: none; border-radius: 6px; font-size: 9pt; font-weight: bold; }"
+            "QPushButton { background-color: #C62828; color: #FFFFFF; border: none; border-radius: 6px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; font-weight: bold; }"
             "QPushButton:hover { background-color: #E53935; }"
         )
         inactive_style = (
-            "QPushButton { background-color: #444; color: #FFFFFF; border: none; border-radius: 6px; font-size: 9pt; font-weight: bold; }"
-            "QPushButton:hover { background-color: #555; }"
+            "QPushButton { background-color: #333; color: #AAAAAA; border: 1px solid #444; border-radius: 6px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; font-weight: bold; }"
+            "QPushButton:hover { background-color: #444; color: #ddd; }"
         )
         if tab == "stable":
             self._ver_tab_stable_btn.setStyleSheet(active_style)
@@ -7703,22 +7700,22 @@ class MainWindow(QMainWindow):
             exe_info = v.get("exe_info")
 
             if is_current:
-                row_bg = "#1a2e1a"
-                border_color = "#2a4a2a"
+                row_bg = "#141e14"
+                border_color = "#1e3a1e"
             elif is_remote_new:
-                row_bg = "#161620"
-                border_color = "#1f3a4f"
+                row_bg = "#12121e"
+                border_color = "#1e2a3e"
             elif is_available:
-                row_bg = "#161616"
-                border_color = "#222"
+                row_bg = "#141414"
+                border_color = "#1e1e1e"
             else:
-                row_bg = "#111"
-                border_color = "#1a1a1a"
+                row_bg = "#0f0f0f"
+                border_color = "#181818"
 
             card = QFrame()
             card.setProperty("card_bg", row_bg)
             card.setCursor(Qt.CursorShape.PointingHandCursor)
-            card.setStyleSheet(f"background-color: {row_bg}; border: 1px solid {border_color}; border-radius: 6px;")
+            card.setStyleSheet(f"background-color: {row_bg}; border: 1px solid {border_color}; border-radius: 8px;")
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(0, 0, 0, 0)
             card_layout.setSpacing(0)
@@ -7726,13 +7723,13 @@ class MainWindow(QMainWindow):
             row = QFrame()
             row.setStyleSheet(f"background-color: {row_bg}; border: none;")
             row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(12, 6, 12, 6)
-            row_layout.setSpacing(8)
+            row_layout.setContentsMargins(14, 8, 14, 8)
+            row_layout.setSpacing(10)
 
-            ver_color = "#4CAF50" if is_current else ("#42A5F5" if is_remote_new else ("#DDDDDD" if is_available else "#888"))
+            ver_color = "#4CAF50" if is_current else ("#42A5F5" if is_remote_new else ("#CCCCCC" if is_available else "#666"))
             ver_label = QLabel(f"v{ver}")
-            ver_label.setFixedWidth(130)
-            ver_label.setStyleSheet(f"font-family: Consolas; font-size: 10pt; font-weight: bold; color: {ver_color}; border: none;")
+            ver_label.setMinimumWidth(120)
+            ver_label.setStyleSheet(f"font-family: 'Segoe UI', Consolas, monospace; font-size: 10pt; font-weight: bold; color: {ver_color}; border: none;")
             row_layout.addWidget(ver_label)
 
             desc_text = ""
@@ -7743,68 +7740,85 @@ class MainWindow(QMainWindow):
                     desc_text = "、".join(changes[:2])
                     if len(changes) > 2:
                         desc_text += f"等{len(changes)}项"
-                    if len(desc_text) > 40:
-                        desc_text = desc_text[:37] + "..."
+                    if len(desc_text) > 50:
+                        desc_text = desc_text[:47] + "..."
             desc_label = QLabel(desc_text if desc_text else "暂无描述")
             desc_label.setWordWrap(True)
             desc_color = "#999" if desc_text else "#444"
-            desc_label.setStyleSheet(f"font-size: 9pt; color: {desc_color}; border: none;")
+            desc_label.setStyleSheet(f"font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; color: {desc_color}; border: none;")
             row_layout.addWidget(desc_label, stretch=1)
 
-            status_label = QLabel("")
-            status_label.setFixedWidth(90)
+            # 状态标签
+            status_parts = []
             if is_current:
-                status_label.setText("● 当前版本")
-                status_label.setStyleSheet("font-size: 8pt; color: #4CAF50; border: none; font-weight: bold;")
-            elif is_remote_new:
-                status_label.setText("远程新版")
-                status_label.setStyleSheet("font-size: 8pt; color: #42A5F5; border: none;")
+                status_parts.append("当前版本")
             elif is_available and exe_info:
                 size_text = f" {exe_info.get('size_mb', '')}MB" if exe_info.get("size_mb") else ""
-                status_label.setText(f"已下载{size_text}")
-                status_label.setStyleSheet("font-size: 8pt; color: #FF9800; border: none;")
-            elif v.get("remote_info", {}).get("filename"):
-                status_label.setText("可下载")
-                status_label.setStyleSheet("font-size: 8pt; color: #5dade2; border: none;")
+                status_parts.append(f"已下载{size_text}")
+            elif v.get("remote_info", {}).get("download_url") or v.get("remote_info", {}).get("filename"):
+                status_parts.append("可下载")
+            if v.get("build_time"):
+                status_parts.append(v["build_time"])
+            elif v.get("remote_info", {}).get("date"):
+                status_parts.append(v["remote_info"]["date"])
+
+            status_label = QLabel("  |  ".join(status_parts) if status_parts else "—")
+            status_label.setMinimumWidth(80)
+            if is_current:
+                status_label.setStyleSheet("font-family: 'Segoe UI', sans-serif; font-size: 8pt; color: #4CAF50; border: none;")
+            elif is_remote_new:
+                status_label.setStyleSheet("font-family: 'Segoe UI', sans-serif; font-size: 8pt; color: #42A5F5; border: none;")
+            elif is_available:
+                status_label.setStyleSheet("font-family: 'Segoe UI', sans-serif; font-size: 8pt; color: #999; border: none;")
             else:
-                status_label.setText("—")
-                status_label.setStyleSheet("font-size: 8pt; color: #333; border: none;")
+                status_label.setStyleSheet("font-family: 'Segoe UI', sans-serif; font-size: 8pt; color: #555; border: none;")
             row_layout.addWidget(status_label)
 
+            # 按钮区域
+            btn_container = QHBoxLayout()
+            btn_container.setSpacing(6)
+
             if is_available and exe_info and not is_current:
-                switch_btn = QPushButton("🔄 切换")
-                switch_btn.setFixedSize(60, 22)
+                switch_btn = QPushButton("切换到此版本")
+                switch_btn.setFixedHeight(28)
+                switch_btn.setMinimumWidth(90)
                 switch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 switch_btn.setStyleSheet(
-                    "QPushButton { background-color: #2E7D32; color: #fff; border: none; border-radius: 4px; font-size: 8pt; font-weight: bold; }"
-                    "QPushButton:hover { background-color: #388E3C; }"
+                    "QPushButton { background-color: #C62828; color: #fff; border: none; border-radius: 5px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; font-weight: bold; padding: 0 10px; }"
+                    "QPushButton:hover { background-color: #E53935; }"
                 )
                 exe_path = exe_info["path"]
                 git_commit = v.get("git_commit", "")
                 switch_btn.clicked.connect(lambda checked, p=exe_path, gc=git_commit: self._switch_to_exe(p, gc))
-                row_layout.addWidget(switch_btn)
-            elif is_remote_new or (v.get("remote_info", {}).get("filename") and not is_available):
-                dl_btn = QPushButton("📥 下载")
-                dl_btn.setFixedSize(60, 22)
+                btn_container.addWidget(switch_btn)
+
+            if is_remote_new or (v.get("remote_info", {}).get("download_url") and not is_available):
+                dl_btn = QPushButton("下载此版本")
+                dl_btn.setFixedHeight(28)
+                dl_btn.setMinimumWidth(90)
                 dl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 dl_btn.setStyleSheet(
-                    "QPushButton { background-color: #C62828; color: #fff; border: none; border-radius: 4px; font-size: 8pt; font-weight: bold; }"
-                    "QPushButton:hover { background-color: #E53935; }"
+                    "QPushButton { background-color: #2E7D32; color: #fff; border: none; border-radius: 5px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; font-weight: bold; padding: 0 10px; }"
+                    "QPushButton:hover { background-color: #388E3C; }"
                 )
                 rinfo = v.get("remote_info")
                 dl_btn.clicked.connect(lambda checked, ri=rinfo: self._on_download_version(ri))
-                row_layout.addWidget(dl_btn)
-            elif is_current and v.get("remote_info", {}).get("filename"):
-                rdl_btn = QPushButton("📥 重下载")
-                rdl_btn.setFixedSize(65, 22)
+                btn_container.addWidget(dl_btn)
+
+            if is_current and v.get("remote_info", {}).get("download_url"):
+                rdl_btn = QPushButton("重新下载")
+                rdl_btn.setFixedHeight(28)
+                rdl_btn.setMinimumWidth(80)
                 rdl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 rdl_btn.setStyleSheet(
-                    "QPushButton { background-color: #555; color: #ccc; border: none; border-radius: 4px; font-size: 8pt; font-weight: bold; }"
-                    "QPushButton:hover { background-color: #666; color: #fff; }"
+                    "QPushButton { background-color: #333; color: #aaa; border: 1px solid #444; border-radius: 5px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; font-weight: bold; padding: 0 10px; }"
+                    "QPushButton:hover { background-color: #444; color: #ddd; }"
                 )
                 rinfo = v.get("remote_info")
                 rdl_btn.clicked.connect(lambda checked, ri=rinfo: self._on_download_version(ri))
-                row_layout.addWidget(rdl_btn)
+                btn_container.addWidget(rdl_btn)
+
+            row_layout.addLayout(btn_container)
 
             card_layout.addWidget(row)
             has_detail = bool(changes) or bool(v.get("git_commit", ""))
@@ -7817,22 +7831,22 @@ class MainWindow(QMainWindow):
                 detail.setObjectName("_detail")
                 detail.setStyleSheet(f"background-color: {row_bg}; border: none;")
                 detail_layout = QVBoxLayout(detail)
-                detail_layout.setContentsMargins(140, 0, 10, 6)
-                detail_layout.setSpacing(2)
+                detail_layout.setContentsMargins(140, 0, 14, 8)
+                detail_layout.setSpacing(3)
                 git_commit = v.get("git_commit", "")
                 if git_commit:
-                    lbl = QLabel(f"🔗 commit: {git_commit}")
-                    lbl.setStyleSheet("font-family: Consolas; font-size: 9pt; color: #555; border: none;")
+                    lbl = QLabel(f"commit: {git_commit}")
+                    lbl.setStyleSheet("font-family: Consolas, monospace; font-size: 8pt; color: #555; border: none;")
                     detail_layout.addWidget(lbl)
                 if changes:
                     for ch in changes:
                         lbl = QLabel(f"· {ch}")
                         lbl.setWordWrap(True)
-                        lbl.setStyleSheet("font-size: 8pt; color: #777; border: none;")
+                        lbl.setStyleSheet("font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; color: #777; border: none;")
                         detail_layout.addWidget(lbl)
                 else:
                     lbl = QLabel("暂无修改记录")
-                    lbl.setStyleSheet("font-size: 8pt; color: #3a3a3a; border: none;")
+                    lbl.setStyleSheet("font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; color: #3a3a3a; border: none;")
                     detail_layout.addWidget(lbl)
                 card_layout.addWidget(detail)
             self._ver_scroll_layout.addWidget(card)
@@ -7840,12 +7854,12 @@ class MainWindow(QMainWindow):
         self._ver_rendered_count = end
 
         if end < len(ordered):
-            load_more_btn = QPushButton(f"⬇ 加载更多（{len(ordered) - end} 条剩余）")
-            load_more_btn.setFixedHeight(32)
+            load_more_btn = QPushButton(f"加载更多（{len(ordered) - end} 条剩余）")
+            load_more_btn.setFixedHeight(34)
             load_more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             load_more_btn.setStyleSheet(
-                "QPushButton { background-color: #1a1a1a; color: #888; border: 1px solid #2a2a2a; border-radius: 6px; font-size: 9pt; }"
-                "QPushButton:hover { background-color: #222; color: #aaa; }"
+                "QPushButton { background-color: #1a1a1a; color: #888; border: 1px solid #2a2a2a; border-radius: 6px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; }"
+                "QPushButton:hover { background-color: #222; color: #bbb; }"
             )
             load_more_btn.clicked.connect(lambda: self._load_more_stable(ordered, current_version))
             self._ver_scroll_layout.addWidget(load_more_btn)
