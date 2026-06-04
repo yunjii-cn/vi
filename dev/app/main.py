@@ -12146,7 +12146,12 @@ if __name__ == '__main__':
             if env_layout:
                 env_layout.insertWidget(0, self._newbie_guide_frame)
 
-        self._update_newbie_guide()
+        # 初始状态：显示正在检测环境
+        self._newbie_content.setText("正在检测您当前的项目环境……")
+        self._newbie_tip.setText("")
+
+        # 延迟更新为检测结果（等待环境检测完成）
+        QTimer.singleShot(1500, self._update_newbie_guide)
 
     def _update_newbie_guide(self):
         """根据当前部署状态更新新手引导内容"""
@@ -12181,7 +12186,7 @@ if __name__ == '__main__':
             # 未部署
             self._newbie_title.setText("👋 欢迎使用云集智能视频创意站！")
             self._newbie_content.setText(
-                "检测到当前尚未配置运行环境，系统将根据您的硬件自动完成初始化部署。\n"
+                "检测到您当前没有本项目环境，系统将根据您的硬件配置进行初始化部署。\n"
                 "部署流程：UV 包管理器 → Python 环境 → 核心依赖 → 扩展组件 → 必需模型\n"
                 "整个过程全自动，请耐心等待。"
             )
