@@ -2988,22 +2988,19 @@ for dep_name, spec in VERSION_LOCKS.items():
             torch_env.pop("UV_DEFAULT_INDEX", None)
             torch_env.pop("UV_INDEX", None)
             torch_env.pop("PYTHONHOME", None)
-            # 首次尝试：CUDA索引为主，PyPI镜像为辅
-            # first-index 确保torch系列从CUDA索引获取（避免安装CPU版本）
+            # 仅使用CUDA索引安装torch系列，避免PyPI镜像提供CPU版本
             result = self._retry_run(
                 [uv_exe, "pip", "install", "--python", python_exe,
                  f"torch{TORCH_VERSION_CONSTRAINT}",
                  f"torchvision{TORCHVISION_VERSION_CONSTRAINT}",
                  f"torchaudio{TORCHAUDIO_VERSION_CONSTRAINT}",
-                 "--default-index", torch_index,
-                 "--index", self._resolved_mirrors["pip"],
-                 "--index-strategy", "first-index"],
+                 "--default-index", torch_index],
                 label=f"PyTorch ({cuda_variant or 'CUDA'})",
                 max_retries=2,
                 capture_output=True, text=True, timeout=1800, env=torch_env
             )
             if isinstance(result, str):
-                self.log.emit("  △ 混合索引安装失败，尝试仅使用CUDA索引...", "warn")
+                self.log.emit("  △ CUDA索引安装失败，尝试添加PyPI镜像重试...", "warn")
                 fallback_env = torch_env.copy()
                 result = self._retry_run(
                     [uv_exe, "pip", "install", "--python", python_exe,
@@ -3011,6 +3008,7 @@ for dep_name, spec in VERSION_LOCKS.items():
                      f"torchvision{TORCHVISION_VERSION_CONSTRAINT}",
                      f"torchaudio{TORCHAUDIO_VERSION_CONSTRAINT}",
                      "--default-index", torch_index,
+                     "--index", self._resolved_mirrors["pip"],
                      "--index-strategy", "first-index"],
                     label=f"PyTorch ({cuda_variant or 'CUDA'} only-index)",
                     max_retries=2,
@@ -12183,13 +12181,11 @@ if __name__ == '__main__':
             # 未部署
             self._newbie_title.setText("👋 欢迎使用云集智能视频创意站！")
             self._newbie_content.setText(
-                "首次使用需要完成环境部署：\n"
-                "  ① 点击下方「一键部署维护」按钮，等待自动安装完成\n"
-                "  ② 部署完成后，点击上方「运行服务」导航按钮\n"
-                "  ③ 点击「启动全部」，浏览器将自动打开操作界面\n"
-                "  ④ 在浏览器中输入文字描述，即可生成AI视频"
+                "检测到当前尚未配置运行环境，系统将根据您的硬件自动完成初始化部署。\n"
+                "部署流程：UV 包管理器 → Python 环境 → 核心依赖 → 扩展组件 → 必需模型\n"
+                "整个过程全自动，请耐心等待。"
             )
-            self._newbie_tip.setText("💡 提示：如果自动部署未开始，请手动点击「一键部署维护」按钮")
+            self._newbie_tip.setText("💡 提示：部署需下载约 10GB 文件，请确保网络稳定和磁盘空间充足")
 
     def _show_deploy_success_guide(self):
         """部署完成后更新新手引导状态"""
