@@ -12531,9 +12531,15 @@ def main():
     if _IS_FROZEN:
         _validate_exe_filename()
 
-        # 使用 _find_dev_dir 确保资源释放到自部署目录内
-        install_root = _find_dev_dir()
+        install_root = _find_install_root()
         exe_dir = os.path.abspath(os.path.dirname(sys.executable))
+
+        # 优先检查自部署目录是否已存在，避免资源释放到外面
+        deploy_dir = os.path.join(exe_dir, BRAND_NAME)
+        if os.path.isdir(deploy_dir) and os.path.isfile(os.path.join(deploy_dir, LOCK_FILE)):
+            install_root = deploy_dir
+        elif install_root is None:
+            install_root = exe_dir
 
         if install_root != exe_dir:
             exe_name = os.path.basename(sys.executable)
