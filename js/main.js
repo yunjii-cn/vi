@@ -148,6 +148,28 @@ function createParticles(container) {
     });
 }
 
+// --- 登录弹窗 ---
+function openLoginModal() {
+    const modal = document.getElementById('loginModal');
+    const iframe = document.getElementById('loginIframe');
+    if (!modal || !iframe) return;
+    iframe.src = '/sl/connect.php?type=wx';
+    modal.classList.add('active');
+}
+
+function closeLoginModal() {
+    const modal = document.getElementById('loginModal');
+    const iframe = document.getElementById('loginIframe');
+    if (!modal) return;
+    modal.classList.remove('active');
+    if (iframe) iframe.src = '';
+}
+
+// ESC 关闭弹窗
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeLoginModal();
+});
+
 // --- 截图画廊 ---
 function initGallery() {
     const thumbs = document.querySelectorAll('.thumb');

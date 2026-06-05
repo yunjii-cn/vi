@@ -13,3 +13,13 @@ Thumbs.db
 
 # 压缩包
 *.zip
+
+# 下载缓存
+.download_cache.json
+
+# 日志
+sl/debug.log
+sl/error.log
+
+# 私钥（不提交）
+certs/private_key.pem

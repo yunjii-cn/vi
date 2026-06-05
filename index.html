@@ -24,6 +24,10 @@
             <a href="#roadmap" class="nav-link">发展路线</a>
             <a href="#download" class="nav-link">免费下载</a>
         </div>
+        <a href="javascript:void(0)" class="nav-login" id="navLogin" onclick="openLoginModal()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            登录
+        </a>
         <button class="nav-toggle" id="navToggle" aria-label="菜单">
             <span></span><span></span><span></span>
         </button>
@@ -317,13 +321,13 @@
                 <h2>免费下载，即刻开始创作</h2>
                 <p>云集智能视频创意站完全免费提供给用户下载使用<br>Windows 10/11，NVIDIA GPU（最低 8GB 显存）</p>
                 <div class="download-buttons">
-                    <a href="https://gitee.com/yunjii/vi-web/releases/latest" class="btn btn-primary btn-xl" id="downloadBtn" target="_blank">
+                    <a href="/download.php" class="btn btn-primary btn-xl" id="downloadBtn">
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
                         下载 Windows 版本
                     </a>
                 </div>
                 <div class="download-meta">
-                    <span>最新版本：v1.0</span>
+                    <span>最新版本：v2026.06.04</span>
                     <span class="meta-dot">|</span>
                     <span>Windows 10/11</span>
                     <span class="meta-dot">|</span>
@@ -359,6 +363,21 @@
         </div>
     </div>
 </footer>
+
+<!-- 登录弹窗 -->
+<div class="login-modal" id="loginModal">
+    <div class="login-modal-overlay" onclick="closeLoginModal()"></div>
+    <div class="login-modal-content">
+        <button class="login-modal-close" onclick="closeLoginModal()">&times;</button>
+        <img src="/image/ico.png" alt="云集" class="login-modal-logo">
+        <div class="login-modal-title">微信扫码登录</div>
+        <div class="login-modal-subtitle">打开微信扫一扫，快速登录</div>
+        <div class="login-modal-qrcode">
+            <iframe id="loginIframe" src="" width="150" height="150" frameborder="0" scrolling="no"></iframe>
+        </div>
+        <div class="login-modal-hint">扫码即代表同意用户协议和隐私政策</div>
+    </div>
+</div>
 
 <script src="/js/main.js"></script>
 </body>

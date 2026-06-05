@@ -30,7 +30,9 @@
 }
 
 /* --- 重置 --- */
-*, *::before, *::after {
+*,
+*::before,
+*::after {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
@@ -91,12 +93,14 @@ img {
     align-items: center;
     justify-content: space-between;
     height: 64px;
+    position: relative;
 }
 
 .nav-brand {
     display: flex;
     align-items: center;
     gap: 10px;
+    flex-shrink: 0;
 }
 
 .nav-logo {
@@ -115,6 +119,9 @@ img {
 .nav-links {
     display: flex;
     gap: 8px;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
 }
 
 .nav-link {
@@ -129,6 +136,26 @@ img {
 .nav-link:hover {
     color: var(--text-primary);
     background: rgba(255, 255, 255, 0.06);
+}
+
+.nav-login {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 14px;
+    font-size: 13px;
+    color: var(--primary-light);
+    border: 1px solid var(--primary);
+    border-radius: var(--radius-sm);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: all var(--transition);
+    flex-shrink: 0;
+}
+
+.nav-login:hover {
+    background: var(--primary);
+    color: #fff;
 }
 
 .nav-toggle {
@@ -332,8 +359,17 @@ img {
 }
 
 @keyframes scrollBounce {
-    0%, 100% { transform: rotate(45deg) translateY(0); opacity: 0.5; }
-    50% { transform: rotate(45deg) translateY(8px); opacity: 0.8; }
+
+    0%,
+    100% {
+        transform: rotate(45deg) translateY(0);
+        opacity: 0.5;
+    }
+
+    50% {
+        transform: rotate(45deg) translateY(8px);
+        opacity: 0.8;
+    }
 }
 
 /* --- 通用 Section --- */
@@ -836,6 +872,114 @@ img {
 .fade-in.visible {
     opacity: 1;
     transform: translateY(0);
+}
+
+/* --- 登录弹窗 --- */
+.login-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+}
+
+.login-modal.active {
+    display: flex;
+}
+
+.login-modal-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+}
+
+.login-modal-content {
+    position: relative;
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 16px;
+    padding: 40px 32px;
+    width: 340px;
+    text-align: center;
+    z-index: 1;
+    animation: modalIn 0.25s ease;
+}
+
+@keyframes modalIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9) translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.login-modal-close {
+    position: absolute;
+    top: 12px;
+    right: 16px;
+    background: none;
+    border: none;
+    color: #666;
+    font-size: 24px;
+    cursor: pointer;
+    transition: color 0.2s;
+    line-height: 1;
+}
+
+.login-modal-close:hover {
+    color: #fff;
+}
+
+.login-modal-logo {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    margin: 0 auto 16px auto;
+    display: block;
+}
+
+.login-modal-title {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #fff;
+}
+
+.login-modal-subtitle {
+    font-size: 13px;
+    color: #888;
+    margin-bottom: 28px;
+}
+
+.login-modal-qrcode {
+    background: #222222;
+    border: 2px solid #cc0000;
+    border-radius: 12px;
+    padding: 12px;
+    display: inline-block;
+    margin-bottom: 20px;
+}
+
+.login-modal-qrcode iframe {
+    border: none;
+    display: block;
+}
+
+.login-modal-hint {
+    font-size: 12px;
+    color: #666;
 }
 
 /* --- 响应式 --- */
