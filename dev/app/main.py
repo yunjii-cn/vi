@@ -2150,6 +2150,106 @@ class DeployWorker(QThread):
             done_mb = done / (1024 * 1024)
             return f"  ↓ {label} {done_mb:.1f}MB"
 
+    def _monitor_download_progress(self, proc, info, models_dir, target_path, is_folder, expected_bytes):
+        """监控下载进程的文件大小变化，实时更新进度条。
+        后台排空stderr防止管道阻塞，结果存入 self._last_download_stderr。"""
+        import threading as _threading
+        label = info.get("file", "")
+        last_pct = -1
+
+        # 后台线程排空stderr，防止管道阻塞
+        stderr_chunks = []
+        def _drain_stderr():
+            try:
+                while True:
+                    chunk = proc.stderr.read(4096)
+                    if not chunk:
+                        break
+                    stderr_chunks.append(chunk)
+            except Exception:
+                pass
+        drain = _threading.Thread(target=_drain_stderr, daemon=True)
+        drain.start()
+
+        # 确定HF缓存目录（用于监控 .incomplete 文件）
+        hf_home = os.environ.get("HF_HOME",
+                    os.environ.get("HUGGINGFACE_HUB_CACHE",
+                        os.path.join(os.path.expanduser("~"), ".cache", "huggingface")))
+        hf_hub_cache = os.path.join(hf_home, "hub") if not hf_home.endswith("hub") else hf_home
+        repo_cache_name = "models--" + info["repo"].replace("/", "--")
+        repo_blobs_dir = os.path.join(hf_hub_cache, repo_cache_name, "blobs")
+
+        while proc.poll() is None:
+            if self._should_stop:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                self._last_download_stderr = ""
+                return
+
+            downloaded = 0
+            try:
+                if is_folder:
+                    if os.path.isdir(target_path):
+                        for dp, dn, fns in os.walk(target_path):
+                            for fn in fns:
+                                try:
+                                    downloaded += os.path.getsize(os.path.join(dp, fn))
+                                except OSError:
+                                    pass
+                else:
+                    # 检查HF缓存中的 .incomplete 文件
+                    if os.path.isdir(repo_blobs_dir):
+                        for fn in os.listdir(repo_blobs_dir):
+                            if fn.endswith(".incomplete"):
+                                try:
+                                    downloaded += os.path.getsize(os.path.join(repo_blobs_dir, fn))
+                                except OSError:
+                                    pass
+                    # 检查目标文件
+                    if os.path.exists(target_path):
+                        try:
+                            downloaded += os.path.getsize(target_path)
+                        except OSError:
+                            pass
+            except Exception:
+                pass
+
+            if downloaded > 0 and expected_bytes > 0:
+                pct = min(downloaded * 100 // expected_bytes, 99)
+                if pct != last_pct:
+                    last_pct = pct
+                    self.log_replace.emit(self._format_progress(downloaded, expected_bytes, label), "info")
+            elif downloaded > 0:
+                self.log_replace.emit(self._format_progress(downloaded, 0, label), "info")
+
+            time.sleep(2)
+
+        # 进程结束，最终进度更新
+        try:
+            if is_folder:
+                if os.path.isdir(target_path):
+                    downloaded = 0
+                    for dp, dn, fns in os.walk(target_path):
+                        for fn in fns:
+                            try:
+                                downloaded += os.path.getsize(os.path.join(dp, fn))
+                            except OSError:
+                                pass
+                else:
+                    downloaded = 0
+            else:
+                downloaded = os.path.getsize(target_path) if os.path.exists(target_path) else 0
+        except Exception:
+            downloaded = 0
+
+        if downloaded > 0 and expected_bytes > 0:
+            self.log_replace.emit(self._format_progress(downloaded, expected_bytes, label), "info")
+
+        drain.join(timeout=3)
+        self._last_download_stderr = b"".join(stderr_chunks).decode("utf-8", errors="replace")
+
     def _download_with_retry(self, url, save_path, label, max_retries=None):
         retries = max_retries or self.MAX_RETRIES
         last_err = "未知错误"
@@ -3889,19 +3989,16 @@ for d in deps:
                             f"snapshot_download(repo_id='{info['repo']}', local_dir=r'{target_path}', "
                             f"local_dir_use_symlinks=False)"
                         ]
-                        proc = hidden_run(cmd, capture_output=True, text=True, timeout=14400, env=env)
+                        proc = hidden_popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env)
+                        self._monitor_download_progress(proc, info, models_dir, target_path, is_folder, expected_bytes)
                         if proc.returncode == 0 and os.path.exists(target_path):
                             folder_size = sum(f.stat().st_size for f in __import__('pathlib').Path(target_path).rglob("*") if f.is_file())
                             if folder_size > expected_bytes * 0.5:
                                 success = True
                                 self.log.emit(f"  √ {info['file']} 下载完成", "ok")
                                 break
-                        err = proc.stderr[:200] if proc.stderr else "未知错误"
+                        err = self._last_download_stderr[:200] if self._last_download_stderr else "未知错误"
                         self.log.emit(f"  △ 第{attempt}次下载失败: {err}", "warn")
-                        if attempt < self.MAX_RETRIES:
-                            time.sleep(3)
-                    except subprocess.TimeoutExpired:
-                        self.log.emit(f"  △ 第{attempt}次下载超时", "warn")
                         if attempt < self.MAX_RETRIES:
                             time.sleep(3)
                     except Exception as e:
@@ -3943,20 +4040,17 @@ for d in deps:
                         f"hf_hub_download(repo_id='{info['repo']}', filename='{info['file']}', "
                         f"local_dir=r'{models_dir}', force_download={'True' if attempt > 1 else 'False'})"
                     ]
-                    proc = hidden_run(cmd, capture_output=True, text=True, timeout=7200, env=env)
+                    proc = hidden_popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env)
+                    self._monitor_download_progress(proc, info, models_dir, target_path, is_folder, expected_bytes)
                     if proc.returncode == 0 and os.path.exists(target_file) and os.path.getsize(target_file) > expected_bytes * 0.9:
                         success = True
                         self.log.emit(f"  √ {info['file']} 下载完成 (HF镜像)", "ok")
                         break
                     else:
-                        err = proc.stderr[:300] if proc.stderr else "未知错误"
+                        err = self._last_download_stderr[:300] if self._last_download_stderr else "未知错误"
                         self.log.emit(f"  △ HF镜像第{attempt}次下载失败: {err}", "warn")
                         if attempt < self.MAX_RETRIES:
                             time.sleep(5 * attempt)
-                except subprocess.TimeoutExpired:
-                    self.log.emit(f"  △ HF镜像第{attempt}次下载超时", "warn")
-                    if attempt < self.MAX_RETRIES:
-                        time.sleep(5 * attempt)
                 except Exception as e:
                     self.log.emit(f"  △ HF镜像下载异常: {e}", "warn")
                     if attempt < self.MAX_RETRIES:
@@ -3993,12 +4087,13 @@ for d in deps:
                             f"td = os.path.join(r'{models_dir}', '{info['file']}'); "
                             f"shutil.copy2(p, td) if os.path.exists(p) and p != td else None"
                         ]
-                    proc = hidden_run(cmd, capture_output=True, text=True, timeout=7200)
+                    proc = hidden_popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env)
+                    self._monitor_download_progress(proc, info, models_dir, target_path, is_folder, expected_bytes)
                     if proc.returncode == 0 and os.path.exists(target_file) and os.path.getsize(target_file) > expected_bytes * 0.9:
                         success = True
                         self.log.emit(f"  √ {info['file']} 下载完成 (ModelScope)", "ok")
                     else:
-                        err = proc.stderr[:300] if proc.stderr else "未知错误"
+                        err = self._last_download_stderr[:300] if self._last_download_stderr else "未知错误"
                         self.log.emit(f"  △ ModelScope 也失败: {err}", "warn")
                 except Exception as e:
                     self.log.emit(f"  △ ModelScope 异常: {e}", "warn")
@@ -4015,12 +4110,13 @@ for d in deps:
                         f"hf_hub_download(repo_id='{info['repo']}', filename='{info['file']}', "
                         f"local_dir=r'{models_dir}', force_download=True)"
                     ]
-                    proc = hidden_run(cmd, capture_output=True, text=True, timeout=7200, env=direct_env)
+                    proc = hidden_popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=direct_env)
+                    self._monitor_download_progress(proc, info, models_dir, target_path, is_folder, expected_bytes)
                     if proc.returncode == 0 and os.path.exists(target_file) and os.path.getsize(target_file) > expected_bytes * 0.9:
                         success = True
                         self.log.emit(f"  √ {info['file']} 下载完成 (HF直连)", "ok")
                     else:
-                        err = proc.stderr[:300] if proc.stderr else "未知错误"
+                        err = self._last_download_stderr[:300] if self._last_download_stderr else "未知错误"
                         self.log.emit(f"  △ HF直连也失败: {err}", "warn")
                 except Exception as e:
                     self.log.emit(f"  △ HF直连异常: {e}", "warn")

@@ -5,8 +5,19 @@ EXE构建脚本 - 云集智能视频创意站
 --onefile 模式打包（单文件，稳定可靠）
 
 使用方法：
-  python build-version.py 修改内容1 修改内容2 ...
-  python build-version.py
+  python build-version.py --dev 修改内容1 修改内容2 ...    # 日常开发：仅git提交推送
+  python build-version.py --build 修改内容1 修改内容2 ...  # 测试构建：打包EXE到dist+git推送（不更新版本列表）
+  python build-version.py --release 修改内容1 修改内容2 ... # 正式发布：以git为依据合并版本描述+更新版本列表
+  python build-version.py --build                       # 交互式输入修改内容
+  python build-version.py                               # 默认 --build
+
+版本发布规则：
+  - ver/ 文件夹是稳定版的依据：只有手动放入 ver/ 的版本才会发布EXE给用户下载
+  - 已发布的版本和EXE永久存在（不可逆），除非主动删除
+  - 日常开发用bat测试，成熟后打包EXE到dist并推送git
+  - 亲测稳定后手动放入ver/，再使用 --release 正式发布
+  - git提交面向开发者（源码修改描述），软件版本面向用户（版本变化描述）
+  - --release 时以git历史为依据合并和完善版本描述，只看修改结果区别总结
 
 架构说明：
   - --onefile 模式打包（单文件EXE，启动稍慢但极少出问题）
@@ -565,27 +576,102 @@ def cleanup():
         print(f"  清理 __pycache__ ({pycache_count} 个目录)")
 
 
-# ── 部署到 dev/ ──
+# ── 发布EXE到 ver/ 目录 ──
+def publish_to_ver(exe_path: Path):
+    """将EXE复制到 ver/ 目录，标记为稳定版"""
+    ver_dir = PROJECT_ROOT / "ver"
+    ver_dir.mkdir(parents=True, exist_ok=True)
+    dest = ver_dir / exe_path.name
+    if dest.exists():
+        print(f"  ⚠ ver/ 中已存在: {exe_path.name}，跳过复制")
+    else:
+        shutil.copy2(str(exe_path), str(dest))
+        print(f"  ✓ 已发布到 ver/: {exe_path.name}")
+    return dest
+
+
+def _collect_git_changes_since_last_release():
+    """从git历史中收集自上次release以来的变更，合并为面向用户的版本描述"""
+    try:
+        # 获取上次release标签或提交
+        result = subprocess.run(
+            ['git', 'log', '--oneline', '--grep=^release:', '-1'],
+            capture_output=True, text=True,
+            cwd=PROJECT_ROOT, timeout=10
+        )
+        last_release_hash = ""
+        if result.stdout.strip():
+            last_release_hash = result.stdout.strip().split()[0]
+            print(f"  上次正式发布: {result.stdout.strip()[:60]}")
+
+        if last_release_hash:
+            # 获取自上次release以来的所有提交
+            result = subprocess.run(
+                ['git', 'log', '--oneline', f'{last_release_hash}..HEAD'],
+                capture_output=True, text=True,
+                cwd=PROJECT_ROOT, timeout=10
+            )
+            commits = result.stdout.strip().split('\n') if result.stdout.strip() else []
+        else:
+            # 没有release记录，取最近20条
+            result = subprocess.run(
+                ['git', 'log', '--oneline', '-20'],
+                capture_output=True, text=True,
+                cwd=PROJECT_ROOT, timeout=10
+            )
+            commits = result.stdout.strip().split('\n') if result.stdout.strip() else []
+
+        if not commits or commits == ['']:
+            print("  未找到git变更记录")
+            return []
+
+        print(f"  收集到 {len(commits)} 条git提交记录")
+        return commits
+    except Exception as e:
+        print(f"  获取git历史失败: {e}")
+        return []
+
+
+# ── 主流程 ──
 def main():
+    # 解析命令行参数
+    args = sys.argv[1:]
+    mode = "build"  # 默认模式：打包+git推送
+    changes = []
+
+    for arg in args:
+        if arg in ("--dev", "--build", "--release"):
+            mode = arg.lstrip("-")
+        else:
+            changes.append(arg)
+
+    mode_labels = {
+        "dev": "日常开发 (dev)",
+        "build": "测试构建 (build)",
+        "release": "正式发布 (release)",
+    }
+    mode_label = mode_labels.get(mode, mode)
+
     print("=" * 60)
     print(f"  {APP_NAME} - 版本化构建工具")
     print("=" * 60)
     print()
     print(f"  版本: {VERSION}")
+    print(f"  模式: {mode_label}")
     print(f"  源码: {ROOT_DIR}")
-    print(f"  输出: {BUILD_DIR}")
-    print(f"  模式: --onefile (单文件)")
+    if mode in ("build", "release"):
+        print(f"  输出: {BUILD_DIR}")
+    if mode == "release":
+        print(f"  发布: ver/")
     print()
 
-    changes = []
-    if len(sys.argv) > 1:
-        changes = sys.argv[1:]
+    if changes:
         print("使用命令行提供的修改内容：")
         for i, change in enumerate(changes, 1):
             print(f"  {i}. {change}")
         print()
     else:
-        print("请输入本次版本的修改内容：")
+        print("请输入本次修改内容：")
         print("（每行一条，输入空行结束）")
         print()
 
@@ -608,63 +694,174 @@ def main():
         print()
 
     try:
-        # Step 0: 代码验证
-        print("── Step 0: 代码验证 ──")
-        if not validate_code_before_build():
+        # ── 日常开发模式：仅git提交推送 ──
+        if mode == "dev":
+            commit_message = f"dev: {changes[0]}\n\n" + "\n".join([f"- {c}" for c in changes])
+            git_commit_and_push(commit_message)
+
             print()
-            print("❌ 打包中止：代码验证未通过，请修复上述错误后重试。")
-            sys.exit(1)
-        print()
+            print("=" * 60)
+            print("  开发提交完成！")
+            print(f"  描述: {changes[0]}")
+            print("=" * 60)
+            return
 
-        # Step 1: 检查并移除 BOM
-        print("── Step 1: 预处理 ──")
-        strip_bom_from_py_files()
-        print()
+        # ── 测试构建模式：打包EXE + git提交推送 ──
+        if mode == "build":
+            # Step 0: 代码验证
+            print("── Step 0: 代码验证 ──")
+            if not validate_code_before_build():
+                print()
+                print("❌ 打包中止：代码验证未通过，请修复上述错误后重试。")
+                sys.exit(1)
+            print()
 
-        # Step 2: PyInstaller 打包
-        print("── Step 2: PyInstaller 打包 (--onefile) ──")
-        exe_path = build_exe()
-        print()
+            # Step 1: 预处理
+            print("── Step 1: 预处理 ──")
+            strip_bom_from_py_files()
+            print()
 
-        # Step 3: 打包后处理
-        print("── Step 3: 打包后处理 ──")
-        exe_output = post_build(exe_path)
-        print()
+            # Step 2: PyInstaller 打包
+            print("── Step 2: PyInstaller 打包 (--onefile) ──")
+            exe_path = build_exe()
+            print()
 
-        # Step 4: 清理
-        print("── Step 4: 清理 ──")
-        cleanup()
-        print()
+            # Step 3: 打包后处理
+            print("── Step 3: 打包后处理 ──")
+            exe_output = post_build(exe_path)
+            print()
 
-        # Step 5: 记录版本
-        print("── Step 5: 记录版本 ──")
-        version_history = load_version_history()
-        version_name = f"{APP_NAME}-v{VERSION}"
-        version_history[version_name] = {
-            "version": version_name,
-            "changes": changes,
-            "build_time": datetime.now().isoformat(),
-            "version_number": VERSION
-        }
-        save_version_history(version_history)
-        print("  ✓ 版本历史已更新")
+            # Step 4: 清理
+            print("── Step 4: 清理 ──")
+            cleanup()
+            print()
 
-        update_versions_json(VERSION, changes, exe_output.name)
+            # Step 5: 记录版本历史（仅本地记录，不更新版本列表）
+            print("── Step 5: 记录版本历史 ──")
+            version_history = load_version_history()
+            version_name = f"{APP_NAME}-v{VERSION}"
+            version_history[version_name] = {
+                "version": version_name,
+                "changes": changes,
+                "build_time": datetime.now().isoformat(),
+                "version_number": VERSION
+            }
+            save_version_history(version_history)
+            print("  ✓ 版本历史已更新（本地）")
 
-        print()
+            print()
 
-        # 完成
-        print("=" * 60)
-        print("  构建完成！")
-        print(f"  EXE: {exe_output}")
-        size_mb = exe_output.stat().st_size / (1024 * 1024)
-        print(f"  大小: {size_mb:.1f} MB")
-        print(f"  资源目录: {ROOT_DIR}")
-        print("=" * 60)
+            # 完成
+            print("=" * 60)
+            print("  测试构建完成！")
+            print(f"  EXE: {exe_output}")
+            size_mb = exe_output.stat().st_size / (1024 * 1024)
+            print(f"  大小: {size_mb:.1f} MB")
+            print(f"  资源目录: {ROOT_DIR}")
+            print("  提示: 亲测稳定后手动放入 ver/，再使用 --release 正式发布")
+            print("=" * 60)
 
-        # Git 提交
-        commit_message = f"feat: 发布版本 v{VERSION}\n\n" + "\n".join([f"- {change}" for change in changes])
-        git_commit_and_push(commit_message)
+            # Git 提交（开发者视角的源码修改描述）
+            commit_message = f"build: v{VERSION}\n\n" + "\n".join([f"- {c}" for c in changes])
+            git_commit_and_push(commit_message)
+            return
+
+        # ── 正式发布模式：以git为依据合并版本描述 + 更新版本列表 ──
+        if mode == "release":
+            # 检查ver/目录中是否有待发布的EXE
+            ver_dir = PROJECT_ROOT / "ver"
+            if not ver_dir.is_dir():
+                print("❌ ver/ 目录不存在，请先将测试稳定的EXE放入 ver/ 目录")
+                sys.exit(1)
+
+            ver_exes = sorted(ver_dir.glob("*.exe"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if not ver_exes:
+                print("❌ ver/ 目录中没有EXE文件，请先将测试稳定的EXE放入 ver/ 目录")
+                sys.exit(1)
+
+            # 找出ver/中尚未在版本列表中记录的EXE
+            release_file = PROJECT_ROOT / "release" / "version.json"
+            released_versions = set()
+            if release_file.exists():
+                try:
+                    with open(release_file, 'r', encoding='utf-8') as f:
+                        release_data = json.load(f)
+                    for v in release_data.get("versions", []):
+                        released_versions.add(v.get("exe", v.get("filename", "")))
+                except Exception:
+                    pass
+
+            unreleased = [e for e in ver_exes if e.name not in released_versions]
+
+            if not unreleased:
+                print("  ver/ 中的所有EXE已发布，无需重复发布")
+                return
+
+            print(f"  发现 {len(unreleased)} 个待发布的EXE：")
+            for e in unreleased:
+                size_mb = e.stat().st_size / (1024 * 1024)
+                print(f"    - {e.name} ({size_mb:.1f} MB)")
+            print()
+
+            # 收集git历史作为版本描述依据
+            print("── 收集git变更历史 ──")
+            git_commits = _collect_git_changes_since_last_release()
+            print()
+
+            # 如果命令行提供了描述，直接使用；否则提示用户基于git历史编写
+            if not changes or changes == ["优化和修复"]:
+                if git_commits:
+                    print("  以下git提交记录可作为版本描述参考：")
+                    for i, commit in enumerate(git_commits[:15], 1):
+                        print(f"    {i}. {commit[:80]}")
+                    print()
+                    print("  请输入面向用户的版本描述（合并git历史，只看修改结果区别总结）：")
+                    print("  （每行一条，输入空行结束）")
+                    print()
+                    changes = []
+                    line_num = 1
+                    try:
+                        while True:
+                            line = input(f"  {line_num}. ").strip()
+                            if not line:
+                                break
+                            changes.append(line)
+                            line_num += 1
+                    except (EOFError, KeyboardInterrupt):
+                        pass
+                    if not changes:
+                        changes = ["优化和修复"]
+
+            # 更新版本列表
+            print()
+            print("── 更新版本列表 ──")
+            for ver_exe in unreleased:
+                # 从EXE文件名提取版本号
+                exe_name = ver_exe.name
+                ver_match = None
+                import re
+                m = re.search(r'v(\d{4}\.\d{2}\.\d{2}\.\d{4})', exe_name)
+                if m:
+                    ver_match = m.group(1)
+
+                if ver_match:
+                    update_versions_json(ver_match, changes, exe_name)
+                    print(f"  ✓ {exe_name} 已添加到版本列表")
+                else:
+                    print(f"  ⚠ 无法从文件名提取版本号: {exe_name}，跳过")
+
+            print()
+
+            # 完成
+            print("=" * 60)
+            print("  正式版发布完成！")
+            print(f"  发布版本数: {len(unreleased)}")
+            print(f"  版本描述: {changes[0]}")
+            print("=" * 60)
+
+            # Git 提交（面向用户的版本变化描述）
+            commit_message = f"release: v{VERSION}\n\n" + "\n".join([f"- {c}" for c in changes])
+            git_commit_and_push(commit_message)
 
     except subprocess.CalledProcessError as e:
         print(f"\n打包失败：{e}")
