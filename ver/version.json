@@ -1,12 +1,18 @@
 {
-  "latest": "2026.06.05.1713",
+  "latest": "2026.06.05.1805",
   "release_date": "2026-06-05",
   "changes": [
-    "优化版本更新与Git历史获取机制：启动时优先读取本地缓存，避免重复请求远程数据",
-    "新增更新源自动竞速模式，支持多源并行竞速与单源直连切换",
-    "移除缓存1小时过期限制，本地缓存永久有效直至用户主动检查更新"
+    "修复Gitee版本列表获取路径错误（ver/version.json而非release/version.json）"
   ],
   "versions": [
+    {
+      "version": "2026.06.05.1805",
+      "date": "2026-06-05 18:06",
+      "changes": [
+        "修复Gitee版本列表获取路径错误（ver/version.json而非release/version.json）"
+      ],
+      "filename": "云集智能视频创意站-v2026.06.05.1805.exe"
+    },
     {
       "version": "2026.06.05.1713",
       "date": "2026-06-05 17:15",
@@ -261,6 +267,6 @@
       ]
     }
   ],
-  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.05.1713",
-  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.05.1713"
+  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.05.1805",
+  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.05.1805"
 }

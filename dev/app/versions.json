@@ -1,5 +1,15 @@
 [
   {
+    "version": "2026.06.05.1805",
+    "date": "2026-06-05 18:06",
+    "message": "修复Gitee版本列表获取路径错误（ver/version.json而非release/version.json）",
+    "changes": [
+      "修复Gitee版本列表获取路径错误（ver/version.json而非release/version.json）"
+    ],
+    "name": "云集智能视频创意站-v2026.06.05.1805.exe",
+    "download_url": ""
+  },
+  {
     "version": "2026.06.05.1713",
     "date": "2026-06-05 17:15",
     "message": "优化版本更新与Git历史获取机制：启动时优先读取本地缓存，避免重复请求远程数据",

@@ -2797,5 +2797,13 @@
     ],
     "build_time": "2026-06-05T17:15:10.440452",
     "version_number": "2026.06.05.1713"
+  },
+  "云集智能视频创意站-v2026.06.05.1805": {
+    "version": "云集智能视频创意站-v2026.06.05.1805",
+    "changes": [
+      "修复Gitee版本列表获取路径错误（ver/version.json而非release/version.json）"
+    ],
+    "build_time": "2026-06-05T18:06:38.192646",
+    "version_number": "2026.06.05.1805"
   }
 }
