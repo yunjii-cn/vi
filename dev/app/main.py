@@ -76,7 +76,7 @@ def _load_project_config():
             "gitee": "yunjii/vi"
         },
         "paths": {
-            "version_json": "ver/version.json",
+            "version_json": "release/version.json",
             "dev": "dev",
             "app": "app",
             "ver": "ver",
