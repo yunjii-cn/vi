@@ -1,10 +1,18 @@
 {
-  "latest": "2026.06.05.1805",
+  "latest": "2026.06.05.1816",
   "release_date": "2026-06-05",
   "changes": [
-    "修复Gitee版本列表获取路径错误（ver/version.json而非release/version.json）"
+    "修复版本更新获取：同步release目录到Gitee仓库，恢复Gitee源路径为release/version.json"
   ],
   "versions": [
+    {
+      "version": "2026.06.05.1816",
+      "date": "2026-06-05 18:18",
+      "changes": [
+        "修复版本更新获取：同步release目录到Gitee仓库，恢复Gitee源路径为release/version.json"
+      ],
+      "filename": "云集智能视频创意站-v2026.06.05.1816.exe"
+    },
     {
       "version": "2026.06.05.1805",
       "date": "2026-06-05 18:06",
@@ -267,6 +275,6 @@
       ]
     }
   ],
-  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.05.1805",
-  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.05.1805"
+  "download_url": "https://github.com/yunjii-cn/vi/releases/tag/v2026.06.05.1816",
+  "gitee_download_url": "https://gitee.com/yunjii/vi/releases/tag/v2026.06.05.1816"
 }

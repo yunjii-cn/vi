@@ -1,6 +1,16 @@
 {
-  "latest": "2026.06.05.1805",
+  "latest": "2026.06.05.1816",
   "versions": [
+    {
+      "version": "2026.06.05.1816",
+      "date": "2026-06-05",
+      "exe": "云集智能视频创意站-v2026.06.05.1816.exe",
+      "filename": "云集智能视频创意站-v2026.06.05.1816.exe",
+      "message": "修复版本更新获取：同步release目录到Gitee仓库，恢复Gitee源路径为release/version.json",
+      "changes": [
+        "修复版本更新获取：同步release目录到Gitee仓库，恢复Gitee源路径为release/version.json"
+      ]
+    },
     {
       "version": "2026.06.05.1805",
       "date": "2026-06-05",
