@@ -102,26 +102,36 @@ def git_commit_and_push(commit_message):
         for attempt in range(max_attempts):
             try:
                 result = subprocess.run(
-                    ['git', 'push'],
+                    ['git', 'push', 'origin', 'main'],
                     cwd=PROJECT_ROOT, capture_output=True, text=True,
                     timeout=180
                 )
                 if result.returncode == 0:
-                    print("  ✓ 推送成功")
-                    return True
+                    print("  ✓ 推送成功 (origin/main)")
+                    break
                 else:
                     print(f"  警告：推送失败（第{attempt + 1}次尝试）：{result.stderr}")
                     if attempt < max_attempts - 1:
-                        print("  重试中...")
-                        time.sleep(3)
+                        time.sleep(2)
             except subprocess.TimeoutExpired:
                 print(f"  警告：推送超时（第{attempt + 1}次尝试）")
                 if attempt < max_attempts - 1:
-                    print("  重试中...")
-                    time.sleep(3)
+                    time.sleep(2)
+        # 推送到 Gitee
+        try:
+            result = subprocess.run(
+                ['git', 'push', 'gitee', 'main'],
+                cwd=PROJECT_ROOT, capture_output=True, text=True,
+                timeout=180
+            )
+            if result.returncode == 0:
+                print("  ✓ 推送成功 (gitee/main)")
+            else:
+                print(f"  警告：Gitee推送失败：{result.stderr}")
+        except subprocess.TimeoutExpired:
+            print("  警告：Gitee推送超时")
 
-        print("  ✗ 推送失败，请稍后手动推送")
-        return False
+        return True
 
     except subprocess.CalledProcessError as e:
         print(f"  Git操作失败：{e}")
