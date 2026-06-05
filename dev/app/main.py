@@ -2151,27 +2151,73 @@ class DeployWorker(QThread):
             return f"  ↓ {label} {done_mb:.1f}MB"
 
     def _monitor_download_progress(self, proc, info, models_dir, target_path, is_folder, expected_bytes):
-        """监控下载进程的文件大小变化，实时更新进度条。
-        后台排空stderr防止管道阻塞，结果存入 self._last_download_stderr。"""
+        """监控下载进程，从stderr解析进度信息，实时更新进度条。
+        huggingface_hub / modelscope 下载时会在stderr输出进度条信息。"""
         import threading as _threading
+        import re as _re
         label = info.get("file", "")
         last_pct = -1
 
-        # 后台线程排空stderr，防止管道阻塞
-        stderr_chunks = []
+        # 后台线程实时读取stderr，解析进度信息
+        stderr_lines = []
+        current_pct = [0]  # 用列表包装以便在线程中修改
+
         def _drain_stderr():
             try:
+                buf = b""
                 while True:
-                    chunk = proc.stderr.read(4096)
+                    chunk = proc.stderr.read(256)
                     if not chunk:
                         break
-                    stderr_chunks.append(chunk)
+                    buf += chunk
+                    # 按行处理
+                    while b"\r" in buf or b"\n" in buf:
+                        # \r 是进度条覆盖，\n 是换行
+                        if b"\r" in buf:
+                            idx = buf.index(b"\r")
+                            line = buf[:idx].decode("utf-8", errors="replace")
+                            buf = buf[idx + 1:]
+                        elif b"\n" in buf:
+                            idx = buf.index(b"\n")
+                            line = buf[:idx].decode("utf-8", errors="replace")
+                            buf = buf[idx + 1:]
+                        else:
+                            break
+                        line = line.strip()
+                        if line:
+                            stderr_lines.append(line)
+                            # 解析 huggingface_hub 进度格式: "Downloading:  45%|████▌     | 500M/1.10G"
+                            m = _re.search(r'(\d+)%', line)
+                            if m:
+                                try:
+                                    current_pct[0] = int(m.group(1))
+                                except ValueError:
+                                    pass
+                            # 解析 modelscope 进度格式: "Downloading: 45.0%"
+                            m2 = _re.search(r'[Dd]ownload.*?(\d+(?:\.\d+)?)\s*%', line)
+                            if m2:
+                                try:
+                                    current_pct[0] = int(float(m2.group(1)))
+                                except ValueError:
+                                    pass
+                # 处理剩余数据
+                if buf:
+                    line = buf.decode("utf-8", errors="replace").strip()
+                    if line:
+                        stderr_lines.append(line)
+                        m = _re.search(r'(\d+)%', line)
+                        if m:
+                            try:
+                                current_pct[0] = int(m.group(1))
+                            except ValueError:
+                                pass
             except Exception:
                 pass
+
         drain = _threading.Thread(target=_drain_stderr, daemon=True)
         drain.start()
 
-        # 确定HF缓存目录（用于监控 .incomplete 文件）
+        # 同时监控目标文件/目录大小变化（作为备用进度来源）
         hf_home = os.environ.get("HF_HOME",
                     os.environ.get("HUGGINGFACE_HUB_CACHE",
                         os.path.join(os.path.expanduser("~"), ".cache", "huggingface")))
@@ -2188,67 +2234,60 @@ class DeployWorker(QThread):
                 self._last_download_stderr = ""
                 return
 
-            downloaded = 0
-            try:
-                if is_folder:
-                    if os.path.isdir(target_path):
-                        for dp, dn, fns in os.walk(target_path):
-                            for fn in fns:
-                                try:
-                                    downloaded += os.path.getsize(os.path.join(dp, fn))
-                                except OSError:
-                                    pass
-                else:
-                    # 检查HF缓存中的 .incomplete 文件
-                    if os.path.isdir(repo_blobs_dir):
-                        for fn in os.listdir(repo_blobs_dir):
-                            if fn.endswith(".incomplete"):
-                                try:
-                                    downloaded += os.path.getsize(os.path.join(repo_blobs_dir, fn))
-                                except OSError:
-                                    pass
-                    # 检查目标文件
-                    if os.path.exists(target_path):
-                        try:
-                            downloaded += os.path.getsize(target_path)
-                        except OSError:
-                            pass
-            except Exception:
-                pass
+            # 优先使用stderr解析的百分比
+            pct_from_stderr = current_pct[0]
 
-            if downloaded > 0 and expected_bytes > 0:
-                pct = min(downloaded * 100 // expected_bytes, 99)
-                if pct != last_pct:
-                    last_pct = pct
-                    self.log_replace.emit(self._format_progress(downloaded, expected_bytes, label), "info")
-            elif downloaded > 0:
-                self.log_replace.emit(self._format_progress(downloaded, 0, label), "info")
-
-            time.sleep(2)
-
-        # 进程结束，最终进度更新
-        try:
-            if is_folder:
-                if os.path.isdir(target_path):
-                    downloaded = 0
-                    for dp, dn, fns in os.walk(target_path):
-                        for fn in fns:
+            # 如果stderr没有进度信息，尝试从文件大小推断
+            pct_from_size = 0
+            if pct_from_stderr == 0 and expected_bytes > 0:
+                downloaded = 0
+                try:
+                    if is_folder:
+                        if os.path.isdir(target_path):
+                            for dp, dn, fns in os.walk(target_path):
+                                for fn in fns:
+                                    try:
+                                        downloaded += os.path.getsize(os.path.join(dp, fn))
+                                    except OSError:
+                                        pass
+                    else:
+                        if os.path.isdir(repo_blobs_dir):
+                            for fn in os.listdir(repo_blobs_dir):
+                                if fn.endswith(".incomplete"):
+                                    try:
+                                        downloaded += os.path.getsize(os.path.join(repo_blobs_dir, fn))
+                                    except OSError:
+                                        pass
+                        if os.path.exists(target_path):
                             try:
-                                downloaded += os.path.getsize(os.path.join(dp, fn))
+                                downloaded += os.path.getsize(target_path)
                             except OSError:
                                 pass
+                except Exception:
+                    pass
+                if downloaded > 0:
+                    pct_from_size = min(downloaded * 100 // expected_bytes, 99)
+
+            pct = max(pct_from_stderr, pct_from_size)
+            if pct > 0 and pct != last_pct:
+                last_pct = pct
+                if expected_bytes > 0 and pct_from_size > pct_from_stderr:
+                    # 从文件大小推断的，显示具体大小
+                    self.log_replace.emit(self._format_progress(
+                        expected_bytes * pct // 100, expected_bytes, label), "info")
                 else:
-                    downloaded = 0
-            else:
-                downloaded = os.path.getsize(target_path) if os.path.exists(target_path) else 0
-        except Exception:
-            downloaded = 0
+                    # 从stderr解析的百分比
+                    self.log_replace.emit(self._format_progress(
+                        expected_bytes * pct // 100, expected_bytes, label), "info")
 
-        if downloaded > 0 and expected_bytes > 0:
-            self.log_replace.emit(self._format_progress(downloaded, expected_bytes, label), "info")
+            time.sleep(1)
 
+        # 进程结束，最终进度更新
         drain.join(timeout=3)
-        self._last_download_stderr = b"".join(stderr_chunks).decode("utf-8", errors="replace")
+        self._last_download_stderr = "\n".join(stderr_lines[-10:]) if stderr_lines else ""
+
+        if proc.returncode == 0:
+            self.log_replace.emit(self._format_progress(expected_bytes, expected_bytes, label), "info")
 
     def _download_with_retry(self, url, save_path, label, max_retries=None):
         retries = max_retries or self.MAX_RETRIES
@@ -3977,6 +4016,8 @@ for d in deps:
                 self.log.emit(f"  下载 {info['file']} ({info['size_bytes']/1024/1024/1024:.1f}GB，文件夹)...", "info")
                 env = os.environ.copy()
                 env["HF_ENDPOINT"] = self._resolved_mirrors["hf_endpoint"]
+                env["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+                env["TQDM_DISABLE"] = "0"
                 env.pop("PYTHONHOME", None)
                 success = False
                 for attempt in range(1, self.MAX_RETRIES + 1):
@@ -3984,7 +4025,7 @@ for d in deps:
                         return self.STEP_STATUS_FAILED
                     try:
                         cmd = [
-                            python_exe, "-c",
+                            python_exe, "-u", "-c",
                             f"from huggingface_hub import snapshot_download; "
                             f"snapshot_download(repo_id='{info['repo']}', local_dir=r'{target_path}', "
                             f"local_dir_use_symlinks=False)"
@@ -4026,6 +4067,8 @@ for d in deps:
 
             env = os.environ.copy()
             env["HF_ENDPOINT"] = self._resolved_mirrors["hf_endpoint"]
+            env["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+            env["TQDM_DISABLE"] = "0"
             env.pop("PYTHONHOME", None)
 
             success = False
@@ -4035,7 +4078,7 @@ for d in deps:
                     return self.STEP_STATUS_FAILED
                 try:
                     cmd = [
-                        python_exe, "-c",
+                        python_exe, "-u", "-c",
                         f"from huggingface_hub import hf_hub_download; "
                         f"hf_hub_download(repo_id='{info['repo']}', filename='{info['file']}', "
                         f"local_dir=r'{models_dir}', force_download={'True' if attempt > 1 else 'False'})"
@@ -4072,14 +4115,14 @@ for d in deps:
                     is_folder = info.get("is_folder", False)
                     if is_folder:
                         cmd = [
-                            python_exe, "-c",
+                            python_exe, "-u", "-c",
                             f"from modelscope.hub.snapshot_download import snapshot_download; "
                             f"snapshot_download(model_id='{ms_model_id}', "
                             f"local_dir=r'{target_path}')"
                         ]
                     else:
                         cmd = [
-                            python_exe, "-c",
+                            python_exe, "-u", "-c",
                             f"from modelscope.hub.file_download import model_file_download; "
                             f"p = model_file_download(model_id='{ms_model_id}', "
                             f"file_path='{info['file']}', cache_dir=r'{models_dir}'); "
@@ -4103,9 +4146,11 @@ for d in deps:
                 try:
                     direct_env = os.environ.copy()
                     direct_env.pop("HF_ENDPOINT", None)
+                    direct_env["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+                    direct_env["TQDM_DISABLE"] = "0"
                     direct_env.pop("PYTHONHOME", None)
                     cmd = [
-                        python_exe, "-c",
+                        python_exe, "-u", "-c",
                         f"from huggingface_hub import hf_hub_download; "
                         f"hf_hub_download(repo_id='{info['repo']}', filename='{info['file']}', "
                         f"local_dir=r'{models_dir}', force_download=True)"
@@ -7436,7 +7481,7 @@ class MainWindow(QMainWindow):
         self._ver_status_label.setStyleSheet("font-size: 8pt; color: #888; border: none;")
         tab_layout.addWidget(self._ver_status_label)
 
-        self._ver_expand_btn = QPushButton("📂 全部展开")
+        self._ver_expand_btn = QPushButton("📂 全部收起")
         self._ver_expand_btn.setMinimumWidth(90)
         self._ver_expand_btn.setFixedHeight(28)
         self._ver_expand_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -7543,6 +7588,9 @@ class MainWindow(QMainWindow):
 
     def _toggle_expand_all(self):
         self._ver_expanded = self._ver_expand_btn.isChecked() if self._ver_expand_btn else not self._ver_expanded
+        # 更新按钮文字
+        if self._ver_expand_btn:
+            self._ver_expand_btn.setText("📂 全部收起" if self._ver_expanded else "📂 全部展开")
         # 同步所有卡片的展开状态，但列表模式下当前版本始终展开
         for v in self._ver_stable_data:
             self._ver_card_expanded[v["version"]] = self._ver_expanded
@@ -11817,6 +11865,34 @@ if __name__ == '__main__':
         self._kill_port_processes()
         self._enable_buttons()
 
+    def _stop_non_service_procs(self):
+        """关闭GUI时调用：停止部署worker、下载进程等，但保留前后端服务进程继续运行"""
+        # 停止部署worker
+        if hasattr(self, '_deploy_worker') and self._deploy_worker and self._deploy_worker.isRunning():
+            self._deploy_worker.cancel()
+            self._deploy_worker.wait(3000)
+
+        # 停止模型下载进程
+        if hasattr(self, '_download_procs') and self._download_procs:
+            for model_id, dl in list(self._download_procs.items()):
+                proc = dl.get("proc")
+                if proc and proc.poll() is None:
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+
+        # 停止前端调试轮询
+        self._stop_fe_debug_polling()
+
+        # 断开服务进程的信号连接（不终止进程本身）
+        for sid, proc in list(self.service_processes.items()):
+            if proc and proc.isRunning():
+                try:
+                    proc.finished.disconnect()
+                except Exception:
+                    pass
+
     def _kill_port_processes(self):
         port_map = {"backend": self._backend_port, "frontend": self._frontend_port}
         for sid, port in port_map.items():
@@ -12943,7 +13019,8 @@ if __name__ == '__main__':
                     pass
                 proc.deleteLater()
                 setattr(self, proc_attr, None)
-        self._stop_all()
+        # 关闭时保留前后端服务进程，只停止其他子进程
+        self._stop_non_service_procs()
         try:
             self.monitor.stop()
         except Exception:
