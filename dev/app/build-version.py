@@ -178,6 +178,8 @@ def update_versions_json(version, changes, exe_name):
             release_versions.insert(0, release_entry)
             release_data["versions"] = release_versions
             release_data["latest"] = version
+            release_data["download_url"] = f"https://github.com/yunjii-cn/vi/releases/tag/v{version}"
+            release_data["gitee_download_url"] = f"https://gitee.com/yunjii/vi/releases/tag/v{version}"
             with open(release_file, 'w', encoding='utf-8') as f:
                 json.dump(release_data, f, ensure_ascii=False, indent=2)
             print("  ✓ release/version.json 已同步更新")
