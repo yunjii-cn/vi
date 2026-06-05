@@ -1056,7 +1056,7 @@ UPDATE_SOURCES = {
     },
     "gitee": {
         "name": "Gitee",
-        "version_url": f"https://gitee.com/api/v5/repos/yunjii/vi/contents/ver/version.json?ref=main{_GITEE_TOKEN_PARAM}",
+        "version_url": f"https://gitee.com/api/v5/repos/yunjii/vi/contents/release/version.json?ref=main{_GITEE_TOKEN_PARAM}",
         "commits_url": f"https://gitee.com/api/v5/repos/yunjii/vi/commits?per_page=100{_GITEE_TOKEN_PARAM}",
         "download_url_tpl": f"https://gitee.com/yunjii/vi/releases/download/v{{version}}/{{filename}}{_GITEE_TOKEN_PARAM}",
         "releases_url": f"https://gitee.com/api/v5/repos/yunjii/vi/releases?per_page=10{_GITEE_TOKEN_PARAM}",
