@@ -7481,17 +7481,17 @@ class MainWindow(QMainWindow):
         self._ver_status_label.setStyleSheet("font-size: 8pt; color: #888; border: none;")
         tab_layout.addWidget(self._ver_status_label)
 
-        self._ver_expand_btn = QPushButton("📂 全部收起")
+        self._ver_expand_btn = QPushButton("📂 全部展开")
         self._ver_expand_btn.setMinimumWidth(90)
         self._ver_expand_btn.setFixedHeight(28)
         self._ver_expand_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._ver_expand_btn.setCheckable(True)
         self._ver_expand_btn.setChecked(True)
         self._ver_expand_btn.setStyleSheet("""
-            QPushButton { background-color: #2E7D32; color: #fff; border: 1px solid #388E3C; border-radius: 5px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; font-weight: bold; padding: 4px 10px; }
-            QPushButton:hover { background-color: #388E3C; }
-            QPushButton:!checked { background-color: #222; color: #999; border: 1px solid #333; }
-            QPushButton:!checked:hover { background-color: #333; color: #ccc; }
+            QPushButton { background-color: #CC0000; color: #fff; border: 1px solid #DD2222; border-radius: 5px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; font-weight: bold; padding: 4px 10px; }
+            QPushButton:hover { background-color: #DD2222; }
+            QPushButton:!checked { background-color: #444; color: #999; border: 1px solid #555; }
+            QPushButton:!checked:hover { background-color: #555; color: #ccc; }
         """)
         self._ver_expand_btn.clicked.connect(self._toggle_expand_all)
         tab_layout.addWidget(self._ver_expand_btn)
@@ -7588,9 +7588,6 @@ class MainWindow(QMainWindow):
 
     def _toggle_expand_all(self):
         self._ver_expanded = self._ver_expand_btn.isChecked() if self._ver_expand_btn else not self._ver_expanded
-        # 更新按钮文字
-        if self._ver_expand_btn:
-            self._ver_expand_btn.setText("📂 全部收起" if self._ver_expanded else "📂 全部展开")
         # 同步所有卡片的展开状态，但列表模式下当前版本始终展开
         for v in self._ver_stable_data:
             self._ver_card_expanded[v["version"]] = self._ver_expanded
@@ -7651,6 +7648,50 @@ class MainWindow(QMainWindow):
             status_text.setWordWrap(True)
             status_text.setStyleSheet("font-size: 9pt; color: #8aaa8a; border: none;")
             cc_layout.addWidget(status_text)
+
+            # === 当前版本下载进度条（初始隐藏）===
+            cv_dl_frame = QFrame()
+            cv_dl_frame.setObjectName("_dl_progress_current")
+            cv_dl_frame.setStyleSheet("background-color: #0d2d1a; border: none;")
+            cv_dl_frame.setVisible(False)
+            cv_dl_layout = QHBoxLayout(cv_dl_frame)
+            cv_dl_layout.setContentsMargins(0, 4, 0, 2)
+            cv_dl_layout.setSpacing(8)
+
+            cv_dl_progress = QProgressBar()
+            cv_dl_progress.setRange(0, 100)
+            cv_dl_progress.setValue(0)
+            cv_dl_progress.setFixedHeight(20)
+            cv_dl_progress.setStyleSheet("""
+                QProgressBar { background-color: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 4px; text-align: center; color: #ccc; font-size: 8pt; }
+                QProgressBar::chunk { background-color: #CC0000; border-radius: 3px; }
+            """)
+            cv_dl_layout.addWidget(cv_dl_progress, stretch=1)
+
+            cv_dl_status = QLabel("0.0/0.0MB")
+            cv_dl_status.setFixedWidth(100)
+            cv_dl_status.setStyleSheet("font-family: 'Segoe UI', sans-serif; font-size: 8pt; color: #888; border: none;")
+            cv_dl_layout.addWidget(cv_dl_status)
+
+            cv_dl_pause = QPushButton("暂停")
+            cv_dl_pause.setFixedSize(48, 22)
+            cv_dl_pause.setCursor(Qt.CursorShape.PointingHandCursor)
+            cv_dl_pause.setStyleSheet(
+                "QPushButton { background-color: #333; color: #aaa; border: 1px solid #444; border-radius: 4px; font-family: 'Microsoft YaHei UI', sans-serif; font-size: 7pt; font-weight: bold; }"
+                "QPushButton:hover { background-color: #444; color: #ddd; }"
+            )
+            cv_dl_layout.addWidget(cv_dl_pause)
+
+            cv_dl_cancel = QPushButton("取消")
+            cv_dl_cancel.setFixedSize(48, 22)
+            cv_dl_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+            cv_dl_cancel.setStyleSheet(
+                "QPushButton { background-color: #CC0000; color: #fff; border: none; border-radius: 4px; font-family: 'Microsoft YaHei UI', sans-serif; font-size: 7pt; font-weight: bold; }"
+                "QPushButton:hover { background-color: #FF0000; }"
+            )
+            cv_dl_layout.addWidget(cv_dl_cancel)
+
+            cc_layout.addWidget(cv_dl_frame)
 
             if is_current_expanded:
                 changes = current_v.get("changes", [])
@@ -7796,7 +7837,11 @@ class MainWindow(QMainWindow):
             self._ver_scroll_layout.addWidget(lbl)
             return
         expanded = self._ver_expanded
-        page_size = self._ver_detail_page_size if expanded else self._ver_list_page_size
+        # 展开模式：显示全部版本不分页；列表模式：分页显示
+        if expanded:
+            page_size = len(all_versions) + 1  # 展开时全部显示
+        else:
+            page_size = self._ver_list_page_size
 
         current_v = None
         other_versions = []
@@ -7954,12 +7999,12 @@ class MainWindow(QMainWindow):
             dl_progress.setFixedHeight(18)
             dl_progress.setStyleSheet("""
                 QProgressBar { background-color: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 4px; text-align: center; color: #ccc; font-size: 8pt; }
-                QProgressBar::chunk { background-color: #2E7D32; border-radius: 3px; }
+                QProgressBar::chunk { background-color: #CC0000; border-radius: 3px; }
             """)
             pr_layout.addWidget(dl_progress, stretch=1)
 
             dl_status_label = QLabel("0.0/0.0MB")
-            dl_status_label.setFixedWidth(100)
+            dl_status_label.setFixedWidth(180)
             dl_status_label.setStyleSheet("font-family: 'Segoe UI', sans-serif; font-size: 8pt; color: #888; border: none;")
             pr_layout.addWidget(dl_status_label)
 
@@ -8014,7 +8059,11 @@ class MainWindow(QMainWindow):
             self._ver_scroll_layout.addWidget(lbl)
             return
         expanded = self._ver_expanded
-        page_size = self._ver_detail_page_size if expanded else self._ver_list_page_size
+        # 展开模式：显示全部不分页；列表模式：分页显示
+        if expanded:
+            page_size = len(commits) + 1
+        else:
+            page_size = self._ver_list_page_size
         end = min(self._ver_rendered_count + page_size, len(commits))
         for idx in range(self._ver_rendered_count, end):
             commit = commits[idx]
@@ -8924,7 +8973,16 @@ class MainWindow(QMainWindow):
                     self._log(f"✓ 版本 v{version} 已下载，正在切换...", "ok")
                     self._switch_to_exe(target_path)
                     return
-                # 应用内下载
+                # 优先尝试内联下载（带进度条）
+                scroll_content = getattr(self, '_ver_scroll_content', None)
+                if scroll_content:
+                    progress_row = scroll_content.findChild(QFrame, f"_dl_progress_{version}")
+                    if not progress_row:
+                        progress_row = scroll_content.findChild(QFrame, "_dl_progress_current")
+                    if progress_row:
+                        self._start_inline_download(version, remote_info)
+                        return
+                # 回退到弹窗下载
                 self._download_exe_to_ver(download_url, target_path, version, release_page)
                 return
 
@@ -8971,13 +9029,16 @@ class MainWindow(QMainWindow):
             self._switch_to_exe(target_path)
             return
 
-        # 查找进度条组件
+        # 查找进度条组件（优先查找版本卡片内的，其次查找当前版本卡片的）
         scroll_content = getattr(self, '_ver_scroll_content', None)
         if not scroll_content:
             self._on_download_version(remote_info)
             return
 
         progress_row = scroll_content.findChild(QFrame, f"_dl_progress_{version}")
+        if not progress_row:
+            # 尝试查找当前版本卡片的进度条
+            progress_row = scroll_content.findChild(QFrame, "_dl_progress_current")
         if not progress_row:
             self._on_download_version(remote_info)
             return
@@ -9040,6 +9101,9 @@ class MainWindow(QMainWindow):
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
                 block_size = 65536
+                import time
+                last_time = time.time()
+                last_downloaded = 0
                 with open(tmp_path, "wb") as f:
                     while True:
                         if dl_state["cancelled"]:
@@ -9052,17 +9116,35 @@ class MainWindow(QMainWindow):
                             break
                         f.write(chunk)
                         downloaded += len(chunk)
+                        now = time.time()
+                        elapsed = now - last_time
                         if total > 0:
                             pct = int(downloaded * 100 / total)
                             mb = downloaded / (1024 * 1024)
                             total_mb = total / (1024 * 1024)
-                            QTimer.singleShot(0, lambda p=pct, m=mb, t=total_mb: (
-                                dl_progress.setValue(p),
-                                dl_status_label.setText(f"{m:.1f}/{t:.1f}MB")
-                            ))
-                        elif downloaded % (1024 * 1024) < block_size:
-                            mb = downloaded / (1024 * 1024)
-                            QTimer.singleShot(0, lambda m=mb: dl_status_label.setText(f"{m:.1f}MB"))
+                            # 每隔0.3秒更新速度和ETA
+                            if elapsed >= 0.3:
+                                speed_bps = (downloaded - last_downloaded) / elapsed
+                                speed_mb = speed_bps / (1024 * 1024)
+                                remaining_bytes = total - downloaded
+                                eta_sec = remaining_bytes / speed_bps if speed_bps > 0 else 0
+                                eta_str = f"{int(eta_sec // 60)}:{int(eta_sec % 60):02d}" if eta_sec < 3600 else f"{int(eta_sec // 3600)}:{int((eta_sec % 3600) // 60):02d}:{int(eta_sec % 60):02d}"
+                                QTimer.singleShot(0, lambda p=pct, m=mb, t=total_mb, s=speed_mb, e=eta_str: (
+                                    dl_progress.setValue(p),
+                                    dl_status_label.setText(f"{m:.1f}/{t:.1f}MB {s:.1f}MB/s ETA:{e}")
+                                ))
+                                last_time = now
+                                last_downloaded = downloaded
+                        else:
+                            if elapsed >= 0.5:
+                                mb = downloaded / (1024 * 1024)
+                                speed_bps = (downloaded - last_downloaded) / elapsed
+                                speed_mb = speed_bps / (1024 * 1024)
+                                QTimer.singleShot(0, lambda m=mb, s=speed_mb: (
+                                    dl_status_label.setText(f"{m:.1f}MB {s:.1f}MB/s")
+                                ))
+                                last_time = now
+                                last_downloaded = downloaded
 
                 if dl_state["cancelled"]:
                     if os.path.isfile(tmp_path):
@@ -9115,8 +9197,9 @@ class MainWindow(QMainWindow):
         # 创建下载进度对话框
         dlg = QDialog(self)
         dlg.setWindowTitle(f"下载 v{version}")
-        dlg.setFixedSize(420, 140)
+        dlg.setFixedSize(480, 160)
         dlg.setStyleSheet("QDialog { background-color: #1A1A1A; }")
+        dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         dlg_layout = QVBoxLayout(dlg)
         dlg_layout.setContentsMargins(16, 12, 16, 12)
         dlg_layout.setSpacing(8)
@@ -9128,11 +9211,16 @@ class MainWindow(QMainWindow):
         progress = QProgressBar()
         progress.setRange(0, 100)
         progress.setValue(0)
+        progress.setFormat("%p%")
         progress.setStyleSheet("""
-            QProgressBar { background-color: #222222; border: 1px solid #333333; border-radius: 4px; height: 20px; text-align: center; color: #FFFFFF; font-size: 10px; }
+            QProgressBar { background-color: #222222; border: 1px solid #333333; border-radius: 4px; height: 22px; text-align: center; color: #FFFFFF; font-size: 10px; }
             QProgressBar::chunk { background-color: #CC0000; border-radius: 3px; }
         """)
         dlg_layout.addWidget(progress)
+
+        speed_label = QLabel("")
+        speed_label.setStyleSheet("font-size: 10px; color: #999; background: transparent; border: none;")
+        dlg_layout.addWidget(speed_label)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -9151,7 +9239,8 @@ class MainWindow(QMainWindow):
         cancel_btn.clicked.connect(on_cancel)
 
         dlg.show()
-        QApplication.processEvents()
+        dlg.raise_()
+        dlg.activateWindow()
 
         # 执行下载
         import urllib.request
@@ -9164,6 +9253,9 @@ class MainWindow(QMainWindow):
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
                 block_size = 65536
+                import time
+                last_time = time.time()
+                last_downloaded = 0
                 with open(tmp_path, "wb") as f:
                     while True:
                         if download_state["cancelled"]:
@@ -9173,14 +9265,37 @@ class MainWindow(QMainWindow):
                             break
                         f.write(chunk)
                         downloaded += len(chunk)
+                        now = time.time()
+                        elapsed = now - last_time
                         if total > 0:
                             pct = int(downloaded * 100 / total)
-                            QTimer.singleShot(0, lambda p=pct: progress.setValue(p))
-                            if downloaded % (1024 * 1024) < block_size:
+                            mb = downloaded / (1024 * 1024)
+                            total_mb = total / (1024 * 1024)
+                            # 每隔0.3秒更新速度信息
+                            if elapsed >= 0.3:
+                                speed_bps = (downloaded - last_downloaded) / elapsed
+                                speed_mb = speed_bps / (1024 * 1024)
+                                remaining_bytes = total - downloaded
+                                eta_sec = remaining_bytes / speed_bps if speed_bps > 0 else 0
+                                eta_str = f"{int(eta_sec // 60)}:{int(eta_sec % 60):02d}" if eta_sec < 3600 else f"{int(eta_sec // 3600)}:{int((eta_sec % 3600) // 60):02d}:{int(eta_sec % 60):02d}"
+                                QTimer.singleShot(0, lambda p=pct, m=mb, t=total_mb: (
+                                    progress.setValue(p),
+                                    status_label.setText(f"正在下载 v{version}... {m:.1f}/{t:.1f} MB")
+                                ))
+                                QTimer.singleShot(0, lambda s=speed_mb, e=eta_str: speed_label.setText(f"速度: {s:.1f} MB/s | 预计剩余: {e}"))
+                                last_time = now
+                                last_downloaded = downloaded
+                        else:
+                            if elapsed >= 0.5:
                                 mb = downloaded / (1024 * 1024)
-                                total_mb = total / (1024 * 1024)
-                                QTimer.singleShot(0, lambda m=mb, t=total_mb: status_label.setText(f"正在下载 v{version}... {m:.1f}/{t:.1f} MB"))
-                                QApplication.processEvents()
+                                speed_bps = (downloaded - last_downloaded) / elapsed
+                                speed_mb = speed_bps / (1024 * 1024)
+                                QTimer.singleShot(0, lambda m=mb, s=speed_mb: (
+                                    status_label.setText(f"正在下载 v{version}... {m:.1f} MB"),
+                                    speed_label.setText(f"速度: {s:.1f} MB/s")
+                                ))
+                                last_time = now
+                                last_downloaded = downloaded
 
                 if download_state["cancelled"]:
                     if os.path.isfile(tmp_path):
@@ -9191,23 +9306,28 @@ class MainWindow(QMainWindow):
                 if os.path.isfile(tmp_path) and os.path.getsize(tmp_path) > 1024 * 1024:
                     os.replace(tmp_path, target_path)
                     download_state["done"] = True
-                    QTimer.singleShot(0, lambda: status_label.setText(f"✓ v{version} 下载完成！"))
-                    QTimer.singleShot(0, lambda: progress.setValue(100))
-                    QApplication.processEvents()
+                    QTimer.singleShot(0, lambda: (
+                        progress.setValue(100),
+                        status_label.setText(f"✓ v{version} 下载完成！"),
+                        speed_label.setText("即将自动切换版本...")
+                    ))
                     import time
-                    time.sleep(0.5)
-                    dlg.accept()
+                    time.sleep(0.8)
+                    QTimer.singleShot(0, dlg.accept)
                     self._log(f"✓ v{version} 下载完成，已保存到 ver/ 目录", "ok")
                     # 自动切换
                     QTimer.singleShot(500, lambda: self._switch_to_exe(target_path))
                 else:
                     if os.path.isfile(tmp_path):
                         os.remove(tmp_path)
-                    QTimer.singleShot(0, lambda: status_label.setText("× 下载文件异常，请在浏览器下载"))
+                    QTimer.singleShot(0, lambda: (
+                        status_label.setText("× 下载文件异常，请在浏览器下载"),
+                        speed_label.setText("")
+                    ))
                     self._log(f"× v{version} 下载文件异常", "err")
                     import time
-                    time.sleep(1)
-                    dlg.reject()
+                    time.sleep(1.5)
+                    QTimer.singleShot(0, dlg.reject)
                     # 回退到浏览器
                     import webbrowser
                     webbrowser.open(fallback_page)
@@ -9217,10 +9337,14 @@ class MainWindow(QMainWindow):
                         os.remove(tmp_path)
                     except Exception:
                         pass
-                QTimer.singleShot(0, lambda: status_label.setText(f"× 下载失败: {e}"))
+                QTimer.singleShot(0, lambda: (
+                    status_label.setText(f"× 下载失败: {e}"),
+                    speed_label.setText("")
+                ))
                 self._log(f"× v{version} 下载失败: {e}", "err")
                 import time
-                time.sleep(1)
+                time.sleep(1.5)
+                QTimer.singleShot(0, dlg.reject)
                 dlg.reject()
                 # 回退到浏览器
                 try:
@@ -9236,10 +9360,11 @@ class MainWindow(QMainWindow):
     def _on_download_update(self):
         if not hasattr(self, '_latest_info') or not self._latest_info:
             if self._latest_version:
-                self._on_download_version({"version": self._latest_version, "filename": f"{APP_NAME}-v{self._latest_version}.exe"})
+                self._start_inline_download(self._latest_version, {"version": self._latest_version, "filename": f"{APP_NAME}-v{self._latest_version}.exe"})
                 return
             return
-        self._on_download_version(self._latest_info)
+        version = self._latest_info.get("version", self._latest_version)
+        self._start_inline_download(version, self._latest_info)
 
     def _open_release_page(self):
         source_key = self._effective_source_key()
