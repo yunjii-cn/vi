@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>云集智能视频创意站 - AI视频生成一站式工具</title>
+    <meta name="description" content="基于LTX-2.3引擎的AI视频生成桌面软件，文生视频、图生视频、智能多帧拼接、视频迁移、TTS语音合成，从安装到出片全程无忧。">
+    <meta name="keywords" content="AI视频生成,文生视频,图生视频,LTX Studio,云集智能,视频创作">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<!-- 导航栏 -->
+<nav class="navbar" id="navbar">
+    <div class="nav-container">
+        <a href="/" class="nav-brand">
+            <img src="/image/ico.png" alt="云集" class="nav-logo">
+            <span class="nav-title">云集智能视频创意站</span>
+        </a>
+        <div class="nav-links" id="navLinks">
+            <a href="#features" class="nav-link">核心功能</a>
+            <a href="#showcase" class="nav-link">产品展示</a>
+            <a href="#roadmap" class="nav-link">发展路线</a>
+            <a href="#download" class="nav-link">免费下载</a>
+        </div>
+        <a href="javascript:void(0)" class="nav-login" id="navLogin" onclick="openLoginModal()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            登录
+        </a>
+        <button class="nav-toggle" id="navToggle" aria-label="菜单">
+            <span></span><span></span><span></span>
+        </button>
+    </div>
+</nav>
+
+<!-- Hero 区域 -->
+<section class="hero" id="hero">
+    <div class="hero-bg">
+        <div class="hero-particles" id="particles"></div>
+        <div class="hero-gradient"></div>
+    </div>
+    <div class="hero-content">
+        <div class="hero-badge">基于 LTX-2.3 引擎</div>
+        <h1 class="hero-title">
+            <span class="title-line">AI 驱动</span>
+            <span class="title-line accent">视频创意</span>
+            <span class="title-line">一站直达</span>
+        </h1>
+        <p class="hero-desc">
+            从安装到出片，全程无忧。国内最好用的 AI 视频生成工具——<br>
+            本地推理零门槛，6GB 显存即可运行，国内网络全适配。
+        </p>
+        <div class="hero-actions">
+            <a href="#download" class="btn btn-primary btn-lg">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                免费下载
+            </a>
+            <a href="#features" class="btn btn-outline btn-lg">
+                了解更多
+            </a>
+        </div>
+        <div class="hero-stats">
+            <div class="stat-item">
+                <span class="stat-value">6GB</span>
+                <span class="stat-label">最低显存</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+                <span class="stat-value">免费</span>
+                <span class="stat-label">完全免费</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+                <span class="stat-value">一键</span>
+                <span class="stat-label">部署安装</span>
+            </div>
+        </div>
+    </div>
+    <div class="hero-scroll-hint">
+        <div class="scroll-arrow"></div>
+    </div>
+</section>
+
+<!-- 核心功能 -->
+<section class="section features" id="features">
+    <div class="container">
+        <div class="section-header">
+            <span class="section-tag">CORE FEATURES</span>
+            <h2 class="section-title">六大核心能力</h2>
+            <p class="section-desc">从创意到成片，AI 赋能每一个环节</p>
+        </div>
+        <div class="feature-grid">
+            <div class="feature-card" data-delay="0">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="6" y="10" width="36" height="24" rx="3"/>
+                        <path d="M20 18l10 5-10 5V18z" fill="currentColor" opacity="0.3"/>
+                    </svg>
+                </div>
+                <h3>文生视频</h3>
+                <p>输入文字描述，AI 自动生成高质量视频。支持多种画幅、帧率、镜头运动控制。</p>
+            </div>
+            <div class="feature-card" data-delay="1">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="6" y="6" width="16" height="16" rx="2"/>
+                        <rect x="26" y="6" width="16" height="16" rx="2"/>
+                        <path d="M14 26v16M34 26v16M6 34h36" stroke-dasharray="3 3"/>
+                    </svg>
+                </div>
+                <h3>图生视频</h3>
+                <p>上传首帧图片或首尾帧，AI 智能补间生成流畅视频，支持音频驱动。</p>
+            </div>
+            <div class="feature-card" data-delay="2">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="4" y="12" width="12" height="12" rx="2"/>
+                        <rect x="18" y="8" width="12" height="12" rx="2"/>
+                        <rect x="32" y="12" width="12" height="12" rx="2"/>
+                        <path d="M16 18h2M30 14h2" stroke-width="3"/>
+                    </svg>
+                </div>
+                <h3>智能多帧</h3>
+                <p>多张图片智能编排为连续视频，支持单次多关键帧和分段拼接两种工作流。</p>
+            </div>
+            <div class="feature-card" data-delay="3">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M8 12h32v24H8z"/>
+                        <path d="M8 24h32" stroke-dasharray="4 4"/>
+                        <circle cx="24" cy="24" r="6"/>
+                        <path d="M22 22l4 2-4 2v-4z" fill="currentColor"/>
+                    </svg>
+                </div>
+                <h3>视频迁移</h3>
+                <p>提取参考视频的动作、运镜、风格，迁移到新主体。支持姿态、轮廓、深度控制。</p>
+            </div>
+            <div class="feature-card" data-delay="4">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="8" y="8" width="32" height="32" rx="4"/>
+                        <circle cx="24" cy="24" r="8"/>
+                        <circle cx="24" cy="24" r="3" fill="currentColor"/>
+                    </svg>
+                </div>
+                <h3>图像生成</h3>
+                <p>基于 LTX-2.3 引擎生成高质量静态图像，支持多种预设分辨率和自定义尺寸。</p>
+            </div>
+            <div class="feature-card" data-delay="5">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 8c0 0-4 8-4 16s4 16 4 16"/>
+                        <path d="M36 8c0 0 4 8 4 16s-4 16-4 16"/>
+                        <path d="M18 20c2-2 4-4 6-4s4 2 6 4"/>
+                        <path d="M18 28c2 2 4 4 6 4s4-2 6-4"/>
+                    </svg>
+                </div>
+                <h3>TTS 语音合成</h3>
+                <p>文字转语音、声音克隆、终极克隆三模式，AI 自动设计声音风格。</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- 产品优势 -->
+<section class="section advantages" id="advantages">
+    <div class="container">
+        <div class="section-header">
+            <span class="section-tag">WHY CHOOSE US</span>
+            <h2 class="section-title">为什么选择云集</h2>
+        </div>
+        <div class="adv-grid">
+            <div class="adv-item">
+                <div class="adv-number">01</div>
+                <div class="adv-content">
+                    <h3>本地推理零门槛</h3>
+                    <p>6GB 显存即可启动，FP8 量化 + Layer Streaming 分段加载，让低配显卡也能流畅运行 AI 视频生成。</p>
+                </div>
+            </div>
+            <div class="adv-item">
+                <div class="adv-number">02</div>
+                <div class="adv-content">
+                    <h3>国内网络全适配</h3>
+                    <p>镜像源自动测速、HF-Mirror + Gitee 双源更新，告别 HuggingFace 访问困难，部署速度提升数倍。</p>
+                </div>
+            </div>
+            <div class="adv-item">
+                <div class="adv-number">03</div>
+                <div class="adv-content">
+                    <h3>硬件自适应</h3>
+                    <p>GPU 自动检测 → 智能推荐参数 → FP8 量化 → 显存保护，5 档硬件等级精准匹配最优推理策略。</p>
+                </div>
+            </div>
+            <div class="adv-item">
+                <div class="adv-number">04</div>
+                <div class="adv-content">
+                    <h3>一键部署维护</h3>
+                    <p>Python 环境、模型下载、依赖修复全自动。首次启动自动完成全部部署，15-30 分钟即可开始创作。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- 产品展示 -->
+<section class="section showcase" id="showcase">
+    <div class="container">
+        <div class="section-header">
+            <span class="section-tag">PRODUCT SHOWCASE</span>
+            <h2 class="section-title">产品展示</h2>
+            <p class="section-desc">简洁直观的操作界面，专业级视频创作体验</p>
+        </div>
+        <div class="showcase-gallery">
+            <div class="gallery-main">
+                <div class="gallery-frame">
+                    <div class="film-strip film-top">
+                        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                    </div>
+                    <div class="gallery-viewport" id="galleryViewport">
+                        <img src="/image/screenshot-1.png" alt="主界面" class="gallery-img active" data-index="0">
+                        <img src="/image/screenshot-2.png" alt="视频生成" class="gallery-img" data-index="1">
+                        <img src="/image/screenshot-3.png" alt="智能多帧" class="gallery-img" data-index="2">
+                        <img src="/image/screenshot-4.png" alt="视频迁移" class="gallery-img" data-index="3">
+                        <img src="/image/screenshot-5.png" alt="高清放大" class="gallery-img" data-index="4">
+                    </div>
+                    <div class="film-strip film-bottom">
+                        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                    </div>
+                </div>
+            </div>
+            <div class="gallery-thumbs" id="galleryThumbs">
+                <button class="thumb active" data-index="0">主界面</button>
+                <button class="thumb" data-index="1">视频生成</button>
+                <button class="thumb" data-index="2">智能多帧</button>
+                <button class="thumb" data-index="3">视频迁移</button>
+                <button class="thumb" data-index="4">高清放大</button>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- 发展路线 -->
+<section class="section roadmap" id="roadmap">
+    <div class="container">
+        <div class="section-header">
+            <span class="section-tag">ROADMAP</span>
+            <h2 class="section-title">发展路线</h2>
+            <p class="section-desc">从桌面到云端，从单平台到全平台</p>
+        </div>
+        <div class="timeline">
+            <div class="timeline-item current">
+                <div class="timeline-dot"></div>
+                <div class="timeline-content">
+                    <span class="timeline-phase">Phase 1</span>
+                    <h3>桌面客户端</h3>
+                    <p>Windows 桌面应用，本地 AI 推理，一键部署，免费开放。当前已上线，持续迭代中。</p>
+                    <div class="timeline-tags">
+                        <span class="tl-tag active">已上线</span>
+                        <span class="tl-tag">Windows</span>
+                        <span class="tl-tag">本地推理</span>
+                    </div>
+                </div>
+            </div>
+            <div class="timeline-item">
+                <div class="timeline-dot"></div>
+                <div class="timeline-content">
+                    <span class="timeline-phase">Phase 2</span>
+                    <h3>云端模式</h3>
+                    <p>无需本地 GPU，一键连接云端算力。按时长计费，低门槛体验高性能 AI 视频生成。</p>
+                    <div class="timeline-tags">
+                        <span class="tl-tag">规划中</span>
+                        <span class="tl-tag">云端推理</span>
+                        <span class="tl-tag">按量计费</span>
+                    </div>
+                </div>
+            </div>
+            <div class="timeline-item">
+                <div class="timeline-dot"></div>
+                <div class="timeline-content">
+                    <span class="timeline-phase">Phase 3</span>
+                    <h3>多平台覆盖</h3>
+                    <p>macOS、移动端 APP 陆续上线，云端推理 + 移动端预览编辑，随时随地创作。</p>
+                    <div class="timeline-tags">
+                        <span class="tl-tag">规划中</span>
+                        <span class="tl-tag">macOS</span>
+                        <span class="tl-tag">iOS / Android</span>
+                    </div>
+                </div>
+            </div>
+            <div class="timeline-item">
+                <div class="timeline-dot"></div>
+                <div class="timeline-content">
+                    <span class="timeline-phase">Phase 4</span>
+                    <h3>平台生态</h3>
+                    <p>模型市场、模板市场、API 开放平台，构建 AI 视频创作生态，赋能更多创作者。</p>
+                    <div class="timeline-tags">
+                        <span class="tl-tag">远期规划</span>
+                        <span class="tl-tag">模型市场</span>
+                        <span class="tl-tag">API 开放</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- 下载区域 -->
+<section class="section download" id="download">
+    <div class="container">
+        <div class="download-card">
+            <div class="download-glow"></div>
+            <div class="download-content">
+                <div class="download-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                        <path d="M7 10l5 5 5-5"/>
+                        <path d="M12 15V3"/>
+                    </svg>
+                </div>
+                <h2>免费下载，即刻开始创作</h2>
+                <p>云集智能视频创意站完全免费提供给用户下载使用<br>Windows 10/11，NVIDIA GPU（最低 8GB 显存）</p>
+                <div class="download-buttons">
+                    <a href="/download.php" class="btn btn-primary btn-xl" id="downloadBtn">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                        下载 Windows 版本
+                    </a>
+                </div>
+                <div class="download-meta">
+                    <span>最新版本：v2026.06.04</span>
+                    <span class="meta-dot">|</span>
+                    <span>Windows 10/11</span>
+                    <span class="meta-dot">|</span>
+                    <span>免费使用</span>
+                </div>
+                <div class="download-notice">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                    首次启动将自动部署环境（约 15-30 分钟），请确保网络畅通
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- 页脚 -->
+<footer class="footer">
+    <div class="container">
+        <div class="footer-content">
+            <div class="footer-brand">
+                <img src="/image/ico.png" alt="云集" class="footer-logo">
+                <span class="footer-title">云集智能视频创意站</span>
+            </div>
+            <div class="footer-links">
+                <a href="#features">核心功能</a>
+                <a href="#showcase">产品展示</a>
+                <a href="#roadmap">发展路线</a>
+                <a href="#download">免费下载</a>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>&copy; 2026 武汉市云集智能科技有限公司 版权所有</p>
+            <p><a href="https://yunjii.cn/" target="_blank">云集智能</a> | <a href="https://beian.miit.gov.cn/" target="_blank">鄂ICP备2024085021号</a></p>
+        </div>
+    </div>
+</footer>
+
+<!-- 登录弹窗 -->
+<div class="login-modal" id="loginModal">
+    <div class="login-modal-overlay" onclick="closeLoginModal()"></div>
+    <div class="login-modal-content">
+        <button class="login-modal-close" onclick="closeLoginModal()">&times;</button>
+        <img src="/image/ico.png" alt="云集" class="login-modal-logo">
+        <div class="login-modal-title">微信扫码登录</div>
+        <div class="login-modal-subtitle">打开微信扫一扫，快速登录</div>
+        <div class="login-modal-qrcode">
+            <iframe id="loginIframe" src="" width="150" height="150" frameborder="0" scrolling="no"></iframe>
+        </div>
+        <div class="login-modal-hint">扫码即代表同意用户协议和隐私政策</div>
+    </div>
+</div>
+
+<script src="/js/main.js"></script>
+</body>
+</html>

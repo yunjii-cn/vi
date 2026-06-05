@@ -214,3 +214,16 @@ stable_*.py
 /*.ico
 /*.png
 /*.bat
+
+# 文档源文件（不在网站中直接使用）
+doc/
+
+# 下载缓存
+.download_cache.json
+
+# 日志
+sl/debug.log
+sl/error.log
+
+# 私钥（不提交）
+certs/private_key.pem
