@@ -1,75 +1,69 @@
 # ============================================
-# 云集智能视频创意站 - Git忽略配置
+# Git管理范围说明
 # ============================================
-# Git管理：
+# Git只管理：
 # - .gitignore (本文件)
-# - LICENSE
-# - README.md
-# - dev/app/ (源代码 - 不含运行时/模型/缓存)
+# - app/ (纯净整合包文件夹 - 不含运行时/模型/缓存)
+# - ver/ (稳定版本EXE列表)
 #
 # Git不管理：
-# - build/ (构建产物)
-# - dev/ver/*.exe (EXE文件，通过Release分发)
-# - dev/data/ (用户数据)
-# - dev/temp/ (临时文件)
-# - LTX Desktop/ (参考文件)
+# - app/resources/python/ (嵌入式Python运行时)
+# - app/resources/models/ (AI模型文件)
+# - app/resources/data/ (运行时数据-旧结构兼容)
+# - app/resources/uv/ (UV包管理器)
+# - app/__pycache__/ (Python缓存)
+# - app/config/ (运行时配置)
+# - data/ (用户数据+环境-三目录纯净整合包结构)
+# - temp/ (临时文件-三目录纯净整合包结构)
+# - *.exe (开发测试用的临时EXE，但 ver/*.exe 保留)
 # ============================================
 
-# ── 构建产物 ──
-build/
+# ── dev/ 根目录规则 ──
 
-# ── EXE文件（通过GitHub/Gitee Release分发）──
+# 忽略根目录下的临时EXE，但保留 ver/ 下的稳定版本EXE
 *.exe
-
-# ── 参考文件 ──
-LTX Desktop/
-
-# ── dev/ 根目录临时文件 ──
-dev/*.txt
-dev/*.bat
-dev/icon.ico
-dev/icon.png
-
-# ── dev/ver/ 版本目录 ──
-dev/ver/
+!ver/*.exe
 
 # ── 三目录纯净整合包结构 ──
 
-# 用户数据目录（可写）
-dev/data/
+# 用户数据目录（可写，需要备份）
+data/venv/
+data/outputs/
+data/uploads/
+data/models/
+data/settings.json
+data/custom_dir.txt
+data/low_vram_mode.pref
+data/ffmpeg_path.txt
 
-# 临时文件目录（可删除）
-dev/temp/
+# 临时文件目录（可删除，无需备份）
 temp/
 
 # ── app 目录排除 ──
 
-# 嵌入式Python运行时
-dev/app/resources/python/
+# 嵌入式Python运行时（约200MB，用户部署时自动下载）
+app/resources/python/
 
-# AI模型文件
-dev/app/resources/models/
+# AI模型文件（数GB，部署时自动下载）
+app/resources/models/
 
-# 运行时数据
-dev/app/resources/data/
+# 运行时数据（用户配置、缓存等）
+app/resources/data/
 
-# UV包管理器
-dev/app/resources/uv/
+# UV包管理器（部署时自动下载）
+app/resources/uv/
 
 # Python缓存
-dev/app/__pycache__/
+app/__pycache__/
 
-# 运行时配置
-dev/app/config/
-
-# 输出目录
-dev/app/resources/outputs/
+# 运行时配置（用户修改后的配置）
+app/config/
 
 # ── 通用排除 ──
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
-*.py[cod]
+*.py[codz]
 *$py.class
 *.so
 
@@ -193,6 +187,7 @@ nul
 
 # Runtime/debug logs
 *.log
+!app/resources/patches/*.log
 logs/
 .debug/
 _runtime/
@@ -201,26 +196,4 @@ _instance_debug.log
 
 # Temporary reference files
 stable_*.py
-
-# ── .trae/ 规则 ──
-.trae/
-
-# ── 根目录临时文件 ──
-/*.txt
-/*.py
-/*.ico
-/*.png
-/*.bat
-
-# 文档源文件（不在网站中直接使用）
-doc/
-
-# 下载缓存
-.download_cache.json
-
-# 日志
-sl/debug.log
-sl/error.log
-
-# 私钥（不提交）
-certs/private_key.pem
+app/resources/outputs/
