@@ -136,6 +136,7 @@ def git_commit_and_push(commit_message):
 
 def update_versions_json(version, changes, exe_name):
     try:
+        # 更新 dev/app/versions.json（旧格式，兼容）
         versions_file = ROOT_DIR / "versions.json"
         versions = []
         if versions_file.exists():
@@ -157,6 +158,30 @@ def update_versions_json(version, changes, exe_name):
             json.dump(versions, f, ensure_ascii=False, indent=2)
 
         print("  ✓ versions.json 已更新")
+
+        # 同步更新 release/version.json（唯一版本列表数据源）
+        release_file = ROOT_DIR.parent.parent / "release" / "version.json"
+        if release_file.parent.is_dir():
+            release_data = {}
+            if release_file.exists():
+                with open(release_file, 'r', encoding='utf-8') as f:
+                    release_data = json.load(f)
+            release_versions = release_data.get("versions", [])
+            release_entry = {
+                "version": version,
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "exe": exe_name,
+                "filename": exe_name,
+                "message": changes[0] if changes else "优化和修复",
+                "changes": changes
+            }
+            release_versions.insert(0, release_entry)
+            release_data["versions"] = release_versions
+            release_data["latest"] = version
+            with open(release_file, 'w', encoding='utf-8') as f:
+                json.dump(release_data, f, ensure_ascii=False, indent=2)
+            print("  ✓ release/version.json 已同步更新")
+
         return True
 
     except Exception as e:

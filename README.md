@@ -17,6 +17,8 @@
 
 ```
 云集智能视频创意站/
+├── release/                    # 版本发布信息
+│   └── version.json            # 版本列表（唯一数据源）
 ├── app/                        # 只读（Git管理）
 │   ├── main.py                 # PyQt6 桌面启动器
 │   ├── launcher.py             # EXE入口点
@@ -98,11 +100,14 @@ python build-version.py
 
 ## 开源协议
 
-本项目采用 [GPL-3.0](LICENSE) 协议开源。
+本项目采用 [GPL-3.0](LICENSE) 协议开源，符合自由软件基金会（FSF）定义的自由软件标准。
 
 - ✅ 允许自由使用、修改和分发
+- ✅ 版本历史公开透明（见 [release/version.json](release/version.json)）
+- ✅ 源代码始终可获取（GitHub/Gitee 双源镜像）
 - ❌ **禁止闭源商业使用** — 任何衍生作品必须同样以 GPL-3.0 开源
 - ❌ **禁止移除版权声明**
+- ❌ **禁止专利限制** — 不得对软件施加专利限制
 
 ## 链接
 
