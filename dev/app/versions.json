@@ -1,5 +1,19 @@
 [
   {
+    "version": "2026.06.06.2018",
+    "date": "2026-06-06 20:19",
+    "message": "统一版本列表路径：versions.json为唯一数据源，废弃release/version.json",
+    "changes": [
+      "统一版本列表路径：versions.json为唯一数据源，废弃release/version.json",
+      "新增必需模型检测与下载方法",
+      "必需模型行高亮显示",
+      "自部署时释放versions.json到app目录",
+      "打包规范：AI助手自动总结修改描述"
+    ],
+    "name": "云集智能视频创意站-v2026.06.06.2018.exe",
+    "download_url": ""
+  },
+  {
     "version": "2026.06.05.1816",
     "date": "2026-06-05 18:18",
     "message": "修复版本更新获取：同步release目录到Gitee仓库，恢复Gitee源路径为release/version.json",

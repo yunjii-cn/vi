@@ -179,31 +179,6 @@ def update_versions_json(version, changes, exe_name):
 
         print("  ✓ versions.json 已更新")
 
-        # 同步更新 release/version.json（唯一版本列表数据源）
-        release_file = ROOT_DIR.parent.parent / "release" / "version.json"
-        if release_file.parent.is_dir():
-            release_data = {}
-            if release_file.exists():
-                with open(release_file, 'r', encoding='utf-8') as f:
-                    release_data = json.load(f)
-            release_versions = release_data.get("versions", [])
-            release_entry = {
-                "version": version,
-                "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "exe": exe_name,
-                "filename": exe_name,
-                "message": changes[0] if changes else "优化和修复",
-                "changes": changes
-            }
-            release_versions.insert(0, release_entry)
-            release_data["versions"] = release_versions
-            release_data["latest"] = version
-            release_data["download_url"] = f"https://github.com/yunjii-cn/vi/releases/tag/v{version}"
-            release_data["gitee_download_url"] = f"https://gitee.com/yunjii/vi/releases/tag/v{version}"
-            with open(release_file, 'w', encoding='utf-8') as f:
-                json.dump(release_data, f, ensure_ascii=False, indent=2)
-            print("  ✓ release/version.json 已同步更新")
-
         return True
 
     except Exception as e:
@@ -498,6 +473,12 @@ def build_exe():
         pyinstaller_args.extend(["--add-data", f"{str(vh_file)};."])
         print(f"  已添加版本历史")
 
+    # 嵌入versions.json，自部署时释放到app/目录
+    vs_file = ROOT_DIR / "versions.json"
+    if vs_file.exists():
+        pyinstaller_args.extend(["--add-data", f"{str(vs_file)};."])
+        print(f"  已添加版本列表 (versions.json)")
+
     pj_file = ROOT_DIR.parent.parent / "project.json"
     if pj_file.exists():
         pyinstaller_args.extend(["--add-data", f"{str(pj_file)};."])
@@ -736,7 +717,7 @@ def main():
             cleanup()
             print()
 
-            # Step 5: 记录版本历史（仅本地记录，不更新版本列表）
+            # Step 5: 记录版本历史（仅本地记录，不更新远程版本列表）
             print("── Step 5: 记录版本历史 ──")
             version_history = load_version_history()
             version_name = f"{APP_NAME}-v{VERSION}"
@@ -748,6 +729,10 @@ def main():
             }
             save_version_history(version_history)
             print("  ✓ 版本历史已更新（本地）")
+
+            # 更新 versions.json（嵌入EXE + 远程访问）
+            exe_name = f"{APP_NAME}-v{VERSION}.exe"
+            update_versions_json(VERSION, changes, exe_name)
 
             print()
 

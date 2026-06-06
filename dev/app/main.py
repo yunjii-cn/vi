@@ -253,6 +253,14 @@ def _self_deploy(exe_dir):
                     shutil.copytree(src, dst, ignore=_IGNORE_PATTERNS)
                 except Exception:
                     pass
+        # 释放versions.json到app目录
+        vs_src = os.path.join(meipass, "versions.json")
+        vs_dst = os.path.join(app_dir, "versions.json")
+        if os.path.isfile(vs_src) and not os.path.isfile(vs_dst):
+            try:
+                shutil.copy2(vs_src, vs_dst)
+            except Exception:
+                pass
 
     with open(lock_path, "w", encoding="utf-8") as f:
         f.write("yunji")
@@ -1038,7 +1046,7 @@ _GITEE_TOKEN_PARAM = f"&access_token={GITEE_TOKEN}" if GITEE_TOKEN else ""
 UPDATE_SOURCES = {
     "github_mirror": {
         "name": "GitHub镜像",
-        "version_url": "https://ghgo.xyz/https://raw.githubusercontent.com/yunjii-cn/vi/main/release/version.json",
+        "version_url": "https://ghgo.xyz/https://raw.githubusercontent.com/yunjii-cn/vi/main/dev/app/versions.json",
         "commits_url": "https://ghgo.xyz/https://api.github.com/repos/yunjii-cn/vi/commits?per_page=100",
         "download_url_tpl": "https://github.com/yunjii-cn/vi/releases/download/v{version}/{filename}",
         "releases_url": "https://ghgo.xyz/https://api.github.com/repos/yunjii-cn/vi/releases",
@@ -1047,7 +1055,7 @@ UPDATE_SOURCES = {
     },
     "github": {
         "name": "GitHub",
-        "version_url": "https://raw.githubusercontent.com/yunjii-cn/vi/main/release/version.json",
+        "version_url": "https://raw.githubusercontent.com/yunjii-cn/vi/main/dev/app/versions.json",
         "commits_url": "https://api.github.com/repos/yunjii-cn/vi/commits?per_page=100",
         "download_url_tpl": "https://github.com/yunjii-cn/vi/releases/download/v{version}/{filename}",
         "releases_url": "https://api.github.com/repos/yunjii-cn/vi/releases",
@@ -1056,7 +1064,7 @@ UPDATE_SOURCES = {
     },
     "gitee": {
         "name": "Gitee",
-        "version_url": f"https://gitee.com/api/v5/repos/yunjii/vi/contents/release/version.json?ref=main{_GITEE_TOKEN_PARAM}",
+        "version_url": f"https://gitee.com/api/v5/repos/yunjii/vi/contents/dev/app/versions.json?ref=main{_GITEE_TOKEN_PARAM}",
         "commits_url": f"https://gitee.com/api/v5/repos/yunjii/vi/commits?per_page=100{_GITEE_TOKEN_PARAM}",
         "download_url_tpl": f"https://gitee.com/yunjii/vi/releases/download/v{{version}}/{{filename}}{_GITEE_TOKEN_PARAM}",
         "releases_url": f"https://gitee.com/api/v5/repos/yunjii/vi/releases?per_page=10{_GITEE_TOKEN_PARAM}",
@@ -7280,6 +7288,17 @@ class MainWindow(QMainWindow):
         for r in range(self._model_table.rowCount()):
             self._model_table.setRowHeight(r, 32)
 
+        # 必需模型行高亮背景
+        highlight_bg = QColor(204, 0, 0, 25)
+        self._required_model_rows = set()
+        for row_idx, r in enumerate(filtered_rows):
+            if r.get("tag") == "必需":
+                self._required_model_rows.add(row_idx)
+                for c in range(self._model_table.columnCount()):
+                    item = self._model_table.item(row_idx, c)
+                    if item:
+                        item.setBackground(highlight_bg)
+
         if hasattr(self, '_download_procs') and self._download_procs:
             self._start_download_progress_timer()
 
@@ -7294,12 +7313,14 @@ class MainWindow(QMainWindow):
         old = self._hover_row
         self._hover_row = row
         hover_bg = QColor("#2A2A2E")
+        required_bg = QColor(204, 0, 0, 25)
         clear_bg = QColor("transparent")
         for c in range(self._model_table.columnCount()):
             if old >= 0:
                 item = self._model_table.item(old, c)
                 if item:
-                    item.setBackground(clear_bg)
+                    # 必需模型行恢复高亮背景
+                    item.setBackground(required_bg if old in getattr(self, '_required_model_rows', set()) else clear_bg)
             if row >= 0:
                 item = self._model_table.item(row, c)
                 if item:
@@ -7311,10 +7332,12 @@ class MainWindow(QMainWindow):
                 if self._hover_row >= 0:
                     old = self._hover_row
                     self._hover_row = -1
+                    required_bg = QColor(204, 0, 0, 25)
+                    clear_bg = QColor("transparent")
                     for c in range(self._model_table.columnCount()):
                         item = self._model_table.item(old, c)
                         if item:
-                            item.setBackground(QColor("transparent"))
+                            item.setBackground(required_bg if old in getattr(self, '_required_model_rows', set()) else clear_bg)
         return super().eventFilter(obj, event)
 
     def _delete_local_model_file(self, file_path):
@@ -9128,9 +9151,7 @@ class MainWindow(QMainWindow):
         # 加载release/version.json用于丰富提交描述
         ver_map = {}
         try:
-            vpath = os.path.join(self._repo_root, "release", "version.json") if hasattr(self, '_repo_root') else ""
-            if not vpath or not os.path.exists(vpath):
-                vpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "versions.json")
+            vpath = self._resolve_versions_json_path()
             if os.path.exists(vpath):
                 with open(vpath, "r", encoding="utf-8") as f:
                     raw = json.load(f)
@@ -9194,12 +9215,21 @@ class MainWindow(QMainWindow):
         exes.sort(key=lambda x: x["version"], reverse=True)
         return exes
 
+    def _resolve_versions_json_path(self):
+        """统一解析版本列表文件路径：_app_dir/versions.json
+
+        开发模式：dev/app/versions.json
+        自部署/用户EXE：app/versions.json（与EXE同目录）
+        """
+        if self._app_dir:
+            p = os.path.join(self._app_dir, "versions.json")
+            if os.path.exists(p):
+                return p
+        return ""
+
     def _get_local_version_history(self):
-        # 优先读取release/version.json（唯一版本列表数据源）
-        path = os.path.join(self._repo_root, "release", "version.json") if hasattr(self, '_repo_root') else ""
-        if not path or not os.path.exists(path):
-            path = os.path.join(self._app_dir, "versions.json") if self._app_dir else ""
-        if not path or not os.path.exists(path):
+        path = self._resolve_versions_json_path()
+        if not path:
             return []
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -9691,10 +9721,7 @@ class MainWindow(QMainWindow):
         self.close()
 
     def _show_update_log(self):
-        # 优先读取release/version.json（唯一版本列表数据源）
-        versions_json_path = os.path.join(self._repo_root, "release", "version.json") if hasattr(self, '_repo_root') else ""
-        if not versions_json_path or not os.path.exists(versions_json_path):
-            versions_json_path = os.path.join(self._app_dir, "versions.json") if self._app_dir else ""
+        versions_json_path = self._resolve_versions_json_path()
         log_text = ""
         if versions_json_path and os.path.exists(versions_json_path):
             try:
@@ -10314,6 +10341,15 @@ class MainWindow(QMainWindow):
             if not self._download_procs:
                 self._stop_download_progress_timer()
         self._refresh_model_status()
+        # 更新新手引导状态（必需模型下载完成后可能需要引导去运行服务）
+        info = LTX_MODELS.get(model_id)
+        is_required = info.get("required", False) if info else False
+        if is_required:
+            required_ok = self._check_required_models_ok()
+            self._write_debug_log(f"[引导] 必需模型 {fname} 下载{'成功' if success else '失败'}，必需模型全部就绪: {required_ok}")
+        guide_visible = hasattr(self, '_newbie_guide_frame') and self._newbie_guide_frame and self._newbie_guide_frame.isVisible()
+        self._write_debug_log(f"[引导] 引导横幅可见: {guide_visible}，正在更新引导状态...")
+        self._update_newbie_guide()
 
     def _uninstall_model(self, model_id):
         info = LTX_MODELS.get(model_id)
@@ -13194,6 +13230,70 @@ if __name__ == '__main__':
                 "整个过程全自动，请耐心等待。"
             )
             self._newbie_tip.setText("💡 提示：部署需下载约 10GB 文件，请确保网络稳定和磁盘空间充足")
+
+    def _check_required_models_ok(self):
+        """检查所有必需模型是否已下载完成"""
+        models_dir = self._models_dir or os.path.join(self._data_dir or "", "models")
+        for model_id, info in LTX_MODELS.items():
+            if not info.get("required", False):
+                continue
+            target_path = os.path.join(models_dir, info["file"])
+            expected_bytes = info["size_bytes"]
+            if info.get("is_folder", False):
+                if os.path.exists(target_path) and os.path.isdir(target_path):
+                    folder_size = sum(f.stat().st_size for f in Path(target_path).rglob("*") if f.is_file())
+                    if folder_size > expected_bytes * 0.5:
+                        self._write_debug_log(f"[引导] 必需模型 {info['file']}: 已下载 ({folder_size}/{expected_bytes} bytes)")
+                        continue
+                self._write_debug_log(f"[引导] 必需模型 {info['file']}: 未下载或 incomplete")
+                return False
+            else:
+                if os.path.exists(target_path) and os.path.getsize(target_path) > expected_bytes * 0.9:
+                    actual_size = os.path.getsize(target_path)
+                    self._write_debug_log(f"[引导] 必需模型 {info['file']}: 已下载 ({actual_size}/{expected_bytes} bytes)")
+                    continue
+                actual_size = os.path.getsize(target_path) if os.path.exists(target_path) else 0
+                self._write_debug_log(f"[引导] 必需模型 {info['file']}: 未下载或 incomplete ({actual_size}/{expected_bytes} bytes)")
+                return False
+        return True
+
+    def _get_missing_required_models(self):
+        """获取未下载的必需模型名称列表"""
+        models_dir = self._models_dir or os.path.join(self._data_dir or "", "models")
+        missing = []
+        for model_id, info in LTX_MODELS.items():
+            if not info.get("required", False):
+                continue
+            target_path = os.path.join(models_dir, info["file"])
+            expected_bytes = info["size_bytes"]
+            is_complete = False
+            if info.get("is_folder", False):
+                if os.path.exists(target_path) and os.path.isdir(target_path):
+                    folder_size = sum(f.stat().st_size for f in Path(target_path).rglob("*") if f.is_file())
+                    is_complete = folder_size > expected_bytes * 0.5
+            else:
+                is_complete = os.path.exists(target_path) and os.path.getsize(target_path) > expected_bytes * 0.9
+            if not is_complete:
+                missing.append(info.get("desc", info["file"]))
+        return missing
+
+    def _download_required_models(self):
+        """下载所有未完成的必需模型"""
+        models_dir = self._models_dir or os.path.join(self._data_dir or "", "models")
+        for model_id, info in LTX_MODELS.items():
+            if not info.get("required", False):
+                continue
+            target_path = os.path.join(models_dir, info["file"])
+            expected_bytes = info["size_bytes"]
+            is_complete = False
+            if info.get("is_folder", False):
+                if os.path.exists(target_path) and os.path.isdir(target_path):
+                    folder_size = sum(f.stat().st_size for f in Path(target_path).rglob("*") if f.is_file())
+                    is_complete = folder_size > expected_bytes * 0.5
+            else:
+                is_complete = os.path.exists(target_path) and os.path.getsize(target_path) > expected_bytes * 0.9
+            if not is_complete:
+                self._download_model(model_id)
 
     def _show_deploy_success_guide(self):
         """部署完成后更新新手引导状态"""
