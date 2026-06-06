@@ -792,7 +792,9 @@ def main():
             print("=" * 60)
 
             # Git 提交（开发者视角的源码修改描述）
-            commit_message = f"build: v{VERSION}\n\n" + "\n".join([f"- {c}" for c in changes])
+            # 标题行包含简要描述，body包含完整修改列表
+            brief = changes[0][:60] if changes else VERSION
+            commit_message = f"build: v{VERSION} {brief}\n\n" + "\n".join([f"- {c}" for c in changes])
             git_commit_and_push(commit_message)
             return
 
@@ -890,7 +892,8 @@ def main():
             print("=" * 60)
 
             # Git 提交（面向用户的版本变化描述）
-            commit_message = f"release: v{VERSION}\n\n" + "\n".join([f"- {c}" for c in changes])
+            brief = changes[0][:60] if changes else VERSION
+            commit_message = f"release: v{VERSION} {brief}\n\n" + "\n".join([f"- {c}" for c in changes])
             git_commit_and_push(commit_message)
 
     except subprocess.CalledProcessError as e:

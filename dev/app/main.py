@@ -4653,10 +4653,11 @@ class ConfigManager:
 class ToggleSwitch(QWidget):
     toggled = pyqtSignal(bool)
 
-    def __init__(self, label="", parent=None, checked=True):
+    def __init__(self, label="", parent=None, checked=True, checked_color="#1B5E20"):
         super().__init__(parent)
         self._checked = checked
         self._label = label
+        self._checked_color = checked_color
         self.setFixedHeight(28)
         self.setMinimumWidth(100)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -4682,7 +4683,7 @@ class ToggleSwitch(QWidget):
         track_x = 0
         track_y = (self.height() - track_h) // 2
         if self._checked:
-            p.setBrush(QColor("#1B5E20"))
+            p.setBrush(QColor(self._checked_color))
             p.setPen(Qt.PenStyle.NoPen)
             p.drawRoundedRect(track_x, track_y, track_w, track_h, track_h // 2, track_h // 2)
             knob_x = track_x + track_w - track_h + 2
@@ -5460,6 +5461,7 @@ class MainWindow(QMainWindow):
         self._guide_browser_check_timer = None  # 浏览器检测定时器
         self._guide_browser_check_count = 0  # 浏览器检测计数
         self._guide_skip_models = False  # 部署时是否跳过模型
+        self._guide_bg_models_started = False  # 步骤1期间是否已后台启动模型下载
         self._guide_deploy_sub_hint = ""  # 部署子步骤提示
         self._guide_model_sub_hint = ""  # 模型下载子步骤提示
 
@@ -9946,12 +9948,17 @@ class MainWindow(QMainWindow):
 
         self._log(f"  [DBG] HF_ENDPOINT={env.get('HF_ENDPOINT', '(not set)')}", "info")
 
+        # 步骤1后台下载时限制并发，部署维护优先
+        max_workers_arg = ""
+        if getattr(self, '_guide_active', False) and getattr(self, '_guide_step', 0) == 1:
+            max_workers_arg = ", max_workers=1"
+
         if is_folder:
             dl_script = (
                 "import sys\n"
                 f"try:\n"
                 f"    from huggingface_hub import snapshot_download\n"
-                f"    snapshot_download(repo_id='{info['repo']}', local_dir=r'{target_path}', local_dir_use_symlinks=False)\n"
+                f"    snapshot_download(repo_id='{info['repo']}', local_dir=r'{target_path}', local_dir_use_symlinks=False{max_workers_arg})\n"
                 f"except Exception as e:\n"
                 f"    sys.stderr.write(f'SCRIPT_ERROR:{{e}}\\n')\n"
             )
@@ -10292,7 +10299,7 @@ class MainWindow(QMainWindow):
         if done_ids:
             QTimer.singleShot(1500, self._refresh_model_status)
         # 更新引导横幅的模型下载子步骤提示
-        if self._guide_active and self._guide_step == 2 and self._download_procs:
+        if self._guide_active and self._guide_step in (1, 2) and self._download_procs:
             active_names = []
             for model_id, dl in self._download_procs.items():
                 info = LTX_MODELS.get(model_id)
@@ -10300,7 +10307,8 @@ class MainWindow(QMainWindow):
                 pct = dl.get("current_pct", 0)
                 active_names.append(f"{name} {pct}%")
             if active_names:
-                self._guide_model_sub_hint = "、".join(active_names)
+                prefix = "后台下载" if self._guide_step == 1 else ""
+                self._guide_model_sub_hint = f"{prefix}{'、'.join(active_names)}"
                 self._update_guide_banner()
 
     def _finish_download_ui(self, model_id):
@@ -10457,18 +10465,26 @@ class MainWindow(QMainWindow):
             if not self._download_procs:
                 self._stop_download_progress_timer()
         self._refresh_model_status()
-        # 引导步骤2：检查必需模型下载状态
+        # 引导步骤1或2：检查必需模型下载状态
         info = LTX_MODELS.get(model_id)
         is_required = info.get("required", False) if info else False
-        if is_required and self._guide_active and self._guide_step == 2:
+        if is_required and self._guide_active and self._guide_step in (1, 2):
             required_ok = self._check_required_models_ok()
             self._write_debug_log(f"[引导] 必需模型 {fname} 下载{'成功' if success else '失败'}，必需模型全部就绪: {required_ok}")
             if required_ok:
-                # 所有必需模型下载完成，推进到步骤3
-                self._guide_advance(3)
+                if self._guide_step == 1:
+                    # 部署还在进行中，模型已就绪，标记等待部署完成
+                    self._write_debug_log("[引导] 必需模型已全部就绪，等待部署维护完成")
+                    self._guide_model_sub_hint = "模型已就绪，等待部署维护完成…"
+                    self._update_guide_banner()
+                else:
+                    # 步骤2，模型就绪，推进到步骤3
+                    self._guide_advance(3)
             elif not success:
-                # 下载失败，关闭全自动开关
-                self._guide_on_error()
+                if self._guide_step == 2:
+                    # 步骤2下载失败，关闭全自动开关
+                    self._guide_on_error()
+                # 步骤1时模型下载失败，不立即报错，等部署完成后再处理
 
     def _uninstall_model(self, model_id):
         info = LTX_MODELS.get(model_id)
@@ -10894,6 +10910,16 @@ class MainWindow(QMainWindow):
     def _on_env_update(self, key, text, status, fix_visible):
         self._set_env_widget(key, text, status, fix_visible)
         self._save_env_check_result()
+        # 引导步骤1：当huggingface_hub安装完成时，后台启动必需模型下载
+        if (key == "huggingface_hub" and status == "ok"
+                and self._guide_active and self._guide_step == 1
+                and not self._guide_bg_models_started):
+            self._guide_bg_models_started = True
+            self._write_debug_log("[引导] huggingface_hub已就绪，后台启动必需模型下载")
+            self._guide_model_sub_hint = "后台下载模型中（部署维护优先）…"
+            self._update_guide_banner()
+            # 延迟2秒启动，给部署维护留出带宽
+            QTimer.singleShot(2000, self._download_required_models)
 
     def _set_env_widget(self, key, text, status="ok", fix_visible=False):
         if key not in self._env_check_widgets:
@@ -13385,7 +13411,7 @@ if __name__ == '__main__':
         auto_label.setStyleSheet("font-size: 11px; color: #BBDEFB; background: transparent; border: none;")
         switch_row.addWidget(auto_label)
 
-        self._guide_auto_switch = ToggleSwitch(checked=True)
+        self._guide_auto_switch = ToggleSwitch(checked=True, checked_color="#CC0000")
         self._guide_auto_switch.setFixedHeight(20)
         self._guide_auto_switch.toggled.connect(self._on_guide_auto_toggled)
         switch_row.addWidget(self._guide_auto_switch)
@@ -13512,8 +13538,13 @@ if __name__ == '__main__':
             if is_auto:
                 # 获取当前部署子步骤进度
                 sub_hint = getattr(self, '_guide_deploy_sub_hint', '')
-                if sub_hint:
+                model_hint = getattr(self, '_guide_model_sub_hint', '')
+                if sub_hint and model_hint:
+                    desc = f"正在为您准备运行环境… {sub_hint}　|　{model_hint}"
+                elif sub_hint:
                     desc = f"正在为您准备运行环境… {sub_hint}"
+                elif model_hint:
+                    desc = f"欢迎使用云集智能视频创意站！\u2003{model_hint}"
                 else:
                     desc = ("欢迎使用云集智能视频创意站！\u2003首次使用将自动安装运行环境"
                             "（UV包管理器 → Python → 核心依赖 → 扩展组件），请耐心等待。")
@@ -13585,8 +13616,16 @@ if __name__ == '__main__':
                 self._write_debug_log("[引导] 必需模型已全部就绪，直接推进到步骤3")
                 self._guide_advance(3)
             else:
-                # 延迟启动下载，确保页面切换完成
-                QTimer.singleShot(500, self._download_required_models)
+                # 如果后台下载已在进行，检查是否有失败需要重试
+                bg_active = (self._guide_bg_models_started
+                             and hasattr(self, '_download_procs') and self._download_procs)
+                if bg_active:
+                    self._write_debug_log("[引导] 模型下载已在后台进行中，继续等待")
+                else:
+                    # 延迟启动下载，确保页面切换完成
+                    QTimer.singleShot(500, self._download_required_models)
+                self._guide_model_sub_hint = "正在下载必需模型…"
+                self._update_guide_banner()
         elif step == 3:
             # 步骤3：运行服务
             self._switch_page(0)
@@ -13610,7 +13649,10 @@ if __name__ == '__main__':
             if self._check_required_models_ok():
                 self._guide_advance(3)
             else:
-                self._download_required_models()
+                bg_active = (self._guide_bg_models_started
+                             and hasattr(self, '_download_procs') and self._download_procs)
+                if not bg_active:
+                    self._download_required_models()
         elif step == 3:
             # 执行服务启动
             self._switch_page(0)
@@ -13909,9 +13951,15 @@ if __name__ == '__main__':
             """)
             self.deploy_progress_label.setText("√ 部署完成")
             self._log("√ 部署维护完成！所有环境已就绪", "ok")
-            # 引导步骤1部署成功，推进到步骤2
+            # 引导步骤1部署成功，检查模型下载状态决定跳转步骤
             if self._guide_active and self._guide_step == 1:
-                self._guide_advance(2)
+                if self._check_required_models_ok():
+                    # 必需模型已全部就绪，直接跳到步骤3
+                    self._write_debug_log("[引导] 部署完成且必需模型已就绪，跳到步骤3")
+                    self._guide_advance(3)
+                else:
+                    # 必需模型仍在下载或未完成，跳到步骤2显示进度
+                    self._guide_advance(2)
         else:
             self.deploy_progress_bar.setStyleSheet("""
                 QProgressBar { background-color: rgba(26,26,26,180); border: 1px solid rgba(239,83,80,80); border-radius: 5px; }
