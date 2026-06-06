@@ -1,5 +1,15 @@
 [
   {
+    "version": "2026.06.07.0122",
+    "date": "2026-06-07 01:23",
+    "message": "开发动态打包进EXE：打包时从git历史生成dev_changelog.json嵌入，运行时优先读取真实git历史数据，EXE模式也能看到完整开发动态",
+    "changes": [
+      "开发动态打包进EXE：打包时从git历史生成dev_changelog.json嵌入，运行时优先读取真实git历史数据，EXE模式也能看到完整开发动态"
+    ],
+    "name": "云集智能视频创意站-v2026.06.07.0122.exe",
+    "download_url": ""
+  },
+  {
     "version": "2026.06.07.0118",
     "date": "2026-06-07 01:19",
     "message": "开发动态支持EXE模式：git不可用时从versions.json的changes字段生成开发动态，用户在EXE中也能看到版本更新历史",

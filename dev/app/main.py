@@ -261,6 +261,14 @@ def _self_deploy(exe_dir):
                 shutil.copy2(vs_src, vs_dst)
             except Exception:
                 pass
+        # 释放dev_changelog.json到app目录
+        cl_src = os.path.join(meipass, "dev_changelog.json")
+        cl_dst = os.path.join(app_dir, "dev_changelog.json")
+        if os.path.isfile(cl_src) and not os.path.isfile(cl_dst):
+            try:
+                shutil.copy2(cl_src, cl_dst)
+            except Exception:
+                pass
 
     with open(lock_path, "w", encoding="utf-8") as f:
         f.write("yunji")
@@ -9209,8 +9217,35 @@ class MainWindow(QMainWindow):
         return self._get_history_from_versions(limit)
 
     def _get_history_from_versions(self, limit=30):
-        """从versions.json生成开发动态（EXE模式下git不可用时使用）"""
+        """从dev_changelog.json或versions.json生成开发动态（EXE模式下git不可用时使用）"""
         commits = []
+        # 优先读取dev_changelog.json（打包时从git历史生成的真实开发动态）
+        changelog_path = ""
+        meipass = getattr(sys, '_MEIPASS', '')
+        if meipass:
+            p = os.path.join(meipass, "dev_changelog.json")
+            if os.path.exists(p):
+                changelog_path = p
+        if not changelog_path:
+            p = os.path.join(self._app_dir or "", "dev_changelog.json")
+            if os.path.exists(p):
+                changelog_path = p
+        if changelog_path:
+            try:
+                with open(changelog_path, "r", encoding="utf-8") as f:
+                    commits = json.load(f)
+                # 补充version字段
+                for c in commits:
+                    if "version" not in c:
+                        msg = c.get("message", "")
+                        ver = self._normalize_version(msg)
+                        if ver:
+                            c["version"] = ver
+                return commits[:limit]
+            except Exception:
+                pass
+
+        # 回退到versions.json
         vpath = self._resolve_versions_json_path()
         if not vpath or not os.path.exists(vpath):
             return commits
@@ -9221,7 +9256,6 @@ class MainWindow(QMainWindow):
             for v in vdata[:limit]:
                 ver = v.get("version", "")
                 changes = v.get("changes", [])
-                # 将changes列表合并为描述
                 if changes:
                     desc = "；".join(changes)
                 else:

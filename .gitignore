@@ -18,6 +18,7 @@
 # ── 构建产物 ──
 build/
 dev/dist/
+dev/app/dev_changelog.json
 
 # ── EXE文件（通过GitHub/Gitee Release分发）──
 *.exe

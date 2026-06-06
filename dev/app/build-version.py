@@ -186,6 +186,44 @@ def update_versions_json(version, changes, exe_name):
         return False
 
 
+def generate_dev_changelog(limit=200):
+    """从git历史生成开发动态文件，嵌入EXE供用户查看"""
+    try:
+        result = subprocess.run(
+            ["git", "log", f"-{limit}", "--format=%h|%s|%an|%ai"],
+            capture_output=True, text=True, timeout=30,
+            cwd=str(ROOT_DIR.parent.parent)
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            print("  △ 无法获取git历史，跳过生成开发动态")
+            return False
+
+        commits = []
+        for line in result.stdout.strip().splitlines():
+            parts = line.strip().split("|", 3)
+            if len(parts) >= 4:
+                commits.append({
+                    "sha": parts[0],
+                    "message": parts[1],
+                    "author": parts[2],
+                    "date": parts[3],
+                })
+
+        if not commits:
+            return False
+
+        changelog_file = ROOT_DIR / "dev_changelog.json"
+        with open(changelog_file, 'w', encoding='utf-8') as f:
+            json.dump(commits, f, ensure_ascii=False, indent=2)
+
+        print(f"  ✓ 开发动态已生成 ({len(commits)} 条)")
+        return True
+
+    except Exception as e:
+        print(f"  △ 生成开发动态失败: {e}")
+        return False
+
+
 def strip_bom_from_py_files():
     count = 0
     for dp, dn, fns in os.walk(ROOT_DIR):
@@ -478,6 +516,13 @@ def build_exe():
     if vs_file.exists():
         pyinstaller_args.extend(["--add-data", f"{str(vs_file)};."])
         print(f"  已添加版本列表 (versions.json)")
+
+    # 生成并嵌入开发动态（从git历史）
+    generate_dev_changelog()
+    cl_file = ROOT_DIR / "dev_changelog.json"
+    if cl_file.exists():
+        pyinstaller_args.extend(["--add-data", f"{str(cl_file)};."])
+        print(f"  已添加开发动态 (dev_changelog.json)")
 
     pj_file = ROOT_DIR.parent.parent / "project.json"
     if pj_file.exists():
