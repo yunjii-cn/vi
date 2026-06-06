@@ -885,15 +885,24 @@ def main():
             print()
 
             # 完成
+            # 使用最新发布的EXE版本号（而非当前时间戳）
+            latest_ver_match = None
+            for ver_exe in unreleased:
+                m2 = re.search(r'v(\d{4}\.\d{2}\.\d{2}\.\d{4})', ver_exe.name)
+                if m2:
+                    latest_ver_match = m2.group(1)
+
+            release_ver = latest_ver_match or VERSION
             print("=" * 60)
             print("  正式版发布完成！")
             print(f"  发布版本数: {len(unreleased)}")
+            print(f"  最新版本: v{release_ver}")
             print(f"  版本描述: {changes[0]}")
             print("=" * 60)
 
             # Git 提交（面向用户的版本变化描述）
-            brief = changes[0][:60] if changes else VERSION
-            commit_message = f"release: v{VERSION} {brief}\n\n" + "\n".join([f"- {c}" for c in changes])
+            brief = changes[0][:60] if changes else release_ver
+            commit_message = f"release: v{release_ver} {brief}\n\n" + "\n".join([f"- {c}" for c in changes])
             git_commit_and_push(commit_message)
 
     except subprocess.CalledProcessError as e:
