@@ -5452,6 +5452,8 @@ class MainWindow(QMainWindow):
         self._guide_browser_check_timer = None  # 浏览器检测定时器
         self._guide_browser_check_count = 0  # 浏览器检测计数
         self._guide_skip_models = False  # 部署时是否跳过模型
+        self._guide_deploy_sub_hint = ""  # 部署子步骤提示
+        self._guide_model_sub_hint = ""  # 模型下载子步骤提示
 
         self._resolve_base_dir()
         self.config = ConfigManager(self._get_app_dir(), data_dir=self._exe_data_dir)
@@ -7187,23 +7189,31 @@ class MainWindow(QMainWindow):
             asc = self._model_sort_asc
 
             def sort_key(row):
+                # 必需模型始终置顶（无论排序方向）
+                tag_priority = 0 if row.get("tag") == "必需" else 1
                 if col == 1:
-                    return row.get("name", "").lower()
+                    return (tag_priority, row.get("name", "").lower())
                 elif col == 2:
-                    return row.get("description", "").lower()
+                    return (tag_priority, row.get("description", "").lower())
                 elif col == 3:
-                    return row.get("category", "").lower()
+                    return (tag_priority, row.get("category", "").lower())
                 elif col == 4:
                     tag_order = {"必需": 0, "可选": 1, "本地": 2}
-                    return tag_order.get(row.get("tag", ""), 9)
+                    return (tag_priority, tag_order.get(row.get("tag", ""), 9))
                 elif col == 5:
-                    return row.get("size_gb", 0)
+                    return (tag_priority, row.get("size_gb", 0))
                 elif col == 6:
                     status_order = {"已下载": 0, "完整": 0, "本地": 0, "不完整": 1, "未下载": 2}
-                    return status_order.get(row.get("status", ""), 9)
-                return ""
+                    return (tag_priority, status_order.get(row.get("status", ""), 9))
+                return (tag_priority, "")
 
             self._model_rows.sort(key=sort_key, reverse=not asc)
+        elif hasattr(self, '_model_rows') and self._model_rows:
+            # 无排序时，必需模型也置顶
+            def default_key(row):
+                tag_priority = 0 if row.get("tag") == "必需" else 1
+                return (tag_priority, row.get("name", "").lower())
+            self._model_rows.sort(key=default_key)
 
         self._render_model_table()
 
@@ -10209,6 +10219,17 @@ class MainWindow(QMainWindow):
             self._stop_download_progress_timer()
         if done_ids:
             QTimer.singleShot(1500, self._refresh_model_status)
+        # 更新引导横幅的模型下载子步骤提示
+        if self._guide_active and self._guide_step == 2 and self._download_procs:
+            active_names = []
+            for model_id, dl in self._download_procs.items():
+                info = LTX_MODELS.get(model_id)
+                name = info.get("desc", info.get("file", model_id)) if info else model_id
+                pct = dl.get("current_pct", 0)
+                active_names.append(f"{name} {pct}%")
+            if active_names:
+                self._guide_model_sub_hint = "、".join(active_names)
+                self._update_guide_banner()
 
     def _finish_download_ui(self, model_id):
         pass
@@ -13207,13 +13228,13 @@ if __name__ == '__main__':
         self._guide_banner.setStyleSheet("""
             #guideBannerFrame {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #B71C1C, stop:0.5 #CC0000, stop:1 #880000);
+                    stop:0 #0D47A1, stop:0.5 #1565C0, stop:1 #0D47A1);
                 border: none;
                 border-radius: 0px;
             }
         """)
         banner_layout = QHBoxLayout(self._guide_banner)
-        banner_layout.setContentsMargins(20, 8, 16, 8)
+        banner_layout.setContentsMargins(20, 10, 16, 10)
         banner_layout.setSpacing(12)
 
         # 左侧：步骤指示器 ① → ② → ③
@@ -13248,12 +13269,12 @@ if __name__ == '__main__':
         sep.setStyleSheet("background: rgba(255,255,255,60); border: none;")
         banner_layout.addWidget(sep)
 
-        # 中间：步骤描述
+        # 中间：步骤描述（支持多行，更丰富的文字）
         self._guide_desc_label = QLabel()
         self._guide_desc_label.setStyleSheet(
-            "font-size: 12px; color: #FFD6D6; background: transparent; border: none;"
+            "font-size: 12px; color: #E3F2FD; background: transparent; border: none; line-height: 1.5;"
         )
-        self._guide_desc_label.setWordWrap(False)
+        self._guide_desc_label.setWordWrap(True)
         banner_layout.addWidget(self._guide_desc_label, 1)
 
         # 右侧区域
@@ -13266,7 +13287,7 @@ if __name__ == '__main__':
         switch_row.setSpacing(8)
 
         auto_label = QLabel("全自动")
-        auto_label.setStyleSheet("font-size: 11px; color: #FFD6D6; background: transparent; border: none;")
+        auto_label.setStyleSheet("font-size: 11px; color: #BBDEFB; background: transparent; border: none;")
         switch_row.addWidget(auto_label)
 
         self._guide_auto_switch = ToggleSwitch(checked=True)
@@ -13328,7 +13349,7 @@ if __name__ == '__main__':
         self._guide_skip_btn.setFixedSize(50, 22)
         self._guide_skip_btn.setStyleSheet("""
             QPushButton {
-                background-color: rgba(255,200,0,30); color: #FFD6D6;
+                background-color: rgba(255,200,0,30); color: #E3F2FD;
                 border: 1px solid rgba(255,200,0,80); border-radius: 3px;
                 font-size: 11px; font-weight: bold;
             }
@@ -13360,6 +13381,7 @@ if __name__ == '__main__':
 
         step = self._guide_step
         step_names = ["① 部署", "② 模型", "③ 运行"]
+        is_auto = self._guide_auto
 
         # 更新步骤指示器样式
         for i, lbl in enumerate(self._guide_step_labels):
@@ -13374,40 +13396,58 @@ if __name__ == '__main__':
                     padding: 2px 8px; border-radius: 4px;
                 """)
             elif current_step == step:
-                # 当前步骤：白色加粗
+                # 当前步骤：白色加粗 + 微妙呼吸动画背景
                 lbl.setText(step_names[i])
                 lbl.setStyleSheet("""
                     font-size: 12px; font-weight: bold;
-                    color: #FFFFFF; background: rgba(255,255,255,30);
+                    color: #FFFFFF; background: rgba(255,255,255,40);
                     border: none; padding: 2px 8px; border-radius: 4px;
                 """)
             else:
-                # 未到达步骤：灰色
+                # 未到达步骤：淡蓝灰色
                 lbl.setText(step_names[i])
                 lbl.setStyleSheet("""
                     font-size: 12px; font-weight: bold;
-                    color: #888888; background: transparent; border: none;
+                    color: #90CAF9; background: transparent; border: none;
                     padding: 2px 8px; border-radius: 4px;
                 """)
 
-        # 更新步骤描述
-        is_auto = self._guide_auto
-        descriptions = {
-            1: "① 部署维护：正在安装运行环境（跳过模型下载）...",
-            2: "② 模型管理：正在下载必需模型，请耐心等待...",
-            3: "③ 运行服务：正在启动前后端服务...",
-            4: "🎉 引导完成！欢迎使用云集智能视频创意站",
-        }
-        # 半自动模式下修改描述
-        if not is_auto and step < 4:
-            action_hints = {
-                1: "① 部署维护：点击「下一步」开始安装运行环境",
-                2: "② 模型管理：点击「下一步」下载必需模型",
-                3: "③ 运行服务：点击「下一步」启动前后端服务",
-            }
-            self._guide_desc_label.setText(action_hints.get(step, descriptions.get(step, "")))
+        # 更新步骤描述 — 丰富、动态、亲切的文字
+        if step == 1:
+            if is_auto:
+                # 获取当前部署子步骤进度
+                sub_hint = getattr(self, '_guide_deploy_sub_hint', '')
+                if sub_hint:
+                    desc = f"正在为您准备运行环境… {sub_hint}"
+                else:
+                    desc = ("欢迎使用云集智能视频创意站！\u2003首次使用将自动安装运行环境"
+                            "（UV包管理器 → Python → 核心依赖 → 扩展组件），请耐心等待。")
+            else:
+                desc = ("点击「下一步」开始安装运行环境"
+                        "（UV包管理器 → Python → 核心依赖 → 扩展组件）。")
+        elif step == 2:
+            if is_auto:
+                # 获取模型下载子步骤进度
+                sub_hint = getattr(self, '_guide_model_sub_hint', '')
+                if sub_hint:
+                    desc = f"正在下载必需AI模型… {sub_hint}"
+                else:
+                    desc = ("环境已就绪！正在下载必需AI模型（约5GB），"
+                            "模型是AI创作的核心引擎，下载完成后即可开始创作。")
+            else:
+                desc = ("点击「下一步」下载必需AI模型（约5GB），"
+                        "模型是AI创作的核心引擎。如暂不需要可点击「跳过」。")
+        elif step == 3:
+            if is_auto:
+                desc = "模型就绪！正在启动前后端服务，浏览器将自动打开…"
+            else:
+                desc = "点击「下一步」启动前后端服务，浏览器将自动打开前端界面。"
+        elif step >= 4:
+            desc = "🎉 全部就绪！欢迎使用云集智能视频创意站，开启您的AI创作之旅！"
         else:
-            self._guide_desc_label.setText(descriptions.get(step, ""))
+            desc = ""
+
+        self._guide_desc_label.setText(desc)
 
         # 更新按钮可见性
         self._guide_next_btn.setVisible(not is_auto and step < 4)
@@ -13439,12 +13479,16 @@ if __name__ == '__main__':
         elif step == 2:
             # 步骤2：模型管理
             self._switch_page(2)
+            # 刷新模型表格（确保必需模型置顶高亮）
+            if hasattr(self, '_populate_model_table'):
+                QTimer.singleShot(300, self._populate_model_table)
             # 先检查是否所有必需模型已就绪
             if self._check_required_models_ok():
                 self._write_debug_log("[引导] 必需模型已全部就绪，直接推进到步骤3")
                 self._guide_advance(3)
             else:
-                self._download_required_models()
+                # 延迟启动下载，确保页面切换完成
+                QTimer.singleShot(500, self._download_required_models)
         elif step == 3:
             # 步骤3：运行服务
             self._switch_page(0)
@@ -13495,6 +13539,9 @@ if __name__ == '__main__':
         """推进到下一步"""
         self._guide_step = next_step
         self._write_debug_log(f"[引导] 推进到步骤 {next_step}")
+        # 重置子步骤提示
+        self._guide_deploy_sub_hint = ""
+        self._guide_model_sub_hint = ""
         if next_step >= 4:
             self._guide_complete()
             return
@@ -13723,7 +13770,12 @@ if __name__ == '__main__':
     def _on_deploy_progress(self, pct, msg):
         self.deploy_progress_bar.setValue(int(pct))
         self.deploy_progress_label.setText(msg)
-        self._update_guide_banner()
+        # 更新引导横幅的部署子步骤提示
+        if self._guide_active and self._guide_step == 1 and msg:
+            # 提取关键子步骤信息（如 "↻ Python 环境 (15%)" → "Python 环境 15%"）
+            clean_msg = msg.replace("↻ ", "").replace("↻", "").strip()
+            self._guide_deploy_sub_hint = clean_msg
+            self._update_guide_banner()
 
     def _append_deploy_log(self, msg, level):
         color_map = {"ok": "#66BB6A", "err": "#FF0000", "warn": "#FFA726", "info": "#CCCCCC"}
