@@ -7941,20 +7941,9 @@ class MainWindow(QMainWindow):
         self._ver_status_label.setStyleSheet("font-size: 8pt; color: #888; border: none;")
         tab_layout.addWidget(self._ver_status_label)
 
-        self._ver_expand_btn = QPushButton("📂 全部收起")
-        self._ver_expand_btn.setMinimumWidth(90)
-        self._ver_expand_btn.setFixedHeight(28)
-        self._ver_expand_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._ver_expand_btn.setCheckable(True)
-        self._ver_expand_btn.setChecked(True)
-        self._ver_expand_btn.setStyleSheet("""
-            QPushButton { background-color: #2E7D32; color: #fff; border: 1px solid #388E3C; border-radius: 5px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; font-weight: bold; padding: 4px 10px; }
-            QPushButton:hover { background-color: #388E3C; }
-            QPushButton:!checked { background-color: #222; color: #999; border: 1px solid #333; }
-            QPushButton:!checked:hover { background-color: #333; color: #ccc; }
-        """)
-        self._ver_expand_btn.clicked.connect(self._toggle_expand_all)
-        tab_layout.addWidget(self._ver_expand_btn)
+        self._ver_expand_switch = ToggleSwitch(label="全部展开", checked=True, checked_color="#CC0000")
+        self._ver_expand_switch.toggled.connect(self._toggle_expand_all)
+        tab_layout.addWidget(self._ver_expand_switch)
 
         layout.addWidget(tab_bar)
 
@@ -8014,6 +8003,14 @@ class MainWindow(QMainWindow):
         else:
             self._ver_tab_git_btn.setStyleSheet(active_style)
             self._ver_tab_stable_btn.setStyleSheet(inactive_style)
+        # 切换Tab时重置卡片展开状态，同步展开开关
+        self._ver_card_expanded.clear()
+        if self._ver_expanded:
+            for v in self._ver_stable_data:
+                self._ver_card_expanded[v["version"]] = True
+        if self._ver_expand_switch:
+            self._ver_expand_switch._checked = self._ver_expanded
+            self._ver_expand_switch.update()
         self._render_active_tab()
 
     def _render_active_tab(self):
@@ -8047,11 +8044,8 @@ class MainWindow(QMainWindow):
         finally:
             self._ver_rendering = False
 
-    def _toggle_expand_all(self):
-        self._ver_expanded = self._ver_expand_btn.isChecked() if self._ver_expand_btn else not self._ver_expanded
-        # 更新按钮文字
-        if self._ver_expand_btn:
-            self._ver_expand_btn.setText("📂 全部收起" if self._ver_expanded else "📂 全部展开")
+    def _toggle_expand_all(self, checked):
+        self._ver_expanded = checked
         # 同步所有卡片的展开状态，但列表模式下当前版本始终展开
         for v in self._ver_stable_data:
             self._ver_card_expanded[v["version"]] = self._ver_expanded
@@ -13416,7 +13410,7 @@ if __name__ == '__main__':
         switch_row = QHBoxLayout()
         switch_row.setSpacing(8)
 
-        auto_label = QLabel("全自动")
+        auto_label = QLabel("自动引导")
         auto_label.setStyleSheet("font-size: 11px; color: #BBDEFB; background: transparent; border: none;")
         switch_row.addWidget(auto_label)
 

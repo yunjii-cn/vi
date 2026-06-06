@@ -1,7 +1,7 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(2026, 6, 7, 250),
-    prodvers=(2026, 6, 7, 250),
+    filevers=(2026, 6, 7, 317),
+    prodvers=(2026, 6, 7, 317),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -17,12 +17,12 @@ VSVersionInfo(
           [
             StringStruct(u'CompanyName', u'YunJi'),
             StringStruct(u'FileDescription', u'YunJi Smart Video Creative Station'),
-            StringStruct(u'FileVersion', u'2026.06.07.0250'),
+            StringStruct(u'FileVersion', u'2026.06.07.0317'),
             StringStruct(u'InternalName', u'YunJiVideoCreative'),
             StringStruct(u'LegalCopyright', u'Copyright 2026 YunJi'),
             StringStruct(u'OriginalFilename', u'YunJiVideoCreative.exe'),
             StringStruct(u'ProductName', u'云集智能视频创意站'),
-            StringStruct(u'ProductVersion', u'2026.06.07.0250'),
+            StringStruct(u'ProductVersion', u'2026.06.07.0317'),
           ]
         )
       ]
