@@ -9176,34 +9176,68 @@ class MainWindow(QMainWindow):
         return r["stdout"] if r["ok"] else "unknown"
 
     def _get_git_history(self, limit=30):
-        if not self._is_git_repo():
-            return []
-        r = self._run_git("log", f"-{limit}", "--format=%h|%s|%an|%ai", timeout=30)
-        if not r["ok"]:
-            return []
-        # 加载release/version.json用于丰富提交描述
-        ver_map = {}
+        # 优先从git获取历史
+        if self._is_git_repo():
+            r = self._run_git("log", f"-{limit}", "--format=%h|%s|%an|%ai", timeout=30)
+            if r["ok"] and r["stdout"].strip():
+                # 加载versions.json用于丰富提交描述
+                ver_map = {}
+                try:
+                    vpath = self._resolve_versions_json_path()
+                    if os.path.exists(vpath):
+                        with open(vpath, "r", encoding="utf-8") as f:
+                            raw = json.load(f)
+                        vdata = raw.get("versions", raw) if isinstance(raw, dict) else raw
+                        for v in vdata:
+                            ver_map[v.get("version", "")] = v
+                except Exception:
+                    pass
+                commits = []
+                for line in r["stdout"].splitlines():
+                    parts = line.strip().split("|", 3)
+                    if len(parts) >= 4:
+                        commit = {"sha": parts[0], "hash": parts[0], "message": parts[1], "author": parts[2], "date": parts[3], "time": parts[3]}
+                        msg = parts[1]
+                        msg_ver = self._normalize_version(msg)
+                        if msg_ver and msg_ver in ver_map:
+                            commit["version"] = msg_ver
+                        commits.append(commit)
+                if commits:
+                    return commits
+
+        # git不可用时，从versions.json生成开发动态
+        return self._get_history_from_versions(limit)
+
+    def _get_history_from_versions(self, limit=30):
+        """从versions.json生成开发动态（EXE模式下git不可用时使用）"""
+        commits = []
+        vpath = self._resolve_versions_json_path()
+        if not vpath or not os.path.exists(vpath):
+            return commits
         try:
-            vpath = self._resolve_versions_json_path()
-            if os.path.exists(vpath):
-                with open(vpath, "r", encoding="utf-8") as f:
-                    raw = json.load(f)
-                vdata = raw.get("versions", raw) if isinstance(raw, dict) else raw
-                for v in vdata:
-                    ver_map[v.get("version", "")] = v
+            with open(vpath, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            vdata = raw.get("versions", raw) if isinstance(raw, dict) else raw
+            for v in vdata[:limit]:
+                ver = v.get("version", "")
+                changes = v.get("changes", [])
+                # 将changes列表合并为描述
+                if changes:
+                    desc = "；".join(changes)
+                else:
+                    desc = v.get("message", ver)
+                commit = {
+                    "sha": ver.replace(".", "")[:7],
+                    "hash": ver.replace(".", "")[:7],
+                    "message": desc,
+                    "author": "yunjii",
+                    "date": v.get("date", ""),
+                    "time": v.get("date", ""),
+                    "version": ver,
+                }
+                commits.append(commit)
         except Exception:
             pass
-        commits = []
-        for line in r["stdout"].splitlines():
-            parts = line.strip().split("|", 3)
-            if len(parts) >= 4:
-                commit = {"sha": parts[0], "hash": parts[0], "message": parts[1], "author": parts[2], "date": parts[3], "time": parts[3]}
-                msg = parts[1]
-                # 从commit message中提取版本号，仅标记版本标签，不替换message
-                msg_ver = self._normalize_version(msg)
-                if msg_ver and msg_ver in ver_map:
-                    commit["version"] = msg_ver
-                commits.append(commit)
         return commits
 
     def _list_stable_exes(self):
