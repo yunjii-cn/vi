@@ -1209,6 +1209,97 @@ MIRROR_SOURCES = {
 UV_VERSION = "0.7.2"
 PYTHON_VERSION = "3.12"
 
+# HuggingFace/ModelScope 模型下载辅助脚本（通过 venv Python 子进程执行，输出 JSON 进度协议）
+HF_HELPER_SCRIPT = r'''
+import sys, json, os, threading
+
+def make_progress_tqdm(write_line):
+    from tqdm.auto import tqdm as tqdm_auto
+    lock = threading.Lock()
+    shared = {"downloaded": 0}
+    class _PT(tqdm_auto):
+        def __init__(self, *a, **kw):
+            kw["disable"] = True
+            super().__init__(*a, **kw)
+        def update(self, n=1):
+            r = super().update(n)
+            if n is not None:
+                with lock:
+                    shared["downloaded"] += int(n)
+                write_line(json.dumps({"type": "progress", "downloaded": shared["downloaded"]}))
+            return r
+    return _PT
+
+def make_patch_context(tqdm_cls):
+    from huggingface_hub import file_download
+    from unittest.mock import patch
+    original_http_get = file_download.http_get
+    def _wrapped_http_get(*args, **kwargs):
+        if kwargs.get("_tqdm_bar") is None:
+            kwargs["_tqdm_bar"] = tqdm_cls(disable=True)
+        return original_http_get(*args, **kwargs)
+    xet_get_fn = getattr(file_download, "xet_get", None)
+    def _wrapped_xet_get(*args, **kwargs):
+        if kwargs.get("_tqdm_bar") is None:
+            kwargs["_tqdm_bar"] = tqdm_cls(disable=True)
+        return xet_get_fn(*args, **kwargs)
+    p1 = patch.object(file_download, "http_get", _wrapped_http_get)
+    if xet_get_fn is not None:
+        p2 = patch.object(file_download, "xet_get", _wrapped_xet_get)
+    else:
+        p2 = None
+    return p1, p2
+
+def main():
+    mode = sys.argv[1]
+    repo = sys.argv[2]
+    local_dir = sys.argv[3]
+    filename = sys.argv[4] if len(sys.argv) > 4 else ""
+    def write_line(obj):
+        sys.stdout.write(obj + "\n")
+        sys.stdout.flush()
+    tqdm_cls = make_progress_tqdm(write_line)
+    try:
+        if mode in ("file", "snapshot"):
+            p1, p2 = make_patch_context(tqdm_cls)
+            p1.start()
+            if p2 is not None:
+                p2.start()
+            try:
+                if mode == "file":
+                    from huggingface_hub import hf_hub_download
+                    result = hf_hub_download(repo_id=repo, filename=filename, local_dir=local_dir)
+                else:
+                    from huggingface_hub import snapshot_download
+                    result = snapshot_download(repo_id=repo, local_dir=local_dir, local_dir_use_symlinks=False)
+                write_line(json.dumps({"type": "done", "path": str(result)}))
+            finally:
+                p1.stop()
+                if p2 is not None:
+                    p2.stop()
+        elif mode == "ms_snapshot":
+            from modelscope.hub.snapshot_download import snapshot_download
+            result = snapshot_download(model_id=repo, local_dir=local_dir)
+            write_line(json.dumps({"type": "done", "path": str(result)}))
+        elif mode == "ms_file":
+            from modelscope.hub.file_download import model_file_download
+            import shutil
+            result = model_file_download(model_id=repo, file_path=filename, cache_dir=local_dir)
+            td = os.path.join(local_dir, filename)
+            if os.path.exists(result) and result != td:
+                shutil.copy2(result, td)
+            write_line(json.dumps({"type": "done", "path": td}))
+        else:
+            write_line(json.dumps({"type": "error", "message": f"unknown mode: {mode}"}))
+            sys.exit(1)
+    except Exception as e:
+        write_line(json.dumps({"type": "error", "message": str(e)}))
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+'''
+
 CUDA_VARIANT_MAP = {
     "cu128": {"min_driver": 560.70, "cuda_ver": "12.8", "index_url": "https://download.pytorch.org/whl/cu128"},
     "cu126": {"min_driver": 560.28, "cuda_ver": "12.6", "index_url": "https://download.pytorch.org/whl/cu126"},
@@ -1994,6 +2085,59 @@ for d in deps:
         self.finished.emit(True)
 
 
+class _SpeedProbeWorker(QThread):
+    """真实下载探测 Worker，对候选 URL 做 256KB Range 下载测速"""
+    finished = pyqtSignal(dict)  # {name: {"speed_bps": float, "first_byte_ms": float}}
+
+    PROBE_BYTES = 262143  # 256KB
+    PROBE_TIMEOUT = 10
+
+    def __init__(self, probe_urls, parent=None):
+        """probe_urls: list of (url, name) tuples"""
+        super().__init__(parent)
+        self.probe_urls = probe_urls
+        self._should_stop = False
+
+    def run(self):
+        results = {}
+        for url, name in self.probe_urls:
+            if self._should_stop:
+                break
+            result = self._probe_one(url, name)
+            if result:
+                results[name] = result
+        self.finished.emit(results)
+
+    def _probe_one(self, url, name):
+        """对单个 URL 做 256KB Range 下载探测，返回 {speed_bps, first_byte_ms} 或 None"""
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "Mozilla/5.0",
+                "Range": f"bytes=0-{self.PROBE_BYTES}",
+            })
+            t_start = time.monotonic()
+            with urllib.request.urlopen(req, timeout=self.PROBE_TIMEOUT) as resp:
+                t_first_byte = time.monotonic()
+                first_byte_ms = (t_first_byte - t_start) * 1000
+                total_read = 0
+                while total_read < self.PROBE_BYTES + 1:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    total_read += len(chunk)
+                t_end = time.monotonic()
+                elapsed = t_end - t_start
+                if elapsed > 0 and total_read > 0:
+                    speed_bps = total_read / elapsed
+                    return {"speed_bps": speed_bps, "first_byte_ms": first_byte_ms}
+        except Exception:
+            pass
+        return None
+
+    def stop(self):
+        self._should_stop = True
+
+
 class DeployWorker(QThread):
     progress = pyqtSignal(int, str)
     log = pyqtSignal(str, str)
@@ -2008,7 +2152,7 @@ class DeployWorker(QThread):
 
     MAX_RETRIES = 3
 
-    def __init__(self, app_res, parent=None, mirror_source="auto", uv_urls=None, ltx_urls=None, data_dir=None):
+    def __init__(self, app_res, parent=None, mirror_source="auto", uv_urls=None, ltx_urls=None, data_dir=None, speed_cache=None):
         super().__init__(parent)
         self.app_res = app_res
         if data_dir:
@@ -2020,6 +2164,7 @@ class DeployWorker(QThread):
         self._should_pause = False
         self._step_results = {}
         self._mirror_source = mirror_source
+        self._speed_cache = speed_cache or {}
         self._resolved_mirrors = self._resolve_mirrors(mirror_source)
         if uv_urls:
             self._resolved_mirrors["uv_urls"] = uv_urls
@@ -2030,15 +2175,26 @@ class DeployWorker(QThread):
         if source == "auto" or source not in MIRROR_SOURCES:
             source = "tsinghua"
         src = MIRROR_SOURCES[source]
-        return {
+        result = {
             "pip": src["pip"],
             "pip_extra": src["pip_extra"],
             "pip_fallback": src["pip_fallback"],
-            "uv_urls": src["uv_urls"],
-            "ltx_urls": src["ltx_urls"],
-            "ltx2_urls": src.get("ltx2_urls", []),
+            "uv_urls": list(src["uv_urls"]),
+            "ltx_urls": list(src["ltx_urls"]),
+            "ltx2_urls": list(src.get("ltx2_urls", [])),
             "hf_endpoint": src["hf_endpoint"],
         }
+        # 根据测速缓存排序 URL 列表（最快的排前面）
+        probe = self._speed_cache.get("probe_results", {})
+        if probe:
+            for key in ("uv_urls", "ltx_urls", "ltx2_urls"):
+                urls = result[key]
+                # 按探测速度降序排序
+                def speed_key(item):
+                    url, name = item
+                    return probe.get(name, {}).get("speed_bps", 0)
+                result[key] = sorted(urls, key=speed_key, reverse=True)
+        return result
 
     def stop(self):
         self._should_stop = True
@@ -2136,8 +2292,49 @@ class DeployWorker(QThread):
                 return False
         return False
 
-    def _format_progress(self, done, total, label):
-        """格式化下载进度条文本"""
+    @staticmethod
+    def _format_speed_text(speed_bps):
+        """格式化速度文本，返回如 '3.8MB/s' 或 '512KB/s'"""
+        if speed_bps >= 1024 * 1024:
+            return f"{speed_bps / (1024 * 1024):.1f}MB/s"
+        elif speed_bps >= 1024:
+            return f"{speed_bps / 1024:.0f}KB/s"
+        elif speed_bps > 0:
+            return f"{speed_bps:.0f}B/s"
+        return ""
+
+    @staticmethod
+    def _format_eta_text(done, total, speed_bps):
+        """格式化 ETA 文本，返回如 'ETA 4s' / 'ETA 2m 30s' / 'ETA 1h 20m'"""
+        if speed_bps <= 0 or total <= 0 or done >= total:
+            return ""
+        remaining = (total - done) / speed_bps
+        if remaining < 60:
+            return f"ETA {remaining:.0f}s"
+        elif remaining < 3600:
+            m, s = divmod(int(remaining), 60)
+            return f"ETA {m}m {s}s"
+        else:
+            h, m = divmod(int(remaining), 3600)
+            m = m // 60
+            return f"ETA {h}h {m}m"
+
+    @staticmethod
+    def _update_speed_sample(smoothed_speed, last_time, last_bytes, now, current_bytes):
+        """EWMA(alpha=0.3) 速度采样，每 0.5 秒更新一次。
+        返回 (new_smoothed_speed, new_last_time, new_last_bytes)"""
+        elapsed = now - last_time
+        if elapsed >= 0.5:
+            instant_speed = (current_bytes - last_bytes) / elapsed if elapsed > 0 else 0
+            if smoothed_speed == 0.0:
+                smoothed_speed = instant_speed
+            else:
+                smoothed_speed = 0.3 * instant_speed + 0.7 * smoothed_speed
+            return smoothed_speed, now, current_bytes
+        return smoothed_speed, last_time, last_bytes
+
+    def _format_progress(self, done, total, label, speed_bps=0):
+        """格式化下载进度条文本，支持速度和 ETA 显示"""
         if total > 0:
             pct = done * 100 // total
             bar_len = 20
@@ -2145,10 +2342,21 @@ class DeployWorker(QThread):
             bar = "█" * filled + "░" * (bar_len - filled)
             done_mb = done / (1024 * 1024)
             total_mb = total / (1024 * 1024)
-            return f"  ↓ {label} [{bar}] {pct:3d}% {done_mb:.1f}/{total_mb:.1f}MB"
+            parts = [f"  ↓ {label} [{bar}] {pct:3d}% {done_mb:.1f}/{total_mb:.1f}MB"]
+            speed_text = self._format_speed_text(speed_bps)
+            if speed_text:
+                parts.append(speed_text)
+            eta_text = self._format_eta_text(done, total, speed_bps)
+            if eta_text:
+                parts.append(eta_text)
+            return " ".join(parts)
         else:
             done_mb = done / (1024 * 1024)
-            return f"  ↓ {label} {done_mb:.1f}MB"
+            parts = [f"  ↓ {label} {done_mb:.1f}MB"]
+            speed_text = self._format_speed_text(speed_bps)
+            if speed_text:
+                parts.append(speed_text)
+            return " ".join(parts)
 
     def _monitor_download_progress(self, proc, info, models_dir, target_path, is_folder, expected_bytes):
         """监控下载进程，从stderr解析进度信息，实时更新进度条。
@@ -2289,6 +2497,97 @@ class DeployWorker(QThread):
         if proc.returncode == 0:
             self.log_replace.emit(self._format_progress(expected_bytes, expected_bytes, label), "info")
 
+    def _write_helper_script(self):
+        """将 HF 下载辅助脚本写入临时文件，返回路径"""
+        import tempfile
+        temp_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(self.app_res))), "temp")
+        os.makedirs(temp_dir, exist_ok=True)
+        helper_path = os.path.join(temp_dir, "_hf_download_helper.py")
+        with open(helper_path, 'w', encoding='utf-8') as f:
+            f.write(HF_HELPER_SCRIPT)
+        return helper_path
+
+    def _monitor_download_progress_v2(self, proc, label, expected_bytes, source_name=""):
+        """监控下载进程，从 stdout JSON 协议读取真实字节进度。
+        子进程输出 JSON 行: {"type":"progress","downloaded":123} / {"type":"done","path":"..."} / {"type":"error","message":"..."}
+        返回 (success: bool, result_path_or_error: str)"""
+        import json as _json
+        smoothed_speed = 0.0
+        speed_last_time = time.monotonic()
+        speed_last_bytes = 0
+        last_pct = -1
+        downloaded = 0
+        result_path = None
+        error_msg = ""
+        stderr_buf = []
+
+        # 后台线程读取 stderr（防止 pipe 满阻塞子进程）
+        import threading as _threading
+        def _drain_stderr():
+            try:
+                while True:
+                    chunk = proc.stderr.read(1024)
+                    if not chunk:
+                        break
+                    stderr_buf.append(chunk.decode('utf-8', errors='replace'))
+            except Exception:
+                pass
+        drain = _threading.Thread(target=_drain_stderr, daemon=True)
+        drain.start()
+
+        # 主循环：逐行读取 stdout JSON
+        try:
+            for raw_line in proc.stdout:
+                if self._should_stop:
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+                    break
+                line = raw_line.decode('utf-8', errors='replace').strip() if isinstance(raw_line, bytes) else raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = _json.loads(line)
+                except _json.JSONDecodeError:
+                    continue
+                msg_type = obj.get("type", "")
+                if msg_type == "progress":
+                    downloaded = int(obj.get("downloaded", 0))
+                    # EWMA 速度采样
+                    smoothed_speed, speed_last_time, speed_last_bytes = self._update_speed_sample(
+                        smoothed_speed, speed_last_time, speed_last_bytes, time.monotonic(), downloaded)
+                    # 显示进度
+                    if expected_bytes > 0:
+                        pct = downloaded * 100 // expected_bytes
+                        if pct != last_pct:
+                            last_pct = pct
+                            self.log_replace.emit(self._format_progress(
+                                downloaded, expected_bytes, label, speed_bps=smoothed_speed), "info")
+                    elif downloaded > 0 and downloaded % (5 * 1024 * 1024) < 100000:
+                        self.log_replace.emit(self._format_progress(
+                            downloaded, 0, label, speed_bps=smoothed_speed), "info")
+                elif msg_type == "done":
+                    result_path = obj.get("path", "")
+                elif msg_type == "error":
+                    error_msg = obj.get("message", "未知错误")
+        except Exception as e:
+            error_msg = str(e) if not error_msg else error_msg
+
+        # 等待进程结束
+        proc.wait(timeout=30)
+        drain.join(timeout=3)
+
+        if proc.returncode == 0 and not error_msg:
+            # 最终进度更新
+            final_bytes = max(downloaded, expected_bytes)
+            self.log_replace.emit(self._format_progress(final_bytes, final_bytes, label, speed_bps=smoothed_speed), "info")
+            return True, result_path or ""
+        else:
+            err = error_msg or ("".join(stderr_buf[-5:])[:300] if stderr_buf else "未知错误")
+            self._last_download_stderr = err
+            return False, err
+
     def _download_with_retry(self, url, save_path, label, max_retries=None):
         retries = max_retries or self.MAX_RETRIES
         last_err = "未知错误"
@@ -2303,6 +2602,10 @@ class DeployWorker(QThread):
                     total = int(resp.headers.get("Content-Length", 0))
                     done = 0
                     last_pct = -1
+                    # 速度跟踪变量
+                    smoothed_speed = 0.0
+                    speed_last_time = time.monotonic()
+                    speed_last_bytes = 0
                     with open(temp_path, 'wb') as f:
                         while True:
                             chunk = resp.read(65536)
@@ -2310,13 +2613,16 @@ class DeployWorker(QThread):
                                 break
                             f.write(chunk)
                             done += len(chunk)
+                            # EWMA 速度采样
+                            smoothed_speed, speed_last_time, speed_last_bytes = self._update_speed_sample(
+                                smoothed_speed, speed_last_time, speed_last_bytes, time.monotonic(), done)
                             if total > 0:
                                 pct = done * 100 // total
                                 if pct != last_pct:
                                     last_pct = pct
-                                    self.log_replace.emit(self._format_progress(done, total, label), "info")
+                                    self.log_replace.emit(self._format_progress(done, total, label, speed_bps=smoothed_speed), "info")
                             elif done % (5 * 1024 * 1024) < 65536:
-                                self.log_replace.emit(self._format_progress(done, 0, label), "info")
+                                self.log_replace.emit(self._format_progress(done, 0, label, speed_bps=smoothed_speed), "info")
                 if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
                     self._safe_remove(save_path)
                     try:
@@ -2399,6 +2705,10 @@ class DeployWorker(QThread):
                     total = int(resp.headers.get("Content-Length", 0))
                     done = len(first_chunk)
                     last_pct = -1
+                    # 速度跟踪变量
+                    smoothed_speed = 0.0
+                    speed_last_time = time.monotonic()
+                    speed_last_bytes = done
                     with open(temp_path, 'wb') as f:
                         f.write(first_chunk)
                         while True:
@@ -2409,13 +2719,16 @@ class DeployWorker(QThread):
                                 break
                             f.write(chunk)
                             done += len(chunk)
+                            # EWMA 速度采样
+                            smoothed_speed, speed_last_time, speed_last_bytes = self._update_speed_sample(
+                                smoothed_speed, speed_last_time, speed_last_bytes, time.monotonic(), done)
                             if total > 0:
                                 pct = done * 100 // total
                                 if pct != last_pct:
                                     last_pct = pct
-                                    self.log_replace.emit(self._format_progress(done, total, lbl), "info")
+                                    self.log_replace.emit(self._format_progress(done, total, lbl, speed_bps=smoothed_speed), "info")
                             elif done % (5 * 1024 * 1024) < 65536:
-                                self.log_replace.emit(self._format_progress(done, 0, lbl), "info")
+                                self.log_replace.emit(self._format_progress(done, 0, lbl, speed_bps=smoothed_speed), "info")
                 if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
                     self._safe_remove(save_path)
                     try:
@@ -3994,6 +4307,9 @@ for d in deps:
         any_downloaded = False
         any_skipped = False
 
+        # 提前写入辅助脚本（复用，避免重复写入）
+        helper_path = self._write_helper_script()
+
         for model_id, info in LTX_MODELS.items():
             if not info.get("required", False):
                 continue
@@ -4017,28 +4333,22 @@ for d in deps:
                 env = os.environ.copy()
                 env["HF_ENDPOINT"] = self._resolved_mirrors["hf_endpoint"]
                 env["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
-                env["TQDM_DISABLE"] = "0"
                 env.pop("PYTHONHOME", None)
                 success = False
                 for attempt in range(1, self.MAX_RETRIES + 1):
                     if self._should_stop:
                         return self.STEP_STATUS_FAILED
                     try:
-                        cmd = [
-                            python_exe, "-u", "-c",
-                            f"from huggingface_hub import snapshot_download; "
-                            f"snapshot_download(repo_id='{info['repo']}', local_dir=r'{target_path}', "
-                            f"local_dir_use_symlinks=False)"
-                        ]
-                        proc = hidden_popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env)
-                        self._monitor_download_progress(proc, info, models_dir, target_path, is_folder, expected_bytes)
-                        if proc.returncode == 0 and os.path.exists(target_path):
+                        cmd = [python_exe, "-u", helper_path, "snapshot", info['repo'], target_path, ""]
+                        proc = hidden_popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+                        ok, result = self._monitor_download_progress_v2(proc, info['file'], expected_bytes, "HF镜像")
+                        if ok and os.path.exists(target_path):
                             folder_size = sum(f.stat().st_size for f in __import__('pathlib').Path(target_path).rglob("*") if f.is_file())
                             if folder_size > expected_bytes * 0.5:
                                 success = True
                                 self.log.emit(f"  √ {info['file']} 下载完成", "ok")
                                 break
-                        err = self._last_download_stderr[:200] if self._last_download_stderr else "未知错误"
+                        err = result if not ok else "未知错误"
                         self.log.emit(f"  △ 第{attempt}次下载失败: {err}", "warn")
                         if attempt < self.MAX_RETRIES:
                             time.sleep(3)
@@ -4068,7 +4378,6 @@ for d in deps:
             env = os.environ.copy()
             env["HF_ENDPOINT"] = self._resolved_mirrors["hf_endpoint"]
             env["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
-            env["TQDM_DISABLE"] = "0"
             env.pop("PYTHONHOME", None)
 
             success = False
@@ -4077,20 +4386,15 @@ for d in deps:
                 if self._should_stop:
                     return self.STEP_STATUS_FAILED
                 try:
-                    cmd = [
-                        python_exe, "-u", "-c",
-                        f"from huggingface_hub import hf_hub_download; "
-                        f"hf_hub_download(repo_id='{info['repo']}', filename='{info['file']}', "
-                        f"local_dir=r'{models_dir}', force_download={'True' if attempt > 1 else 'False'})"
-                    ]
-                    proc = hidden_popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env)
-                    self._monitor_download_progress(proc, info, models_dir, target_path, is_folder, expected_bytes)
-                    if proc.returncode == 0 and os.path.exists(target_file) and os.path.getsize(target_file) > expected_bytes * 0.9:
+                    cmd = [python_exe, "-u", helper_path, "file", info['repo'], models_dir, info['file']]
+                    proc = hidden_popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+                    ok, result = self._monitor_download_progress_v2(proc, info['file'], expected_bytes, "HF镜像")
+                    if ok and os.path.exists(target_file) and os.path.getsize(target_file) > expected_bytes * 0.9:
                         success = True
                         self.log.emit(f"  √ {info['file']} 下载完成 (HF镜像)", "ok")
                         break
                     else:
-                        err = self._last_download_stderr[:300] if self._last_download_stderr else "未知错误"
+                        err = result if not ok else "未知错误"
                         self.log.emit(f"  △ HF镜像第{attempt}次下载失败: {err}", "warn")
                         if attempt < self.MAX_RETRIES:
                             time.sleep(5 * attempt)
@@ -4112,31 +4416,17 @@ for d in deps:
                         capture_output=True, text=True, timeout=120, env=ms_env
                     )
                     ms_model_id = info.get("modelscope_id", info["repo"])
-                    is_folder = info.get("is_folder", False)
-                    if is_folder:
-                        cmd = [
-                            python_exe, "-u", "-c",
-                            f"from modelscope.hub.snapshot_download import snapshot_download; "
-                            f"snapshot_download(model_id='{ms_model_id}', "
-                            f"local_dir=r'{target_path}')"
-                        ]
-                    else:
-                        cmd = [
-                            python_exe, "-u", "-c",
-                            f"from modelscope.hub.file_download import model_file_download; "
-                            f"p = model_file_download(model_id='{ms_model_id}', "
-                            f"file_path='{info['file']}', cache_dir=r'{models_dir}'); "
-                            f"import shutil, os; "
-                            f"td = os.path.join(r'{models_dir}', '{info['file']}'); "
-                            f"shutil.copy2(p, td) if os.path.exists(p) and p != td else None"
-                        ]
-                    proc = hidden_popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env)
-                    self._monitor_download_progress(proc, info, models_dir, target_path, is_folder, expected_bytes)
-                    if proc.returncode == 0 and os.path.exists(target_file) and os.path.getsize(target_file) > expected_bytes * 0.9:
+                    ms_mode = "ms_snapshot" if is_folder else "ms_file"
+                    cmd = [python_exe, "-u", helper_path, ms_mode, ms_model_id,
+                           target_path if is_folder else models_dir,
+                           "" if is_folder else info['file']]
+                    proc = hidden_popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ms_env)
+                    ok, result = self._monitor_download_progress_v2(proc, info['file'], expected_bytes, "ModelScope")
+                    if ok and os.path.exists(target_file) and os.path.getsize(target_file) > expected_bytes * 0.9:
                         success = True
                         self.log.emit(f"  √ {info['file']} 下载完成 (ModelScope)", "ok")
                     else:
-                        err = self._last_download_stderr[:300] if self._last_download_stderr else "未知错误"
+                        err = result if not ok else "未知错误"
                         self.log.emit(f"  △ ModelScope 也失败: {err}", "warn")
                 except Exception as e:
                     self.log.emit(f"  △ ModelScope 异常: {e}", "warn")
@@ -4147,21 +4437,15 @@ for d in deps:
                     direct_env = os.environ.copy()
                     direct_env.pop("HF_ENDPOINT", None)
                     direct_env["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
-                    direct_env["TQDM_DISABLE"] = "0"
                     direct_env.pop("PYTHONHOME", None)
-                    cmd = [
-                        python_exe, "-u", "-c",
-                        f"from huggingface_hub import hf_hub_download; "
-                        f"hf_hub_download(repo_id='{info['repo']}', filename='{info['file']}', "
-                        f"local_dir=r'{models_dir}', force_download=True)"
-                    ]
-                    proc = hidden_popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=direct_env)
-                    self._monitor_download_progress(proc, info, models_dir, target_path, is_folder, expected_bytes)
-                    if proc.returncode == 0 and os.path.exists(target_file) and os.path.getsize(target_file) > expected_bytes * 0.9:
+                    cmd = [python_exe, "-u", helper_path, "file", info['repo'], models_dir, info['file']]
+                    proc = hidden_popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=direct_env)
+                    ok, result = self._monitor_download_progress_v2(proc, info['file'], expected_bytes, "HF直连")
+                    if ok and os.path.exists(target_file) and os.path.getsize(target_file) > expected_bytes * 0.9:
                         success = True
                         self.log.emit(f"  √ {info['file']} 下载完成 (HF直连)", "ok")
                     else:
-                        err = self._last_download_stderr[:300] if self._last_download_stderr else "未知错误"
+                        err = result if not ok else "未知错误"
                         self.log.emit(f"  △ HF直连也失败: {err}", "warn")
                 except Exception as e:
                     self.log.emit(f"  △ HF直连异常: {e}", "warn")
@@ -7481,17 +7765,17 @@ class MainWindow(QMainWindow):
         self._ver_status_label.setStyleSheet("font-size: 8pt; color: #888; border: none;")
         tab_layout.addWidget(self._ver_status_label)
 
-        self._ver_expand_btn = QPushButton("📂 全部展开")
+        self._ver_expand_btn = QPushButton("📂 全部收起")
         self._ver_expand_btn.setMinimumWidth(90)
         self._ver_expand_btn.setFixedHeight(28)
         self._ver_expand_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._ver_expand_btn.setCheckable(True)
         self._ver_expand_btn.setChecked(True)
         self._ver_expand_btn.setStyleSheet("""
-            QPushButton { background-color: #CC0000; color: #fff; border: 1px solid #DD2222; border-radius: 5px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; font-weight: bold; padding: 4px 10px; }
-            QPushButton:hover { background-color: #DD2222; }
-            QPushButton:!checked { background-color: #444; color: #999; border: 1px solid #555; }
-            QPushButton:!checked:hover { background-color: #555; color: #ccc; }
+            QPushButton { background-color: #2E7D32; color: #fff; border: 1px solid #388E3C; border-radius: 5px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 8pt; font-weight: bold; padding: 4px 10px; }
+            QPushButton:hover { background-color: #388E3C; }
+            QPushButton:!checked { background-color: #222; color: #999; border: 1px solid #333; }
+            QPushButton:!checked:hover { background-color: #333; color: #ccc; }
         """)
         self._ver_expand_btn.clicked.connect(self._toggle_expand_all)
         tab_layout.addWidget(self._ver_expand_btn)
@@ -7588,6 +7872,9 @@ class MainWindow(QMainWindow):
 
     def _toggle_expand_all(self):
         self._ver_expanded = self._ver_expand_btn.isChecked() if self._ver_expand_btn else not self._ver_expanded
+        # 更新按钮文字
+        if self._ver_expand_btn:
+            self._ver_expand_btn.setText("📂 全部收起" if self._ver_expanded else "📂 全部展开")
         # 同步所有卡片的展开状态，但列表模式下当前版本始终展开
         for v in self._ver_stable_data:
             self._ver_card_expanded[v["version"]] = self._ver_expanded
@@ -7648,50 +7935,6 @@ class MainWindow(QMainWindow):
             status_text.setWordWrap(True)
             status_text.setStyleSheet("font-size: 9pt; color: #8aaa8a; border: none;")
             cc_layout.addWidget(status_text)
-
-            # === 当前版本下载进度条（初始隐藏）===
-            cv_dl_frame = QFrame()
-            cv_dl_frame.setObjectName("_dl_progress_current")
-            cv_dl_frame.setStyleSheet("background-color: #0d2d1a; border: none;")
-            cv_dl_frame.setVisible(False)
-            cv_dl_layout = QHBoxLayout(cv_dl_frame)
-            cv_dl_layout.setContentsMargins(0, 4, 0, 2)
-            cv_dl_layout.setSpacing(8)
-
-            cv_dl_progress = QProgressBar()
-            cv_dl_progress.setRange(0, 100)
-            cv_dl_progress.setValue(0)
-            cv_dl_progress.setFixedHeight(20)
-            cv_dl_progress.setStyleSheet("""
-                QProgressBar { background-color: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 4px; text-align: center; color: #ccc; font-size: 8pt; }
-                QProgressBar::chunk { background-color: #CC0000; border-radius: 3px; }
-            """)
-            cv_dl_layout.addWidget(cv_dl_progress, stretch=1)
-
-            cv_dl_status = QLabel("0.0/0.0MB")
-            cv_dl_status.setFixedWidth(100)
-            cv_dl_status.setStyleSheet("font-family: 'Segoe UI', sans-serif; font-size: 8pt; color: #888; border: none;")
-            cv_dl_layout.addWidget(cv_dl_status)
-
-            cv_dl_pause = QPushButton("暂停")
-            cv_dl_pause.setFixedSize(48, 22)
-            cv_dl_pause.setCursor(Qt.CursorShape.PointingHandCursor)
-            cv_dl_pause.setStyleSheet(
-                "QPushButton { background-color: #333; color: #aaa; border: 1px solid #444; border-radius: 4px; font-family: 'Microsoft YaHei UI', sans-serif; font-size: 7pt; font-weight: bold; }"
-                "QPushButton:hover { background-color: #444; color: #ddd; }"
-            )
-            cv_dl_layout.addWidget(cv_dl_pause)
-
-            cv_dl_cancel = QPushButton("取消")
-            cv_dl_cancel.setFixedSize(48, 22)
-            cv_dl_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
-            cv_dl_cancel.setStyleSheet(
-                "QPushButton { background-color: #CC0000; color: #fff; border: none; border-radius: 4px; font-family: 'Microsoft YaHei UI', sans-serif; font-size: 7pt; font-weight: bold; }"
-                "QPushButton:hover { background-color: #FF0000; }"
-            )
-            cv_dl_layout.addWidget(cv_dl_cancel)
-
-            cc_layout.addWidget(cv_dl_frame)
 
             if is_current_expanded:
                 changes = current_v.get("changes", [])
@@ -7837,11 +8080,7 @@ class MainWindow(QMainWindow):
             self._ver_scroll_layout.addWidget(lbl)
             return
         expanded = self._ver_expanded
-        # 展开模式：显示全部版本不分页；列表模式：分页显示
-        if expanded:
-            page_size = len(all_versions) + 1  # 展开时全部显示
-        else:
-            page_size = self._ver_list_page_size
+        page_size = self._ver_detail_page_size if expanded else self._ver_list_page_size
 
         current_v = None
         other_versions = []
@@ -7999,12 +8238,12 @@ class MainWindow(QMainWindow):
             dl_progress.setFixedHeight(18)
             dl_progress.setStyleSheet("""
                 QProgressBar { background-color: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 4px; text-align: center; color: #ccc; font-size: 8pt; }
-                QProgressBar::chunk { background-color: #CC0000; border-radius: 3px; }
+                QProgressBar::chunk { background-color: #2E7D32; border-radius: 3px; }
             """)
             pr_layout.addWidget(dl_progress, stretch=1)
 
             dl_status_label = QLabel("0.0/0.0MB")
-            dl_status_label.setFixedWidth(180)
+            dl_status_label.setFixedWidth(100)
             dl_status_label.setStyleSheet("font-family: 'Segoe UI', sans-serif; font-size: 8pt; color: #888; border: none;")
             pr_layout.addWidget(dl_status_label)
 
@@ -8059,11 +8298,7 @@ class MainWindow(QMainWindow):
             self._ver_scroll_layout.addWidget(lbl)
             return
         expanded = self._ver_expanded
-        # 展开模式：显示全部不分页；列表模式：分页显示
-        if expanded:
-            page_size = len(commits) + 1
-        else:
-            page_size = self._ver_list_page_size
+        page_size = self._ver_detail_page_size if expanded else self._ver_list_page_size
         end = min(self._ver_rendered_count + page_size, len(commits))
         for idx in range(self._ver_rendered_count, end):
             commit = commits[idx]
@@ -8973,16 +9208,7 @@ class MainWindow(QMainWindow):
                     self._log(f"✓ 版本 v{version} 已下载，正在切换...", "ok")
                     self._switch_to_exe(target_path)
                     return
-                # 优先尝试内联下载（带进度条）
-                scroll_content = getattr(self, '_ver_scroll_content', None)
-                if scroll_content:
-                    progress_row = scroll_content.findChild(QFrame, f"_dl_progress_{version}")
-                    if not progress_row:
-                        progress_row = scroll_content.findChild(QFrame, "_dl_progress_current")
-                    if progress_row:
-                        self._start_inline_download(version, remote_info)
-                        return
-                # 回退到弹窗下载
+                # 应用内下载
                 self._download_exe_to_ver(download_url, target_path, version, release_page)
                 return
 
@@ -9029,16 +9255,13 @@ class MainWindow(QMainWindow):
             self._switch_to_exe(target_path)
             return
 
-        # 查找进度条组件（优先查找版本卡片内的，其次查找当前版本卡片的）
+        # 查找进度条组件
         scroll_content = getattr(self, '_ver_scroll_content', None)
         if not scroll_content:
             self._on_download_version(remote_info)
             return
 
         progress_row = scroll_content.findChild(QFrame, f"_dl_progress_{version}")
-        if not progress_row:
-            # 尝试查找当前版本卡片的进度条
-            progress_row = scroll_content.findChild(QFrame, "_dl_progress_current")
         if not progress_row:
             self._on_download_version(remote_info)
             return
@@ -9101,9 +9324,6 @@ class MainWindow(QMainWindow):
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
                 block_size = 65536
-                import time
-                last_time = time.time()
-                last_downloaded = 0
                 with open(tmp_path, "wb") as f:
                     while True:
                         if dl_state["cancelled"]:
@@ -9116,35 +9336,17 @@ class MainWindow(QMainWindow):
                             break
                         f.write(chunk)
                         downloaded += len(chunk)
-                        now = time.time()
-                        elapsed = now - last_time
                         if total > 0:
                             pct = int(downloaded * 100 / total)
                             mb = downloaded / (1024 * 1024)
                             total_mb = total / (1024 * 1024)
-                            # 每隔0.3秒更新速度和ETA
-                            if elapsed >= 0.3:
-                                speed_bps = (downloaded - last_downloaded) / elapsed
-                                speed_mb = speed_bps / (1024 * 1024)
-                                remaining_bytes = total - downloaded
-                                eta_sec = remaining_bytes / speed_bps if speed_bps > 0 else 0
-                                eta_str = f"{int(eta_sec // 60)}:{int(eta_sec % 60):02d}" if eta_sec < 3600 else f"{int(eta_sec // 3600)}:{int((eta_sec % 3600) // 60):02d}:{int(eta_sec % 60):02d}"
-                                QTimer.singleShot(0, lambda p=pct, m=mb, t=total_mb, s=speed_mb, e=eta_str: (
-                                    dl_progress.setValue(p),
-                                    dl_status_label.setText(f"{m:.1f}/{t:.1f}MB {s:.1f}MB/s ETA:{e}")
-                                ))
-                                last_time = now
-                                last_downloaded = downloaded
-                        else:
-                            if elapsed >= 0.5:
-                                mb = downloaded / (1024 * 1024)
-                                speed_bps = (downloaded - last_downloaded) / elapsed
-                                speed_mb = speed_bps / (1024 * 1024)
-                                QTimer.singleShot(0, lambda m=mb, s=speed_mb: (
-                                    dl_status_label.setText(f"{m:.1f}MB {s:.1f}MB/s")
-                                ))
-                                last_time = now
-                                last_downloaded = downloaded
+                            QTimer.singleShot(0, lambda p=pct, m=mb, t=total_mb: (
+                                dl_progress.setValue(p),
+                                dl_status_label.setText(f"{m:.1f}/{t:.1f}MB")
+                            ))
+                        elif downloaded % (1024 * 1024) < block_size:
+                            mb = downloaded / (1024 * 1024)
+                            QTimer.singleShot(0, lambda m=mb: dl_status_label.setText(f"{m:.1f}MB"))
 
                 if dl_state["cancelled"]:
                     if os.path.isfile(tmp_path):
@@ -9197,9 +9399,8 @@ class MainWindow(QMainWindow):
         # 创建下载进度对话框
         dlg = QDialog(self)
         dlg.setWindowTitle(f"下载 v{version}")
-        dlg.setFixedSize(480, 160)
+        dlg.setFixedSize(420, 140)
         dlg.setStyleSheet("QDialog { background-color: #1A1A1A; }")
-        dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         dlg_layout = QVBoxLayout(dlg)
         dlg_layout.setContentsMargins(16, 12, 16, 12)
         dlg_layout.setSpacing(8)
@@ -9211,16 +9412,11 @@ class MainWindow(QMainWindow):
         progress = QProgressBar()
         progress.setRange(0, 100)
         progress.setValue(0)
-        progress.setFormat("%p%")
         progress.setStyleSheet("""
-            QProgressBar { background-color: #222222; border: 1px solid #333333; border-radius: 4px; height: 22px; text-align: center; color: #FFFFFF; font-size: 10px; }
+            QProgressBar { background-color: #222222; border: 1px solid #333333; border-radius: 4px; height: 20px; text-align: center; color: #FFFFFF; font-size: 10px; }
             QProgressBar::chunk { background-color: #CC0000; border-radius: 3px; }
         """)
         dlg_layout.addWidget(progress)
-
-        speed_label = QLabel("")
-        speed_label.setStyleSheet("font-size: 10px; color: #999; background: transparent; border: none;")
-        dlg_layout.addWidget(speed_label)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -9239,8 +9435,7 @@ class MainWindow(QMainWindow):
         cancel_btn.clicked.connect(on_cancel)
 
         dlg.show()
-        dlg.raise_()
-        dlg.activateWindow()
+        QApplication.processEvents()
 
         # 执行下载
         import urllib.request
@@ -9253,9 +9448,6 @@ class MainWindow(QMainWindow):
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
                 block_size = 65536
-                import time
-                last_time = time.time()
-                last_downloaded = 0
                 with open(tmp_path, "wb") as f:
                     while True:
                         if download_state["cancelled"]:
@@ -9265,37 +9457,14 @@ class MainWindow(QMainWindow):
                             break
                         f.write(chunk)
                         downloaded += len(chunk)
-                        now = time.time()
-                        elapsed = now - last_time
                         if total > 0:
                             pct = int(downloaded * 100 / total)
-                            mb = downloaded / (1024 * 1024)
-                            total_mb = total / (1024 * 1024)
-                            # 每隔0.3秒更新速度信息
-                            if elapsed >= 0.3:
-                                speed_bps = (downloaded - last_downloaded) / elapsed
-                                speed_mb = speed_bps / (1024 * 1024)
-                                remaining_bytes = total - downloaded
-                                eta_sec = remaining_bytes / speed_bps if speed_bps > 0 else 0
-                                eta_str = f"{int(eta_sec // 60)}:{int(eta_sec % 60):02d}" if eta_sec < 3600 else f"{int(eta_sec // 3600)}:{int((eta_sec % 3600) // 60):02d}:{int(eta_sec % 60):02d}"
-                                QTimer.singleShot(0, lambda p=pct, m=mb, t=total_mb: (
-                                    progress.setValue(p),
-                                    status_label.setText(f"正在下载 v{version}... {m:.1f}/{t:.1f} MB")
-                                ))
-                                QTimer.singleShot(0, lambda s=speed_mb, e=eta_str: speed_label.setText(f"速度: {s:.1f} MB/s | 预计剩余: {e}"))
-                                last_time = now
-                                last_downloaded = downloaded
-                        else:
-                            if elapsed >= 0.5:
+                            QTimer.singleShot(0, lambda p=pct: progress.setValue(p))
+                            if downloaded % (1024 * 1024) < block_size:
                                 mb = downloaded / (1024 * 1024)
-                                speed_bps = (downloaded - last_downloaded) / elapsed
-                                speed_mb = speed_bps / (1024 * 1024)
-                                QTimer.singleShot(0, lambda m=mb, s=speed_mb: (
-                                    status_label.setText(f"正在下载 v{version}... {m:.1f} MB"),
-                                    speed_label.setText(f"速度: {s:.1f} MB/s")
-                                ))
-                                last_time = now
-                                last_downloaded = downloaded
+                                total_mb = total / (1024 * 1024)
+                                QTimer.singleShot(0, lambda m=mb, t=total_mb: status_label.setText(f"正在下载 v{version}... {m:.1f}/{t:.1f} MB"))
+                                QApplication.processEvents()
 
                 if download_state["cancelled"]:
                     if os.path.isfile(tmp_path):
@@ -9306,28 +9475,23 @@ class MainWindow(QMainWindow):
                 if os.path.isfile(tmp_path) and os.path.getsize(tmp_path) > 1024 * 1024:
                     os.replace(tmp_path, target_path)
                     download_state["done"] = True
-                    QTimer.singleShot(0, lambda: (
-                        progress.setValue(100),
-                        status_label.setText(f"✓ v{version} 下载完成！"),
-                        speed_label.setText("即将自动切换版本...")
-                    ))
+                    QTimer.singleShot(0, lambda: status_label.setText(f"✓ v{version} 下载完成！"))
+                    QTimer.singleShot(0, lambda: progress.setValue(100))
+                    QApplication.processEvents()
                     import time
-                    time.sleep(0.8)
-                    QTimer.singleShot(0, dlg.accept)
+                    time.sleep(0.5)
+                    dlg.accept()
                     self._log(f"✓ v{version} 下载完成，已保存到 ver/ 目录", "ok")
                     # 自动切换
                     QTimer.singleShot(500, lambda: self._switch_to_exe(target_path))
                 else:
                     if os.path.isfile(tmp_path):
                         os.remove(tmp_path)
-                    QTimer.singleShot(0, lambda: (
-                        status_label.setText("× 下载文件异常，请在浏览器下载"),
-                        speed_label.setText("")
-                    ))
+                    QTimer.singleShot(0, lambda: status_label.setText("× 下载文件异常，请在浏览器下载"))
                     self._log(f"× v{version} 下载文件异常", "err")
                     import time
-                    time.sleep(1.5)
-                    QTimer.singleShot(0, dlg.reject)
+                    time.sleep(1)
+                    dlg.reject()
                     # 回退到浏览器
                     import webbrowser
                     webbrowser.open(fallback_page)
@@ -9337,14 +9501,10 @@ class MainWindow(QMainWindow):
                         os.remove(tmp_path)
                     except Exception:
                         pass
-                QTimer.singleShot(0, lambda: (
-                    status_label.setText(f"× 下载失败: {e}"),
-                    speed_label.setText("")
-                ))
+                QTimer.singleShot(0, lambda: status_label.setText(f"× 下载失败: {e}"))
                 self._log(f"× v{version} 下载失败: {e}", "err")
                 import time
-                time.sleep(1.5)
-                QTimer.singleShot(0, dlg.reject)
+                time.sleep(1)
                 dlg.reject()
                 # 回退到浏览器
                 try:
@@ -9360,11 +9520,10 @@ class MainWindow(QMainWindow):
     def _on_download_update(self):
         if not hasattr(self, '_latest_info') or not self._latest_info:
             if self._latest_version:
-                self._start_inline_download(self._latest_version, {"version": self._latest_version, "filename": f"{APP_NAME}-v{self._latest_version}.exe"})
+                self._on_download_version({"version": self._latest_version, "filename": f"{APP_NAME}-v{self._latest_version}.exe"})
                 return
             return
-        version = self._latest_info.get("version", self._latest_version)
-        self._start_inline_download(version, self._latest_info)
+        self._on_download_version(self._latest_info)
 
     def _open_release_page(self):
         source_key = self._effective_source_key()
@@ -12526,8 +12685,20 @@ if __name__ == '__main__':
             self._log(line, "info")
 
     def _speed_test_mirrors(self):
+        # 检查缓存（24小时内有效）
+        cache = self._load_speed_cache()
+        if cache:
+            self._speed_results = cache.get("ping_results", {})
+            self._speed_gh_ok = cache.get("gh_ok", {})
+            self._speed_probe_results = cache.get("probe_results", {})
+            self._speed_after_deploy = False
+            # 直接显示缓存结果
+            self._on_speed_test_done()
+            return
+
         self._speed_results = {}
         self._speed_gh_ok = {}
+        self._speed_probe_results = {}
         self._speed_phase = "ping"
         self._speed_queue = list(MIRROR_SOURCES.keys())
         self._speed_after_deploy = False
@@ -12593,7 +12764,8 @@ if __name__ == '__main__':
 
     def _check_gh_next(self):
         if not self._speed_queue:
-            self._on_speed_test_done()
+            # GH 检测完成，进入真实下载探测阶段
+            self._start_probe_phase()
             return
         gh_key = self._speed_queue.pop(0)
         gh_hosts = {
@@ -12697,26 +12869,104 @@ if __name__ == '__main__':
                 remaining_urls.append((url, name))
         return priority_urls + remaining_urls
 
+    def _start_probe_phase(self):
+        """启动真实下载探测阶段"""
+        self._speed_probe_results = {}
+        probe_urls = []
+        # 对每个可用的 GH 镜像取第一个 URL 做探测
+        gh_probe_map = {
+            "ghfast": ("https://ghfast.top/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHFast"),
+            "ghproxy": ("https://gh-proxy.com/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GH-Proxy"),
+            "ghgo": ("https://ghgo.xyz/https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip", "GHGo"),
+        }
+        for gh_key, (url, name) in gh_probe_map.items():
+            if self._speed_gh_ok.get(gh_key):
+                probe_urls.append((url, name))
+        # HF 镜像探测
+        probe_urls.append(("https://hf-mirror.com/", "HF-Mirror"))
+        if not probe_urls:
+            self._on_speed_test_done()
+            return
+        self.speed_result_label.setText("• 测速中(真实探测)...")
+        self._probe_worker = _SpeedProbeWorker(probe_urls, self)
+        self._probe_worker.finished.connect(self._on_probe_finished)
+        self._probe_worker.start()
+
+    def _on_probe_finished(self, results):
+        """真实探测完成，保存结果并结束测速"""
+        self._speed_probe_results = results
+        # 保存到缓存
+        self._save_speed_cache()
+        self._on_speed_test_done()
+
+    def _load_speed_cache(self):
+        """加载测速缓存，返回缓存数据或 None"""
+        settings_path = os.path.join(self._data_dir, "settings.json")
+        if not os.path.exists(settings_path):
+            return None
+        try:
+            with open(settings_path, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+            cache = settings.get("speed_cache")
+            if not cache:
+                return None
+            # 缓存有效期 24 小时
+            ts = cache.get("timestamp", 0)
+            if time.time() - ts > 86400:
+                return None
+            return cache
+        except Exception:
+            return None
+
+    def _save_speed_cache(self):
+        """保存测速结果到缓存"""
+        settings_path = os.path.join(self._data_dir, "settings.json")
+        settings = {}
+        if os.path.exists(settings_path):
+            try:
+                with open(settings_path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+            except Exception:
+                pass
+        cache = {
+            "timestamp": time.time(),
+            "ping_results": self._speed_results,
+            "gh_ok": self._speed_gh_ok,
+            "probe_results": {name: {"speed_bps": v["speed_bps"], "first_byte_ms": v["first_byte_ms"]}
+                              for name, v in self._speed_probe_results.items()},
+        }
+        settings["speed_cache"] = cache
+        try:
+            with open(settings_path, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
     def _on_speed_test_done(self):
         fastest = "tsinghua"
         valid = {k: v for k, v in self._speed_results.items() if v < 99999}
         if valid:
             fastest = min(valid, key=valid.get)
-        lines = []
-        for key in ["tsinghua", "aliyun", "official"]:
-            ms = self._speed_results.get(key, 99999)
-            if ms < 99999:
-                lines.append(f"{MIRROR_SOURCES[key]['label']}: {ms:.0f}ms")
-            else:
-                lines.append(f"{MIRROR_SOURCES[key]['label']}: 超时")
+        # 如果有探测结果，根据真实下载速度选择最快源
+        probe_results = getattr(self, '_speed_probe_results', {})
+        if probe_results:
+            best_probe = max(probe_results.items(), key=lambda x: x[1].get("speed_bps", 0))
+            if best_probe:
+                speed_mbps = best_probe[1]["speed_bps"] / (1024 * 1024)
+                self.speed_result_label.setText(f"⚡ {best_probe[0]} {speed_mbps:.1f}MB/s")
+                self.speed_result_label.setStyleSheet("font-size: 10px; color: #66BB6A; background: transparent;")
+        else:
+            self.speed_result_label.setText(f"⚡ {MIRROR_SOURCES[fastest]['label']}")
+            self.speed_result_label.setStyleSheet("font-size: 10px; color: #66BB6A; background: transparent;")
+        # 显示 GH 镜像可用状态和探测速度
         gh_labels = []
         for gh_key, label in [("ghfast", "GHFast"), ("ghproxy", "GH-Proxy"), ("ghgo", "GHGo")]:
             if self._speed_gh_ok.get(gh_key):
-                gh_labels.append(label)
-        if gh_labels:
-            lines.append(f"GH镜像: {','.join(gh_labels)}可用")
-        self.speed_result_label.setText(f"⚡ {MIRROR_SOURCES[fastest]['label']}")
-        self.speed_result_label.setStyleSheet("font-size: 10px; color: #66BB6A; background: transparent;")
+                probe = probe_results.get(label)
+                if probe:
+                    gh_labels.append(f"{label}({probe['speed_bps']/(1024*1024):.1f}MB/s)")
+                else:
+                    gh_labels.append(label)
         if hasattr(self, 'deploy_source_combo'):
             for i in range(self.deploy_source_combo.count()):
                 if self.deploy_source_combo.itemData(i) == fastest:
@@ -12890,7 +13140,7 @@ if __name__ == '__main__':
         self.btn_deploy_pause.setVisible(True)
         self.btn_deploy_cancel.setVisible(True)
         self.btn_deploy_pause.setText("⏸ 暂停")
-        self._deploy_worker = DeployWorker(self._app_resources, self, mirror_source=source_key, data_dir=self._exe_data_dir)
+        self._deploy_worker = DeployWorker(self._app_resources, self, mirror_source=source_key, data_dir=self._exe_data_dir, speed_cache=self._load_speed_cache())
         self._deploy_worker.progress.connect(self._on_deploy_progress)
         self._deploy_worker.log.connect(self._log)
         self._deploy_worker.log.connect(self._append_deploy_log)
@@ -12914,7 +13164,8 @@ if __name__ == '__main__':
         ltx_urls = self._build_ltx_urls(source_key)
         self._deploy_worker = DeployWorker(
             self._app_resources, self, mirror_source=source_key,
-            uv_urls=uv_urls, ltx_urls=ltx_urls, data_dir=self._exe_data_dir
+            uv_urls=uv_urls, ltx_urls=ltx_urls, data_dir=self._exe_data_dir,
+            speed_cache=self._load_speed_cache()
         )
         self._deploy_worker.progress.connect(self._on_deploy_progress)
         self._deploy_worker.log.connect(self._log)
