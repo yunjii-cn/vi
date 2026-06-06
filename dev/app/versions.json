@@ -1,5 +1,15 @@
 [
   {
+    "version": "2026.06.07.0124",
+    "date": "2026-06-07 01:26",
+    "message": "开发动态统一路径逻辑：与versions.json一致，打包时生成dev_changelog.json到dev/app/，自部署时释放到app/，运行时通过_resolve_dev_changelog_path统一读取",
+    "changes": [
+      "开发动态统一路径逻辑：与versions.json一致，打包时生成dev_changelog.json到dev/app/，自部署时释放到app/，运行时通过_resolve_dev_changelog_path统一读取"
+    ],
+    "name": "云集智能视频创意站-v2026.06.07.0124.exe",
+    "download_url": ""
+  },
+  {
     "version": "2026.06.07.0122",
     "date": "2026-06-07 01:23",
     "message": "开发动态打包进EXE：打包时从git历史生成dev_changelog.json嵌入，运行时优先读取真实git历史数据，EXE模式也能看到完整开发动态",

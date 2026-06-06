@@ -517,7 +517,7 @@ def build_exe():
         pyinstaller_args.extend(["--add-data", f"{str(vs_file)};."])
         print(f"  已添加版本列表 (versions.json)")
 
-    # 生成并嵌入开发动态（从git历史）
+    # 生成开发动态（与versions.json同路径逻辑）
     generate_dev_changelog()
     cl_file = ROOT_DIR / "dev_changelog.json"
     if cl_file.exists():

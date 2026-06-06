@@ -2921,5 +2921,13 @@
     ],
     "build_time": "2026-06-07T01:23:24.570050",
     "version_number": "2026.06.07.0122"
+  },
+  "云集智能视频创意站-v2026.06.07.0124": {
+    "version": "云集智能视频创意站-v2026.06.07.0124",
+    "changes": [
+      "开发动态统一路径逻辑：与versions.json一致，打包时生成dev_changelog.json到dev/app/，自部署时释放到app/，运行时通过_resolve_dev_changelog_path统一读取"
+    ],
+    "build_time": "2026-06-07T01:26:17.408142",
+    "version_number": "2026.06.07.0124"
   }
 }
