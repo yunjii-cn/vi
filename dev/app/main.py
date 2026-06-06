@@ -261,9 +261,9 @@ def _self_deploy(exe_dir):
                 shutil.copy2(vs_src, vs_dst)
             except Exception:
                 pass
-        # 释放dev_changelog.json到app目录
-        cl_src = os.path.join(meipass, "dev_changelog.json")
-        cl_dst = os.path.join(app_dir, "dev_changelog.json")
+        # 释放gitlog.json到app目录
+        cl_src = os.path.join(meipass, "gitlog.json")
+        cl_dst = os.path.join(app_dir, "gitlog.json")
         if os.path.isfile(cl_src) and not os.path.isfile(cl_dst):
             try:
                 shutil.copy2(cl_src, cl_dst)
@@ -9217,11 +9217,11 @@ class MainWindow(QMainWindow):
         return self._get_history_from_versions(limit)
 
     def _get_history_from_versions(self, limit=30):
-        """从dev_changelog.json生成开发动态（EXE模式下git不可用时使用）
+        """从gitlog.json生成开发动态（EXE模式下git不可用时使用）
         与versions.json同路径逻辑：开发模式dev/app/，EXE模式app/（自部署释放）
         """
         commits = []
-        changelog_path = self._resolve_dev_changelog_path()
+        changelog_path = self._resolve_gitlog_path()
         if changelog_path:
             try:
                 with open(changelog_path, "r", encoding="utf-8") as f:
@@ -9320,14 +9320,14 @@ class MainWindow(QMainWindow):
                 return p
         return ""
 
-    def _resolve_dev_changelog_path(self):
-        """统一解析开发动态文件路径：_app_dir/dev_changelog.json
+    def _resolve_gitlog_path(self):
+        """统一解析开发动态文件路径：_app_dir/gitlog.json
 
-        开发模式：dev/app/dev_changelog.json
-        自部署/用户EXE：app/dev_changelog.json（与EXE同目录）
+        开发模式：dev/app/gitlog.json
+        自部署/用户EXE：app/gitlog.json（与EXE同目录）
         """
         if self._app_dir:
-            p = os.path.join(self._app_dir, "dev_changelog.json")
+            p = os.path.join(self._app_dir, "gitlog.json")
             if os.path.exists(p):
                 return p
         return ""

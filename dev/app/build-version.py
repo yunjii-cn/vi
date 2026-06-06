@@ -186,7 +186,7 @@ def update_versions_json(version, changes, exe_name):
         return False
 
 
-def generate_dev_changelog(limit=200):
+def generate_gitlog(limit=200):
     """从git历史生成开发动态文件，嵌入EXE供用户查看"""
     try:
         result = subprocess.run(
@@ -212,8 +212,8 @@ def generate_dev_changelog(limit=200):
         if not commits:
             return False
 
-        changelog_file = ROOT_DIR / "dev_changelog.json"
-        with open(changelog_file, 'w', encoding='utf-8') as f:
+        gitlog_file = ROOT_DIR / "gitlog.json"
+        with open(gitlog_file, 'w', encoding='utf-8') as f:
             json.dump(commits, f, ensure_ascii=False, indent=2)
 
         print(f"  ✓ 开发动态已生成 ({len(commits)} 条)")
@@ -518,11 +518,11 @@ def build_exe():
         print(f"  已添加版本列表 (versions.json)")
 
     # 生成开发动态（与versions.json同路径逻辑）
-    generate_dev_changelog()
-    cl_file = ROOT_DIR / "dev_changelog.json"
+    generate_gitlog()
+    cl_file = ROOT_DIR / "gitlog.json"
     if cl_file.exists():
         pyinstaller_args.extend(["--add-data", f"{str(cl_file)};."])
-        print(f"  已添加开发动态 (dev_changelog.json)")
+        print(f"  已添加开发动态 (gitlog.json)")
 
     pj_file = ROOT_DIR.parent.parent / "project.json"
     if pj_file.exists():
