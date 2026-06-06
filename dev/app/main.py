@@ -12930,12 +12930,21 @@ if __name__ == '__main__':
             if self._speed_phase == "ping":
                 self._speed_phase = "gh"
                 self._speed_queue = ["ghfast", "ghproxy", "ghgo"]
+                # 更新引导横幅
+                if self._guide_active and self._guide_step == 1:
+                    self._guide_deploy_sub_hint = "检测GitHub镜像可用性…"
+                    self._update_guide_banner()
                 self._check_gh_next()
             else:
                 self._on_speed_test_done()
             return
         key = self._speed_queue.pop(0)
         host = MIRROR_SOURCES[key]["test_host"]
+        # 更新引导横幅
+        if self._guide_active and self._guide_step == 1:
+            label = MIRROR_SOURCES[key].get("label", key)
+            self._guide_deploy_sub_hint = f"测速中: {label}…"
+            self._update_guide_banner()
         self._ping_proc = QProcess(self)
         self._ping_proc.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         self._ping_key = key
@@ -12996,6 +13005,11 @@ if __name__ == '__main__':
         if not url:
             self._check_gh_next()
             return
+        # 更新引导横幅
+        if self._guide_active and self._guide_step == 1:
+            gh_labels = {"ghfast": "GHFast", "ghproxy": "GH-Proxy", "ghgo": "GHGo"}
+            self._guide_deploy_sub_hint = f"检测 {gh_labels.get(gh_key, gh_key)} 可用性…"
+            self._update_guide_banner()
         self._gh_key = gh_key
         self._gh_proc = QProcess(self)
         self._gh_proc.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
@@ -13091,6 +13105,10 @@ if __name__ == '__main__':
     def _start_probe_phase(self):
         """启动真实下载探测阶段"""
         self._speed_probe_results = {}
+        # 更新引导横幅
+        if self._guide_active and self._guide_step == 1:
+            self._guide_deploy_sub_hint = "真实下载测速中…"
+            self._update_guide_banner()
         probe_urls = []
         # 对每个可用的 GH 镜像取第一个 URL 做探测
         gh_probe_map = {
@@ -13166,6 +13184,11 @@ if __name__ == '__main__':
         valid = {k: v for k, v in self._speed_results.items() if v < 99999}
         if valid:
             fastest = min(valid, key=valid.get)
+        # 更新引导横幅
+        if self._guide_active and self._guide_step == 1:
+            fastest_label = MIRROR_SOURCES[fastest]['label']
+            self._guide_deploy_sub_hint = f"已选择最快源: {fastest_label}，准备开始部署…"
+            self._update_guide_banner()
         # 如果有探测结果，根据真实下载速度选择最快源
         probe_results = getattr(self, '_speed_probe_results', {})
         if probe_results:
@@ -13475,6 +13498,9 @@ if __name__ == '__main__':
         if step == 1:
             # 步骤1：部署维护（跳过模型下载）
             self._switch_page(1)
+            # 立即显示检测网络信息
+            self._guide_deploy_sub_hint = "正在检测网络环境…"
+            self._update_guide_banner()
             self._one_click_deploy(skip_models=True)
         elif step == 2:
             # 步骤2：模型管理
@@ -13503,6 +13529,8 @@ if __name__ == '__main__':
         if step == 1:
             # 执行部署
             self._switch_page(1)
+            self._guide_deploy_sub_hint = "正在检测网络环境…"
+            self._update_guide_banner()
             self._one_click_deploy(skip_models=True)
         elif step == 2:
             # 执行模型下载
