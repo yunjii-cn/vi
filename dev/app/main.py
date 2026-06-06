@@ -2507,11 +2507,15 @@ class DeployWorker(QThread):
             f.write(HF_HELPER_SCRIPT)
         return helper_path
 
-    def _monitor_download_progress_v2(self, proc, label, expected_bytes, source_name=""):
-        """监控下载进程，从 stdout JSON 协议读取真实字节进度。
-        子进程输出 JSON 行: {"type":"progress","downloaded":123} / {"type":"done","path":"..."} / {"type":"error","message":"..."}
+    def _monitor_download_progress_v2(self, proc, label, expected_bytes, source_name="",
+                                      target_path="", is_folder=False):
+        """监控下载进程，从 stdout JSON 协议读取真实字节进度，并以文件大小变化作为备用进度源。
+        子进程输出 JSON 行: {"type":"progress","downloaded":N} / {"type":"done","path":"..."} / {"type":"error","message":"..."}
         返回 (success: bool, result_path_or_error: str)"""
         import json as _json
+        import queue as _queue
+        import threading as _threading
+
         smoothed_speed = 0.0
         speed_last_time = time.monotonic()
         speed_last_bytes = 0
@@ -2520,9 +2524,25 @@ class DeployWorker(QThread):
         result_path = None
         error_msg = ""
         stderr_buf = []
+        stdout_q = _queue.Queue()
+        got_json_progress = [False]
+
+        # 后台线程读取 stdout（避免 readline/for 迭代的主线程阻塞问题）
+        def _reader():
+            try:
+                while True:
+                    raw = proc.stdout.readline()
+                    if not raw:
+                        break
+                    stdout_q.put(raw)
+                stdout_q.put(None)  # 哨兵：表示 EOF
+            except Exception:
+                stdout_q.put(None)
+
+        reader = _threading.Thread(target=_reader, daemon=True)
+        reader.start()
 
         # 后台线程读取 stderr（防止 pipe 满阻塞子进程）
-        import threading as _threading
         def _drain_stderr():
             try:
                 while True:
@@ -2532,17 +2552,80 @@ class DeployWorker(QThread):
                     stderr_buf.append(chunk.decode('utf-8', errors='replace'))
             except Exception:
                 pass
+
         drain = _threading.Thread(target=_drain_stderr, daemon=True)
         drain.start()
 
-        # 主循环：逐行读取 stdout JSON
+        def _get_disk_bytes():
+            """从磁盘文件大小推断已下载字节数（ModelScope 等无 JSON 进度时的备用来源）"""
+            if not target_path:
+                return 0
+            try:
+                if is_folder:
+                    total = 0
+                    if os.path.isdir(target_path):
+                        for dp, dn, fns in os.walk(target_path):
+                            for fn in fns:
+                                try:
+                                    total += os.path.getsize(os.path.join(dp, fn))
+                                except OSError:
+                                    pass
+                    return total
+                else:
+                    # 单文件：直接读取目标文件，或查找 .incomplete 临时文件
+                    if os.path.exists(target_path):
+                        return os.path.getsize(target_path)
+                    # HF hub 使用 blobs/*.incomplete 临时文件
+                    blobs_dir = os.path.join(os.path.dirname(target_path), ".cache", "huggingface", "hub")
+                    if not os.path.isdir(blobs_dir):
+                        # 尝试常见 HF_HOME 路径
+                        hf_home = os.environ.get("HF_HOME", os.path.join(os.path.expanduser("~"), ".cache", "huggingface"))
+                        blobs_dir = os.path.join(hf_home, "hub")
+                    if os.path.isdir(blobs_dir):
+                        # 遍历 blobs 目录中的 .incomplete 文件
+                        for root, dirs, files in os.walk(blobs_dir):
+                            for fn in files:
+                                if fn.endswith(".incomplete"):
+                                    return os.path.getsize(os.path.join(root, fn))
+                    return 0
+            except Exception:
+                return 0
+
+        # 主循环：从队列读取 stdout 行，每 2s 做一次文件大小备用检测
         try:
-            for raw_line in proc.stdout:
+            while True:
+                try:
+                    raw_line = stdout_q.get(timeout=2.0)
+                except _queue.Empty:
+                    # 2s 无 JSON 输出，检查停止/暂停状态，并做文件大小备用检测
+                    if self._should_stop:
+                        try: proc.terminate()
+                        except Exception: pass
+                        break
+                    if self._should_pause:
+                        try: proc.terminate()
+                        except Exception: pass
+                        break
+                    if expected_bytes > 0 and not got_json_progress[0]:
+                        db = _get_disk_bytes()
+                        if db > 0:
+                            pct = db * 100 // expected_bytes
+                            if pct != last_pct and pct <= 99:
+                                last_pct = pct
+                                smoothed_speed, speed_last_time, speed_last_bytes = self._update_speed_sample(
+                                    smoothed_speed, speed_last_time, speed_last_bytes, time.monotonic(), db)
+                                self.log_replace.emit(self._format_progress(
+                                    db, expected_bytes, label, speed_bps=smoothed_speed), "info")
+                    continue
+                if raw_line is None:  # EOF
+                    break
                 if self._should_stop:
-                    try:
-                        proc.terminate()
-                    except Exception:
-                        pass
+                    try: proc.terminate()
+                    except Exception: pass
+                    break
+                if self._should_pause:
+                    try: proc.terminate()
+                    except Exception: pass
                     break
                 line = raw_line.decode('utf-8', errors='replace').strip() if isinstance(raw_line, bytes) else raw_line.strip()
                 if not line:
@@ -2553,11 +2636,10 @@ class DeployWorker(QThread):
                     continue
                 msg_type = obj.get("type", "")
                 if msg_type == "progress":
+                    got_json_progress[0] = True
                     downloaded = int(obj.get("downloaded", 0))
-                    # EWMA 速度采样
                     smoothed_speed, speed_last_time, speed_last_bytes = self._update_speed_sample(
                         smoothed_speed, speed_last_time, speed_last_bytes, time.monotonic(), downloaded)
-                    # 显示进度
                     if expected_bytes > 0:
                         pct = downloaded * 100 // expected_bytes
                         if pct != last_pct:
@@ -2579,12 +2661,11 @@ class DeployWorker(QThread):
         drain.join(timeout=3)
 
         if proc.returncode == 0 and not error_msg:
-            # 最终进度更新
             final_bytes = max(downloaded, expected_bytes)
             self.log_replace.emit(self._format_progress(final_bytes, final_bytes, label, speed_bps=smoothed_speed), "info")
             return True, result_path or ""
         else:
-            err = error_msg or ("".join(stderr_buf[-5:])[:300] if stderr_buf else "未知错误")
+            err = error_msg or ("\n".join(stderr_buf[-5:])[:300] if stderr_buf else "未知错误")
             self._last_download_stderr = err
             return False, err
 
@@ -4341,7 +4422,7 @@ for d in deps:
                     try:
                         cmd = [python_exe, "-u", helper_path, "snapshot", info['repo'], target_path, ""]
                         proc = hidden_popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
-                        ok, result = self._monitor_download_progress_v2(proc, info['file'], expected_bytes, "HF镜像")
+                        ok, result = self._monitor_download_progress_v2(proc, info['file'], expected_bytes, "HF镜像", target_path=target_path, is_folder=True)
                         if ok and os.path.exists(target_path):
                             folder_size = sum(f.stat().st_size for f in __import__('pathlib').Path(target_path).rglob("*") if f.is_file())
                             if folder_size > expected_bytes * 0.5:
@@ -4388,7 +4469,7 @@ for d in deps:
                 try:
                     cmd = [python_exe, "-u", helper_path, "file", info['repo'], models_dir, info['file']]
                     proc = hidden_popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
-                    ok, result = self._monitor_download_progress_v2(proc, info['file'], expected_bytes, "HF镜像")
+                    ok, result = self._monitor_download_progress_v2(proc, info['file'], expected_bytes, "HF镜像", target_path=target_file, is_folder=False)
                     if ok and os.path.exists(target_file) and os.path.getsize(target_file) > expected_bytes * 0.9:
                         success = True
                         self.log.emit(f"  √ {info['file']} 下载完成 (HF镜像)", "ok")
@@ -4421,7 +4502,7 @@ for d in deps:
                            target_path if is_folder else models_dir,
                            "" if is_folder else info['file']]
                     proc = hidden_popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ms_env)
-                    ok, result = self._monitor_download_progress_v2(proc, info['file'], expected_bytes, "ModelScope")
+                    ok, result = self._monitor_download_progress_v2(proc, info['file'], expected_bytes, "ModelScope", target_path=target_path if is_folder else target_file, is_folder=is_folder)
                     if ok and os.path.exists(target_file) and os.path.getsize(target_file) > expected_bytes * 0.9:
                         success = True
                         self.log.emit(f"  √ {info['file']} 下载完成 (ModelScope)", "ok")
@@ -4440,7 +4521,7 @@ for d in deps:
                     direct_env.pop("PYTHONHOME", None)
                     cmd = [python_exe, "-u", helper_path, "file", info['repo'], models_dir, info['file']]
                     proc = hidden_popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=direct_env)
-                    ok, result = self._monitor_download_progress_v2(proc, info['file'], expected_bytes, "HF直连")
+                    ok, result = self._monitor_download_progress_v2(proc, info['file'], expected_bytes, "HF直连", target_path=target_file, is_folder=False)
                     if ok and os.path.exists(target_file) and os.path.getsize(target_file) > expected_bytes * 0.9:
                         success = True
                         self.log.emit(f"  √ {info['file']} 下载完成 (HF直连)", "ok")
@@ -4727,6 +4808,7 @@ class ServiceCard(QFrame):
                 font-size: 12px; font-weight: bold; padding: 4px 8px;
             }
             QPushButton:hover { background-color: #FF0000; }
+            QPushButton:pressed { background-color: #DD0000; }
         """)
         self.port_cancel_btn.setVisible(False)
         btn_row.addWidget(self.port_cancel_btn)
@@ -5503,8 +5585,9 @@ class MainWindow(QMainWindow):
                 padding: 10px 18px; font-size: 13px;
             }
             QPushButton:hover { background-color: #333333; border-color: #444444; }
-            QPushButton:checked { background-color: #FF0000; border-color: #FF0000; color: #FFFFFF; }
-            QPushButton:checked:hover { background-color: #CC0000; }
+            QPushButton:checked { background-color: #CC0000; border-color: #CC0000; color: #FFFFFF; }
+            QPushButton:checked:hover { background-color: #FF0000; border-color: #FF0000; }
+            QPushButton:checked:pressed { background-color: #DD0000; border-color: #DD0000; }
         """
 
         self.btn_home = QPushButton("🚀 运行服务")
@@ -5753,6 +5836,7 @@ class MainWindow(QMainWindow):
                 padding: 14px 0; font-size: 15px; font-weight: bold;
             }
             QPushButton:hover { background-color: #FF0000; }
+            QPushButton:pressed { background-color: #DD0000; }
             QPushButton:disabled { background-color: #1A1A1A; color: #555555; border-color: #222222; }
         """)
         self.btn_start_all.clicked.connect(self._start_all)
@@ -5890,6 +5974,7 @@ class MainWindow(QMainWindow):
                 padding: 6px 12px; font-size: 12px; font-weight: bold;
             }
             QPushButton:hover { background-color: #FF0000; }
+            QPushButton:pressed { background-color: #DD0000; }
             QPushButton:disabled { background-color: #1A1A1A; color: #555555; border-color: #222222; }
         """)
         self.btn_one_click_deploy.clicked.connect(self._one_click_deploy)
@@ -6311,7 +6396,8 @@ class MainWindow(QMainWindow):
         self._remove_dir_btn.setIcon(QIcon(pm_rm))
         self._remove_dir_btn.setStyleSheet("""
             QPushButton { background-color: transparent; border: 1px solid #555555; border-radius: 4px; color: #888888; font-size: 10px; padding: 4px 6px; }
-            QPushButton:hover { background-color: #CC0000; border-color: #FF0000; color: #FFFFFF; }
+            QPushButton:hover { background-color: #FF0000; border-color: #FF0000; color: #FFFFFF; }
+            QPushButton:hover:pressed { background-color: #DD0000; border-color: #DD0000; }
             QPushButton:disabled { color: #444444; border-color: #333333; }
         """)
         self._remove_dir_btn.setToolTip("删除选中的自定义目录")
@@ -6326,7 +6412,7 @@ class MainWindow(QMainWindow):
         QSvgRenderer(add_icon_svg).render(painter_add)
         painter_add.end()
         add_dir_btn.setIcon(QIcon(pm_add))
-        add_dir_btn.setStyleSheet("QPushButton { background-color: #CC0000; color: #FFFFFF; border: 1px solid #FF0000; border-radius: 4px; padding: 4px 12px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: #FF0000; }")
+        add_dir_btn.setStyleSheet("QPushButton { background-color: #CC0000; color: #FFFFFF; border: 1px solid #FF0000; border-radius: 4px; padding: 4px 12px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: #FF0000; } QPushButton:pressed { background-color: #DD0000; }")
         add_dir_btn.clicked.connect(self._add_model_dir)
         dir_row.addWidget(add_dir_btn)
 
@@ -6510,6 +6596,7 @@ class MainWindow(QMainWindow):
         check_btn.setStyleSheet("""
             QPushButton { background-color: #CC0000; color: #FFFFFF; border: 1px solid #FF0000; border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: bold; }
             QPushButton:hover { background-color: #FF0000; }
+            QPushButton:pressed { background-color: #DD0000; }
         """)
         check_btn.clicked.connect(self._check_model_integrity)
         btn_row.addWidget(check_btn)
@@ -7358,7 +7445,7 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(cancel_btn)
 
         save_btn = QPushButton("💾 保存")
-        save_btn.setStyleSheet("QPushButton { background-color: #CC0000; color: white; border: none; border-radius: 6px; padding: 8px 20px; font-size: 13px; font-weight: bold; } QPushButton:hover { background-color: #FF0000; }")
+        save_btn.setStyleSheet("QPushButton { background-color: #CC0000; color: white; border: none; border-radius: 6px; padding: 8px 20px; font-size: 13px; font-weight: bold; } QPushButton:hover { background-color: #FF0000; } QPushButton:pressed { background-color: #DD0000; }")
         save_btn.clicked.connect(dlg.accept)
         btn_layout.addWidget(save_btn)
 
@@ -7745,6 +7832,7 @@ class MainWindow(QMainWindow):
         self._ver_tab_stable_btn.setStyleSheet(
             "QPushButton { background-color: #CC0000; color: #FFFFFF; border: none; border-radius: 6px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; font-weight: bold; }"
             "QPushButton:hover { background-color: #FF0000; }"
+            "QPushButton:pressed { background-color: #DD0000; }"
         )
         self._ver_tab_stable_btn.clicked.connect(lambda: self._switch_ver_tab("stable"))
         tab_layout.addWidget(self._ver_tab_stable_btn)
@@ -7826,6 +7914,7 @@ class MainWindow(QMainWindow):
         active_style = (
             "QPushButton { background-color: #CC0000; color: #FFFFFF; border: none; border-radius: 6px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; font-weight: bold; }"
             "QPushButton:hover { background-color: #FF0000; }"
+            "QPushButton:pressed { background-color: #DD0000; }"
         )
         inactive_style = (
             "QPushButton { background-color: #333; color: #AAAAAA; border: 1px solid #444; border-radius: 6px; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 9pt; font-weight: bold; }"
@@ -8920,10 +9009,15 @@ class MainWindow(QMainWindow):
             # Re-check local EXEs to update available/exe_info (cache may be stale)
             self._refresh_local_exe_status()
             QTimer.singleShot(0, self._deferred_render_version_tab)
-            # 启动时只读本地缓存，不发起远程请求
         else:
-            # 无缓存时才发起远程竞速获取
-            self._check_remote_versions()
+            # 无缓存时只从本地 versions.json 加载版本列表，不自动发起远程请求
+            self._load_all_versions_fallback()
+            local_commits = self._get_git_history(500)
+            if local_commits:
+                self._ver_git_data = local_commits
+            self._ver_info_text = "点击「检查更新」获取最新版本"
+            self._ver_status_label.setText("")
+            QTimer.singleShot(0, self._deferred_render_version_tab)
 
     def _sync_source_combo(self):
         """同步源下拉框选中项与 _active_update_source"""
@@ -9969,7 +10063,7 @@ class MainWindow(QMainWindow):
                     QPushButton { background-color: #CC0000; color: white; border: none; border-radius: 3px;
                         padding: 3px 8px; font-size: 10px; }
                     QPushButton:hover { background-color: #FF0000; }
-                    QPushButton:pressed { background-color: #7f0000; }
+                    QPushButton:pressed { background-color: #DD0000; }
                 """)
                 cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 cancel_btn.clicked.connect(lambda checked, mid=model_id: self._cancel_download(mid))
