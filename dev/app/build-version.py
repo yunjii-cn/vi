@@ -605,7 +605,7 @@ def cleanup():
 # ── 发布EXE到 ver/ 目录 ──
 def publish_to_ver(exe_path: Path):
     """将EXE复制到 ver/ 目录，标记为稳定版"""
-    ver_dir = PROJECT_ROOT / "ver"
+    ver_dir = DEV_DIR / "ver"
     ver_dir.mkdir(parents=True, exist_ok=True)
     dest = ver_dir / exe_path.name
     if dest.exists():
@@ -801,7 +801,7 @@ def main():
         # ── 正式发布模式：以git为依据合并版本描述 + 更新版本列表 ──
         if mode == "release":
             # 检查ver/目录中是否有待发布的EXE
-            ver_dir = PROJECT_ROOT / "ver"
+            ver_dir = DEV_DIR / "ver"
             if not ver_dir.is_dir():
                 print("❌ ver/ 目录不存在，请先将测试稳定的EXE放入 ver/ 目录")
                 sys.exit(1)
