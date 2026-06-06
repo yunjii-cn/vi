@@ -2152,13 +2152,17 @@ class DeployWorker(QThread):
 
     MAX_RETRIES = 3
 
-    def __init__(self, app_res, parent=None, mirror_source="auto", uv_urls=None, ltx_urls=None, data_dir=None, speed_cache=None):
+    def __init__(self, app_res, parent=None, mirror_source="auto", uv_urls=None, ltx_urls=None, data_dir=None, speed_cache=None, temp_dir=None):
         super().__init__(parent)
         self.app_res = app_res
         if data_dir:
             self._data_dir = data_dir
         else:
             self._data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(app_res))), "data")
+        if temp_dir:
+            self._temp_dir = temp_dir
+        else:
+            self._temp_dir = os.path.join(os.path.dirname(self._data_dir), "temp")
         self._models_dir = os.path.join(self._data_dir, "models")
         self._should_stop = False
         self._should_pause = False
@@ -2499,8 +2503,7 @@ class DeployWorker(QThread):
 
     def _write_helper_script(self):
         """将 HF 下载辅助脚本写入临时文件，返回路径"""
-        import tempfile
-        temp_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(self.app_res))), "temp")
+        temp_dir = self._temp_dir
         os.makedirs(temp_dir, exist_ok=True)
         helper_path = os.path.join(temp_dir, "_hf_download_helper.py")
         with open(helper_path, 'w', encoding='utf-8') as f:
@@ -13234,7 +13237,7 @@ if __name__ == '__main__':
         self.btn_deploy_pause.setVisible(True)
         self.btn_deploy_cancel.setVisible(True)
         self.btn_deploy_pause.setText("⏸ 暂停")
-        self._deploy_worker = DeployWorker(self._app_resources, self, mirror_source=source_key, data_dir=self._exe_data_dir, speed_cache=self._load_speed_cache())
+        self._deploy_worker = DeployWorker(self._app_resources, self, mirror_source=source_key, data_dir=self._exe_data_dir, speed_cache=self._load_speed_cache(), temp_dir=self._exe_temp_dir or os.path.join(self._project_root, "temp"))
         self._deploy_worker.progress.connect(self._on_deploy_progress)
         self._deploy_worker.log.connect(self._log)
         self._deploy_worker.log.connect(self._append_deploy_log)
@@ -13259,7 +13262,8 @@ if __name__ == '__main__':
         self._deploy_worker = DeployWorker(
             self._app_resources, self, mirror_source=source_key,
             uv_urls=uv_urls, ltx_urls=ltx_urls, data_dir=self._exe_data_dir,
-            speed_cache=self._load_speed_cache()
+            speed_cache=self._load_speed_cache(),
+            temp_dir=self._exe_temp_dir or os.path.join(self._project_root, "temp")
         )
         self._deploy_worker.progress.connect(self._on_deploy_progress)
         self._deploy_worker.log.connect(self._log)
