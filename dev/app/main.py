@@ -1379,7 +1379,8 @@ LTX_MODELS = {
         "file": "ltx-2.3-22b-distilled-1.1.safetensors",
         "size_bytes": 46149345038,
         "required": False,
-        "desc": "LTX-2.3 蒸馏版 v1.1 (更新版本，质量提升)",
+        "recommended": True,
+        "desc": "LTX-2.3 蒸馏版 v1.1 BF16 (更新版本，质量提升)",
         "category": "视频模型",
         "modelscope_id": "Lightricks/LTX-2.3",
     },
@@ -1442,6 +1443,7 @@ LTX_MODELS = {
         "file": "Z-Image-Turbo-BF16.safetensors",
         "size_bytes": 13589545564,
         "required": False,
+        "recommended": True,
         "desc": "Z-Image-Turbo BF16 (图像生成基础模型，8步高质量生成)",
         "category": "图像模型",
         "modelscope_id": "ByteDance/Z-Image-Turbo",
@@ -6769,7 +6771,7 @@ class MainWindow(QMainWindow):
         tag = r.get("tag", "")
         if tag:
             tag_lbl = QLabel(f"标签: {tag}")
-            tag_color = "#FF0000" if tag == "必需" else "#FF9800" if tag == "可选" else "#888888"
+            tag_color = "#FF0000" if tag == "必需" else "#FF9800" if tag == "推荐" else "#888888"
             tag_lbl.setStyleSheet(f"font-size: 10px; color: {tag_color}; background: transparent; border: none; font-weight: bold;")
             meta_row.addWidget(tag_lbl)
 
@@ -6950,7 +6952,13 @@ class MainWindow(QMainWindow):
                 # 回退：根据文件名推断
                 category = self._classify_model("", {"file": fname, "model_id": rm.get("model_id", "")})
 
-            tag_text = "必需" if rm.get("tags") and "recommended" in rm.get("tags", []) else "可选"
+            rm_tags = rm.get("tags", [])
+            if rm_tags and "required" in rm_tags:
+                tag_text = "必需"
+            elif rm_tags and "recommended" in rm_tags:
+                tag_text = "推荐"
+            else:
+                tag_text = "可选"
             size_gb = rm.get("size_gb", 0)
             downloaded = rm.get("downloaded", False)
 
@@ -7048,7 +7056,7 @@ class MainWindow(QMainWindow):
             seen_filenames.add(fname)
 
             category = self._classify_model(model_id, info)
-            tag = "必需" if info.get("required") else "可选"
+            tag = "必需" if info.get("required") else "推荐" if info.get("recommended") else "可选"
             size_gb = info["size_bytes"] / 1024 / 1024 / 1024
 
             # 先检查顶层，再查递归索引
@@ -7200,8 +7208,8 @@ class MainWindow(QMainWindow):
             asc = self._model_sort_asc
 
             def sort_key(row):
-                # 必需模型始终置顶（无论排序方向）
-                tag_priority = 0 if row.get("tag") == "必需" else 1
+                # 必需模型始终置顶，推荐次之（无论排序方向）
+                tag_priority = {"必需": 0, "推荐": 1}.get(row.get("tag", ""), 2)
                 if col == 1:
                     return (tag_priority, row.get("name", "").lower())
                 elif col == 2:
@@ -7209,7 +7217,7 @@ class MainWindow(QMainWindow):
                 elif col == 3:
                     return (tag_priority, row.get("category", "").lower())
                 elif col == 4:
-                    tag_order = {"必需": 0, "可选": 1, "本地": 2}
+                    tag_order = {"必需": 0, "推荐": 1, "可选": 2, "本地": 3}
                     return (tag_priority, tag_order.get(row.get("tag", ""), 9))
                 elif col == 5:
                     return (tag_priority, row.get("size_gb", 0))
@@ -7222,7 +7230,7 @@ class MainWindow(QMainWindow):
         elif hasattr(self, '_model_rows') and self._model_rows:
             # 无排序时，必需模型也置顶
             def default_key(row):
-                tag_priority = 0 if row.get("tag") == "必需" else 1
+                tag_priority = {"必需": 0, "推荐": 1}.get(row.get("tag", ""), 2)
                 return (tag_priority, row.get("name", "").lower())
             self._model_rows.sort(key=default_key)
 
@@ -7284,6 +7292,8 @@ class MainWindow(QMainWindow):
             tag_item = QTableWidgetItem(r.get("tag", ""))
             if r.get("tag") == "必需":
                 tag_item.setForeground(QColor("#FF0000"))
+            elif r.get("tag") == "推荐":
+                tag_item.setForeground(QColor("#FF9800"))
             self._model_table.setItem(row, 4, tag_item)
 
             size_gb = r.get("size_gb", 0)
@@ -7332,16 +7342,24 @@ class MainWindow(QMainWindow):
         for r in range(self._model_table.rowCount()):
             self._model_table.setRowHeight(r, 32)
 
-        # 必需模型行高亮背景
-        highlight_bg = QColor(204, 0, 0, 25)
+        # 必需/推荐模型行高亮背景
+        required_bg = QColor(204, 0, 0, 25)
+        recommended_bg = QColor(255, 152, 0, 20)
         self._required_model_rows = set()
+        self._recommended_model_rows = set()
         for row_idx, r in enumerate(filtered_rows):
             if r.get("tag") == "必需":
                 self._required_model_rows.add(row_idx)
                 for c in range(self._model_table.columnCount()):
                     item = self._model_table.item(row_idx, c)
                     if item:
-                        item.setBackground(highlight_bg)
+                        item.setBackground(required_bg)
+            elif r.get("tag") == "推荐":
+                self._recommended_model_rows.add(row_idx)
+                for c in range(self._model_table.columnCount()):
+                    item = self._model_table.item(row_idx, c)
+                    if item:
+                        item.setBackground(recommended_bg)
 
         if hasattr(self, '_download_procs') and self._download_procs:
             self._start_download_progress_timer()
