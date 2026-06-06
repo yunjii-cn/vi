@@ -1,5 +1,15 @@
 [
   {
+    "version": "2026.06.07.0239",
+    "date": "2026-06-07 02:40",
+    "message": "修复模型并行下载未触发：改用轮询检测huggingface_hub可用性替代env_update信号",
+    "changes": [
+      "修复模型并行下载未触发：改用轮询检测huggingface_hub可用性替代env_update信号"
+    ],
+    "name": "云集智能视频创意站-v2026.06.07.0239.exe",
+    "download_url": ""
+  },
+  {
     "version": "2026.06.07.0209",
     "date": "2026-06-07 02:10",
     "message": "新手引导全自动开关改为红色",

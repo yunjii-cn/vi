@@ -5462,6 +5462,7 @@ class MainWindow(QMainWindow):
         self._guide_browser_check_count = 0  # 浏览器检测计数
         self._guide_skip_models = False  # 部署时是否跳过模型
         self._guide_bg_models_started = False  # 步骤1期间是否已后台启动模型下载
+        self._guide_bg_poll_timer = None  # 步骤1轮询huggingface_hub是否可用
         self._guide_deploy_sub_hint = ""  # 部署子步骤提示
         self._guide_model_sub_hint = ""  # 模型下载子步骤提示
 
@@ -10910,16 +10911,6 @@ class MainWindow(QMainWindow):
     def _on_env_update(self, key, text, status, fix_visible):
         self._set_env_widget(key, text, status, fix_visible)
         self._save_env_check_result()
-        # 引导步骤1：当huggingface_hub安装完成时，后台启动必需模型下载
-        if (key == "huggingface_hub" and status == "ok"
-                and self._guide_active and self._guide_step == 1
-                and not self._guide_bg_models_started):
-            self._guide_bg_models_started = True
-            self._write_debug_log("[引导] huggingface_hub已就绪，后台启动必需模型下载")
-            self._guide_model_sub_hint = "后台下载模型中（部署维护优先）…"
-            self._update_guide_banner()
-            # 延迟2秒启动，给部署维护留出带宽
-            QTimer.singleShot(2000, self._download_required_models)
 
     def _set_env_widget(self, key, text, status="ok", fix_visible=False):
         if key not in self._env_check_widgets:
@@ -13605,6 +13596,9 @@ if __name__ == '__main__':
             self._guide_deploy_sub_hint = "正在检测网络环境…"
             self._update_guide_banner()
             self._one_click_deploy(skip_models=True)
+            # 启动轮询：检测huggingface_hub是否可用，可用则后台启动模型下载
+            if not self._guide_bg_models_started:
+                self._start_bg_model_poll()
         elif step == 2:
             # 步骤2：模型管理
             self._switch_page(2)
@@ -13710,6 +13704,10 @@ if __name__ == '__main__':
         if self._guide_browser_check_timer:
             self._guide_browser_check_timer.stop()
             self._guide_browser_check_timer = None
+        # 停止后台模型轮询定时器
+        if self._guide_bg_poll_timer:
+            self._guide_bg_poll_timer.stop()
+            self._guide_bg_poll_timer = None
         # 延迟隐藏横幅
         QTimer.singleShot(2000, self._hide_guide_banner)
 
@@ -13727,6 +13725,49 @@ if __name__ == '__main__':
         if self._guide_browser_check_timer:
             self._guide_browser_check_timer.stop()
             self._guide_browser_check_timer = None
+        # 停止后台模型轮询定时器
+        if self._guide_bg_poll_timer:
+            self._guide_bg_poll_timer.stop()
+            self._guide_bg_poll_timer = None
+
+    def _start_bg_model_poll(self):
+        """启动轮询检测huggingface_hub是否可用，可用则后台启动模型下载"""
+        if self._guide_bg_poll_timer:
+            self._guide_bg_poll_timer.stop()
+        self._guide_bg_poll_timer = QTimer(self)
+        self._guide_bg_poll_timer.timeout.connect(self._check_bg_model_ready)
+        self._guide_bg_poll_timer.start(3000)  # 每3秒检查一次
+
+    def _check_bg_model_ready(self):
+        """轮询检查huggingface_hub是否可导入，可用则启动模型下载"""
+        if not self._guide_active or self._guide_step != 1:
+            if self._guide_bg_poll_timer:
+                self._guide_bg_poll_timer.stop()
+            return
+        if self._guide_bg_models_started:
+            if self._guide_bg_poll_timer:
+                self._guide_bg_poll_timer.stop()
+            return
+        # 检查huggingface_hub是否可导入
+        python_exe = self._python_exe
+        if not python_exe or not os.path.exists(python_exe):
+            return
+        try:
+            result = subprocess.run(
+                [python_exe, "-c", "from huggingface_hub import hf_hub_download; print('ok')"],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0 and "ok" in (result.stdout or ""):
+                self._guide_bg_models_started = True
+                if self._guide_bg_poll_timer:
+                    self._guide_bg_poll_timer.stop()
+                self._write_debug_log("[引导] huggingface_hub已就绪，后台启动必需模型下载")
+                self._guide_model_sub_hint = "后台下载模型中（部署维护优先）…"
+                self._update_guide_banner()
+                # 延迟2秒启动，给部署维护留出带宽
+                QTimer.singleShot(2000, self._download_required_models)
+        except Exception:
+            pass  # 还没装好，继续轮询
 
     def _start_guide_browser_check(self):
         """启动浏览器检测定时器（步骤3使用）"""
