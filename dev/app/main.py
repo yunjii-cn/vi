@@ -2933,6 +2933,7 @@ class DeployWorker(QThread):
                 ("triton-windows", "↻ 安装中...", "pending"),
             ],
             "扩展组件": [
+                ("sageattention", "↻ SageAttention 安装中...", "pending"),
                 ("voxcpm", "↻ VoxCPM2 安装中...", "pending"),
                 ("faster_whisper", "↻ faster-whisper 安装中...", "pending"),
                 ("real_esrgan", "↻ Real-ESRGAN 安装中...", "pending"),
@@ -2950,6 +2951,7 @@ class DeployWorker(QThread):
             "Python 环境": [("python", "√ Python 已安装", "ok")],
             "核心依赖": [],
             "扩展组件": [
+                ("sageattention", "√ SageAttention 已安装", "ok"),
                 ("voxcpm", "√ VoxCPM2 已安装", "ok"),
                 ("faster_whisper", "√ faster-whisper 已安装", "ok"),
                 ("real_esrgan", "√ Real-ESRGAN 已安装", "ok"),
@@ -3975,7 +3977,10 @@ for d in deps:
                                 lock = LTX_PIP_VERSION_LOCKS.get(name, "")
                                 self.env_update.emit(name, f"△ {ver} (需{lock})", "warn", True)
                             else:
-                                self.env_update.emit(name, "× 未安装", "err", True)
+                                if name in ("sageattention",):
+                                    self.env_update.emit(name, "可选/未安装", "warn", False)
+                                else:
+                                    self.env_update.emit(name, "× 未安装", "err", True)
         except:
             pass
 
@@ -4071,6 +4076,7 @@ for d in deps:
         self._install_sageattention(python_exe, uv_exe, env)
 
     def _install_sageattention(self, python_exe, uv_exe, env):
+        self.env_update.emit("sageattention", "↻ SageAttention 检测中...", "pending", False)
         try:
             result = hidden_run(
                 [python_exe, "-c", "import importlib.util; spec = importlib.util.find_spec('sageattention'); raise SystemExit(0 if spec else 1)"],
@@ -4078,6 +4084,7 @@ for d in deps:
             )
             if result.returncode == 0:
                 self.log.emit("  ✓ SageAttention 已安装", "ok")
+                self.env_update.emit("sageattention", "√ 已安装", "ok", False)
                 return
         except:
             pass
@@ -4129,12 +4136,14 @@ for d in deps:
                 )
                 if result is not None and not isinstance(result, str):
                     self.log.emit("  ✓ SageAttention 安装成功", "ok")
+                    self.env_update.emit("sageattention", "√ 已安装", "ok", False)
                     return
                 self.log.emit(f"  △ {label} 安装失败，尝试下一方式...", "warn")
             except Exception as e:
                 self.log.emit(f"  △ {label} 异常: {e}", "warn")
 
         self.log.emit("  △ SageAttention 安装失败（非关键依赖，不影响运行）", "warn")
+        self.env_update.emit("sageattention", "可选/未安装", "warn", False)
         self.log.emit("  △ 提示: 可从 https://github.com/woct0rdho/SageAttention/releases 下载对应版本的 .whl 文件后手动安装", "warn")
 
     def _step_patches(self):
@@ -6156,7 +6165,6 @@ class MainWindow(QMainWindow):
                 ("pynvml", "pynvml", "官方要求 >=11.5,<14.0"),
                 ("pydantic", "pydantic", "官方要求 >=2.7,<3.0"),
                 ("python-multipart", "python-multipart", "FastAPI文件上传依赖"),
-                ("sageattention", "sageattention", "Ampere+架构推荐安装"),
                 ("triton-windows", "triton-windows", "Windows Triton后端"),
             ]),
             ("app", "📁 应用组件", [
@@ -6168,6 +6176,7 @@ class MainWindow(QMainWindow):
                 ("project", "项目根目录", "项目根路径"),
             ]),
             ("extensions", "🧩 扩展组件", [
+                ("sageattention", "SageAttention", "Ampere+架构推荐安装，性能加速"),
                 ("voxcpm", "VoxCPM2", "TTS语音合成，要求 >=2.0.0"),
                 ("faster_whisper", "faster-whisper", "语音识别/字幕生成"),
                 ("real_esrgan", "Real-ESRGAN", "视频/图片高清放大"),
@@ -11266,8 +11275,11 @@ for d in deps:
                             self._set_env_widget(name, f"△ {ver} (需{lock})", "warn", True)
                             issue_count += 1
                         else:
-                            self._set_env_widget(name, "× 未安装", "err", True)
-                            issue_count += 1
+                            if name in ("sageattention",):
+                                self._set_env_widget(name, "可选/未安装", "warn", False)
+                            else:
+                                self._set_env_widget(name, "× 未安装", "err", True)
+                                issue_count += 1
 
             if issue_count > 0:
                 if issue_count >= 5:
@@ -13410,7 +13422,7 @@ if __name__ == '__main__':
         switch_row = QHBoxLayout()
         switch_row.setSpacing(8)
 
-        auto_label = QLabel("自动引导")
+        auto_label = QLabel("全自动引导执行")
         auto_label.setStyleSheet("font-size: 11px; color: #BBDEFB; background: transparent; border: none;")
         switch_row.addWidget(auto_label)
 
