@@ -2160,7 +2160,7 @@ class DeployWorker(QThread):
 
     MAX_RETRIES = 3
 
-    def __init__(self, app_res, parent=None, mirror_source="auto", uv_urls=None, ltx_urls=None, data_dir=None, speed_cache=None, temp_dir=None):
+    def __init__(self, app_res, parent=None, mirror_source="auto", uv_urls=None, ltx_urls=None, data_dir=None, speed_cache=None, temp_dir=None, skip_models=False):
         super().__init__(parent)
         self.app_res = app_res
         if data_dir:
@@ -2177,6 +2177,7 @@ class DeployWorker(QThread):
         self._step_results = {}
         self._mirror_source = mirror_source
         self._speed_cache = speed_cache or {}
+        self._skip_models = skip_models
         self._resolved_mirrors = self._resolve_mirrors(mirror_source)
         if uv_urls:
             self._resolved_mirrors["uv_urls"] = uv_urls
@@ -2974,6 +2975,13 @@ class DeployWorker(QThread):
             if self._should_stop:
                 self.finished.emit(False, "用户取消部署")
                 return
+            # 如果 skip_models=True，跳过必需模型步骤
+            if name == "必需模型" and self._skip_models:
+                self._step_results[name] = self.STEP_STATUS_SKIPPED
+                self.log.emit(f"⏭️ [{name}] 引导模式跳过模型下载", "ok")
+                for env_key, env_text, env_status in _STEP_DONE_MAP.get(name, []):
+                    self.env_update.emit(env_key, env_text, env_status, False)
+                continue
             self.progress.emit(pct, f"↻ {name} ({pct}%)")
             self.log.emit(f"{'─' * 40}", "info")
             self.log.emit(f"↻ [{name}] 开始处理...", "info")
@@ -5429,6 +5437,21 @@ class MainWindow(QMainWindow):
         self.browsers = {"系统默认": "system"}
         self.selected_browser = "system"
         self.custom_browser_path = ""
+
+        # 新手引导状态
+        self._guide_step = 0  # 0=未开始, 1=部署, 2=模型, 3=服务, 4=完成
+        self._guide_auto = True  # 全自动模式
+        self._guide_active = False  # 引导是否激活
+        self._guide_banner = None  # 引导横幅widget
+        self._guide_step_labels = []  # 步骤指示器标签
+        self._guide_desc_label = None  # 步骤描述标签
+        self._guide_auto_switch = None  # 全自动开关
+        self._guide_next_btn = None  # 下一步按钮
+        self._guide_retry_btn = None  # 重试按钮
+        self._guide_skip_btn = None  # 跳过按钮（仅步骤2）
+        self._guide_browser_check_timer = None  # 浏览器检测定时器
+        self._guide_browser_check_count = 0  # 浏览器检测计数
+        self._guide_skip_models = False  # 部署时是否跳过模型
 
         self._resolve_base_dir()
         self.config = ConfigManager(self._get_app_dir(), data_dir=self._exe_data_dir)
@@ -10341,15 +10364,18 @@ class MainWindow(QMainWindow):
             if not self._download_procs:
                 self._stop_download_progress_timer()
         self._refresh_model_status()
-        # 更新新手引导状态（必需模型下载完成后可能需要引导去运行服务）
+        # 引导步骤2：检查必需模型下载状态
         info = LTX_MODELS.get(model_id)
         is_required = info.get("required", False) if info else False
-        if is_required:
+        if is_required and self._guide_active and self._guide_step == 2:
             required_ok = self._check_required_models_ok()
             self._write_debug_log(f"[引导] 必需模型 {fname} 下载{'成功' if success else '失败'}，必需模型全部就绪: {required_ok}")
-        guide_visible = hasattr(self, '_newbie_guide_frame') and self._newbie_guide_frame and self._newbie_guide_frame.isVisible()
-        self._write_debug_log(f"[引导] 引导横幅可见: {guide_visible}，正在更新引导状态...")
-        self._update_newbie_guide()
+            if required_ok:
+                # 所有必需模型下载完成，推进到步骤3
+                self._guide_advance(3)
+            elif not success:
+                # 下载失败，关闭全自动开关
+                self._guide_on_error()
 
     def _uninstall_model(self, model_id):
         info = LTX_MODELS.get(model_id)
@@ -10704,15 +10730,37 @@ class MainWindow(QMainWindow):
                 self._set_env_widget(key, info.get("text", "未检测"), info.get("status", "unknown"), info.get("fix_visible", False))
 
     def _auto_deploy_check(self):
+        # 检查是否已完成引导
+        if self.config.get("guide_completed", False):
+            return
+        # 如果环境就绪+模型齐全，标记引导完成
+        uv_ok = self._check_uv_ok() if hasattr(self, '_check_uv_ok') else False
+        python_ok = self._check_python_ok() if hasattr(self, '_check_python_ok') else False
+        models_ok = self._check_required_models_ok() if hasattr(self, '_check_required_models_ok') else False
+        if uv_ok and python_ok and models_ok:
+            self.config.set("guide_completed", True)
+            return
+        # 如果环境已就绪但模型不全，从步骤2开始引导
+        if uv_ok and python_ok and not models_ok:
+            if hasattr(self, '_auto_deploy_prompted') and self._auto_deploy_prompted:
+                return
+            self._auto_deploy_prompted = True
+            self._guide_step = 2
+            self._show_newbie_guide()
+            if self._guide_auto and self._guide_active:
+                self._execute_guide_step()
+            return
+        # 如果没有python环境（首次），从步骤1开始引导
         if self._python_exe and os.path.exists(self._python_exe):
             return
         if hasattr(self, '_auto_deploy_prompted') and self._auto_deploy_prompted:
             return
         self._auto_deploy_prompted = True
-        # 首次启动：跳转到部署页并显示引导提示
-        self._switch_page(1)
+        # 显示引导横幅，从步骤1开始
         self._show_newbie_guide()
-        self._one_click_deploy()
+        # 全自动模式下自动执行步骤1
+        if self._guide_auto and self._guide_active:
+            self._execute_guide_step()
 
     def _save_env_check_result(self):
         result = {}
@@ -11717,12 +11765,19 @@ for d in deps:
     def _start_all_impl(self):
         if not self._python_exe:
             self._log("× 未找到 Python 环境！请先在部署维护中安装。", "err")
+            # 引导步骤3：启动失败
+            if self._guide_active and self._guide_step == 3:
+                self._guide_on_error()
             return
         if not self._backend_dir or not os.path.exists(self._backend_dir):
             self._log("× 未找到 LTX Desktop 后端代码！请先在部署维护中安装。", "err")
+            if self._guide_active and self._guide_step == 3:
+                self._guide_on_error()
             return
         if not self._patches_dir or not os.path.exists(self._patches_dir):
             self._log("× 未找到补丁文件！请确保 patches 目录存在。", "err")
+            if self._guide_active and self._guide_step == 3:
+                self._guide_on_error()
             return
 
         try:
@@ -11734,9 +11789,13 @@ for d in deps:
             if check_result.returncode != 0:
                 self._log("× 核心依赖缺失（uvicorn/fastapi），请先在部署维护中安装依赖。", "err")
                 self._log(f"  缺失详情: {check_result.stderr.strip()[:200]}", "err")
+                if self._guide_active and self._guide_step == 3:
+                    self._guide_on_error()
                 return
         except Exception as e:
             self._log(f"× 依赖检查失败: {e}", "err")
+            if self._guide_active and self._guide_step == 3:
+                self._guide_on_error()
             return
 
         self.is_starting = True
@@ -11783,11 +11842,17 @@ for d in deps:
                 self._wait_frontend_timer = QTimer(self)
                 self._wait_frontend_timer.timeout.connect(self._poll_frontend_port)
                 self._wait_frontend_timer.start(1000)
+            # 引导步骤3：后端已就绪，启动浏览器检测
+            if self._guide_active and self._guide_step == 3:
+                self._start_guide_browser_check()
         else:
             if self._wait_backend_count >= 90:
                 self._wait_backend_timer.stop()
                 self._log(f"核心引擎端口 {self._backend_port} 等待超时", "err")
                 self.is_starting = False
+                # 引导步骤3：启动超时，关闭全自动开关
+                if self._guide_active and self._guide_step == 3:
+                    self._guide_on_error()
 
     def _poll_frontend_port(self):
         self._wait_frontend_count += 1
@@ -13112,124 +13177,408 @@ if __name__ == '__main__':
             self._speed_deploy_source = None
 
     def _show_newbie_guide(self):
-        """首次启动时显示动态新手引导（可关闭，内容随部署状态变化）"""
-        if hasattr(self, '_newbie_guide_frame') and self._newbie_guide_frame:
-            self._newbie_guide_frame.setVisible(True)
-            self._update_newbie_guide()
+        """显示新手引导横幅（全局共享，位于导航栏下方）"""
+        # 如果引导已完成，不显示
+        if self.config.get("guide_completed", False):
+            return
+        # 如果环境已就绪且模型齐全，标记完成不显示
+        uv_ok = self._check_uv_ok() if hasattr(self, '_check_uv_ok') else False
+        python_ok = self._check_python_ok() if hasattr(self, '_check_python_ok') else False
+        models_ok = self._check_required_models_ok() if hasattr(self, '_check_required_models_ok') else False
+        if uv_ok and python_ok and models_ok:
+            self.config.set("guide_completed", True)
             return
 
-        self._newbie_guide_frame = QFrame()
-        self._newbie_guide_frame.setObjectName("newbieGuideFrame")
-        # 品牌红主题：渐变背景 + 左侧激活红装饰条
-        self._newbie_guide_frame.setStyleSheet("""
-            #newbieGuideFrame {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #CC0000, stop:1 #990000);
+        # 激活引导
+        self._guide_active = True
+        if self._guide_step == 0:
+            self._guide_step = 1  # 默认从步骤1开始
+        self._guide_auto = True
+
+        # 如果横幅已存在，直接显示
+        if self._guide_banner:
+            self._guide_banner.setVisible(True)
+            self._update_guide_banner()
+            return
+
+        # 创建引导横幅
+        self._guide_banner = QFrame()
+        self._guide_banner.setObjectName("guideBannerFrame")
+        self._guide_banner.setStyleSheet("""
+            #guideBannerFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #B71C1C, stop:0.5 #CC0000, stop:1 #880000);
                 border: none;
-                border-radius: 6px;
+                border-radius: 0px;
             }
         """)
-        guide_layout = QVBoxLayout(self._newbie_guide_frame)
-        guide_layout.setContentsMargins(20, 12, 16, 12)
-        guide_layout.setSpacing(8)
+        banner_layout = QHBoxLayout(self._guide_banner)
+        banner_layout.setContentsMargins(20, 8, 16, 8)
+        banner_layout.setSpacing(12)
 
-        # 标题行 + 关闭按钮
-        header_row = QHBoxLayout()
-        self._newbie_title = QLabel("👋 欢迎使用云集智能视频创意站！")
-        self._newbie_title.setStyleSheet(
-            "font-size: 15px; font-weight: bold; color: #FFFFFF; background: transparent; border: none;"
+        # 左侧：步骤指示器 ① → ② → ③
+        step_container = QHBoxLayout()
+        step_container.setSpacing(4)
+        self._guide_step_labels = []
+        step_texts = ["① 部署", "② 模型", "③ 运行"]
+        for i, text in enumerate(step_texts):
+            lbl = QLabel(text)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setFixedHeight(28)
+            lbl.setMinimumWidth(60)
+            lbl.setStyleSheet("""
+                font-size: 12px; font-weight: bold;
+                color: #888888; background: transparent; border: none;
+                padding: 2px 8px; border-radius: 4px;
+            """)
+            step_container.addWidget(lbl)
+            self._guide_step_labels.append(lbl)
+            # 箭头（最后一个不加）
+            if i < len(step_texts) - 1:
+                arrow = QLabel("→")
+                arrow.setStyleSheet("font-size: 14px; color: #666666; background: transparent; border: none;")
+                arrow.setFixedWidth(16)
+                arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                step_container.addWidget(arrow)
+        banner_layout.addLayout(step_container)
+
+        # 分隔线
+        sep = QFrame()
+        sep.setFixedWidth(1)
+        sep.setStyleSheet("background: rgba(255,255,255,60); border: none;")
+        banner_layout.addWidget(sep)
+
+        # 中间：步骤描述
+        self._guide_desc_label = QLabel()
+        self._guide_desc_label.setStyleSheet(
+            "font-size: 12px; color: #FFD6D6; background: transparent; border: none;"
         )
-        header_row.addWidget(self._newbie_title, 1)
+        self._guide_desc_label.setWordWrap(False)
+        banner_layout.addWidget(self._guide_desc_label, 1)
+
+        # 右侧区域
+        right_layout = QVBoxLayout()
+        right_layout.setSpacing(2)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 全自动开关 + 关闭按钮行
+        switch_row = QHBoxLayout()
+        switch_row.setSpacing(8)
+
+        auto_label = QLabel("全自动")
+        auto_label.setStyleSheet("font-size: 11px; color: #FFD6D6; background: transparent; border: none;")
+        switch_row.addWidget(auto_label)
+
+        self._guide_auto_switch = ToggleSwitch(checked=True)
+        self._guide_auto_switch.setFixedHeight(20)
+        self._guide_auto_switch.toggled.connect(self._on_guide_auto_toggled)
+        switch_row.addWidget(self._guide_auto_switch)
 
         close_btn = QPushButton("✕")
-        close_btn.setFixedSize(26, 26)
+        close_btn.setFixedSize(22, 22)
         close_btn.setStyleSheet("""
             QPushButton {
-                background-color: transparent; color: rgba(255,255,255,160);
-                border: none; font-size: 15px; font-weight: bold; border-radius: 4px;
+                background-color: transparent; color: rgba(255,255,255,120);
+                border: none; font-size: 13px; font-weight: bold; border-radius: 3px;
             }
             QPushButton:hover {
                 color: #FFFFFF; background-color: rgba(255,255,255,40);
             }
         """)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.clicked.connect(lambda: self._newbie_guide_frame.setVisible(False))
-        header_row.addWidget(close_btn)
-        guide_layout.addLayout(header_row)
+        close_btn.clicked.connect(self._close_guide_banner)
+        switch_row.addWidget(close_btn)
+        right_layout.addLayout(switch_row)
 
-        # 分隔线
-        separator = QFrame()
-        separator.setFixedHeight(1)
-        separator.setStyleSheet("background: rgba(255,255,255,50); border: none;")
-        guide_layout.addWidget(separator)
+        # 半自动按钮行（默认隐藏）
+        self._guide_btn_row = QHBoxLayout()
+        self._guide_btn_row.setSpacing(6)
 
-        # 动态内容标签
-        self._newbie_content = QLabel()
-        self._newbie_content.setStyleSheet(
-            "font-size: 12px; color: #FFD6D6; background: transparent; border: none; line-height: 1.6;"
-        )
-        self._newbie_content.setWordWrap(True)
-        guide_layout.addWidget(self._newbie_content)
+        self._guide_next_btn = QPushButton("下一步")
+        self._guide_next_btn.setFixedSize(60, 22)
+        self._guide_next_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(255,255,255,30); color: #FFFFFF;
+                border: 1px solid rgba(255,255,255,80); border-radius: 3px;
+                font-size: 11px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: rgba(255,255,255,50); }
+        """)
+        self._guide_next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._guide_next_btn.clicked.connect(self._on_guide_next)
+        self._guide_next_btn.setVisible(False)
+        self._guide_btn_row.addWidget(self._guide_next_btn)
 
-        # 提示标签
-        self._newbie_tip = QLabel()
-        self._newbie_tip.setStyleSheet(
-            "font-size: 11px; color: #FF9E9E; background: transparent; border: none;"
-        )
-        self._newbie_tip.setWordWrap(True)
-        guide_layout.addWidget(self._newbie_tip)
+        self._guide_retry_btn = QPushButton("重试")
+        self._guide_retry_btn.setFixedSize(50, 22)
+        self._guide_retry_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(255,255,255,30); color: #FFFFFF;
+                border: 1px solid rgba(255,255,255,80); border-radius: 3px;
+                font-size: 11px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: rgba(255,255,255,50); }
+        """)
+        self._guide_retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._guide_retry_btn.clicked.connect(self._on_guide_retry)
+        self._guide_retry_btn.setVisible(False)
+        self._guide_btn_row.addWidget(self._guide_retry_btn)
 
-        # 插入到部署页顶部
-        if hasattr(self, '_env_page_widget'):
-            env_layout = self._env_page_widget.layout()
-            if env_layout:
-                env_layout.insertWidget(0, self._newbie_guide_frame)
+        self._guide_skip_btn = QPushButton("跳过")
+        self._guide_skip_btn.setFixedSize(50, 22)
+        self._guide_skip_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(255,200,0,30); color: #FFD6D6;
+                border: 1px solid rgba(255,200,0,80); border-radius: 3px;
+                font-size: 11px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: rgba(255,200,0,50); }
+        """)
+        self._guide_skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._guide_skip_btn.clicked.connect(self._on_guide_skip)
+        self._guide_skip_btn.setVisible(False)
+        self._guide_btn_row.addWidget(self._guide_skip_btn)
 
-        # 初始状态：显示正在检测环境
-        self._newbie_content.setText("正在检测您当前的项目环境……")
-        self._newbie_tip.setText("")
+        right_layout.addLayout(self._guide_btn_row)
+        banner_layout.addLayout(right_layout)
 
-        # 延迟更新为检测结果（等待环境检测完成）
-        QTimer.singleShot(1500, self._update_newbie_guide)
+        # 插入到 main_layout 中 nav_bar 之后、page_stack 之前
+        central = self.centralWidget()
+        if central:
+            main_layout = central.layout()
+            if main_layout:
+                # nav_bar 是 index 0，page_stack 是 index 1
+                # 在 page_stack 之前插入横幅
+                main_layout.insertWidget(1, self._guide_banner)
 
-    def _update_newbie_guide(self):
-        """根据当前部署状态更新新手引导内容"""
-        if not hasattr(self, '_newbie_guide_frame') or not self._newbie_guide_frame or not self._newbie_guide_frame.isVisible():
+        self._update_guide_banner()
+
+    def _update_guide_banner(self):
+        """更新引导横幅的显示状态"""
+        if not self._guide_banner or not self._guide_banner.isVisible():
             return
 
-        # 判断当前状态
-        uv_ok = self._check_uv_ok() if hasattr(self, '_check_uv_ok') else False
-        python_ok = self._check_python_ok() if hasattr(self, '_check_python_ok') else False
-        deploying = hasattr(self, 'btn_one_click_deploy') and not self.btn_one_click_deploy.isEnabled()
+        step = self._guide_step
+        step_names = ["① 部署", "② 模型", "③ 运行"]
 
-        if deploying:
-            # 正在部署中
-            self._newbie_title.setText("⏳ 正在自动部署中...")
-            self._newbie_content.setText(
-                "系统正在自动安装所需环境，请耐心等待：\n"
-                "  ① UV 包管理器 → ② Python 环境 → ③ 核心依赖 → ④ 扩展组件 → ⑤ 必需模型\n"
-                "整个过程全自动，无需手动操作。"
-            )
-            self._newbie_tip.setText("💡 提示：部署过程需要下载约 10GB 文件，请确保网络稳定和磁盘空间充足")
-        elif uv_ok and python_ok:
-            # 部署完成
-            self._newbie_title.setText("✅ 部署完成！准备开始使用")
-            self._newbie_content.setText(
-                "环境已就绪！接下来：\n"
-                "  ① 点击上方「运行服务」导航按钮\n"
-                "  ② 点击「启动全部」，浏览器将自动打开\n"
-                "  ③ 在浏览器中输入文字描述，即可生成AI视频"
-            )
-            self._newbie_tip.setText("💡 提示：如需重新部署或修复环境，随时回到此页面点击「一键部署维护」")
+        # 更新步骤指示器样式
+        for i, lbl in enumerate(self._guide_step_labels):
+            current_step = i + 1  # 1-based
+            if current_step < step:
+                # 已完成步骤：绿色打勾
+                check_names = ["✓ 部署", "✓ 模型", "✓ 运行"]
+                lbl.setText(check_names[i])
+                lbl.setStyleSheet("""
+                    font-size: 12px; font-weight: bold;
+                    color: #66BB6A; background: transparent; border: none;
+                    padding: 2px 8px; border-radius: 4px;
+                """)
+            elif current_step == step:
+                # 当前步骤：白色加粗
+                lbl.setText(step_names[i])
+                lbl.setStyleSheet("""
+                    font-size: 12px; font-weight: bold;
+                    color: #FFFFFF; background: rgba(255,255,255,30);
+                    border: none; padding: 2px 8px; border-radius: 4px;
+                """)
+            else:
+                # 未到达步骤：灰色
+                lbl.setText(step_names[i])
+                lbl.setStyleSheet("""
+                    font-size: 12px; font-weight: bold;
+                    color: #888888; background: transparent; border: none;
+                    padding: 2px 8px; border-radius: 4px;
+                """)
+
+        # 更新步骤描述
+        is_auto = self._guide_auto
+        descriptions = {
+            1: "① 部署维护：正在安装运行环境（跳过模型下载）...",
+            2: "② 模型管理：正在下载必需模型，请耐心等待...",
+            3: "③ 运行服务：正在启动前后端服务...",
+            4: "🎉 引导完成！欢迎使用云集智能视频创意站",
+        }
+        # 半自动模式下修改描述
+        if not is_auto and step < 4:
+            action_hints = {
+                1: "① 部署维护：点击「下一步」开始安装运行环境",
+                2: "② 模型管理：点击「下一步」下载必需模型",
+                3: "③ 运行服务：点击「下一步」启动前后端服务",
+            }
+            self._guide_desc_label.setText(action_hints.get(step, descriptions.get(step, "")))
         else:
-            # 未部署
-            self._newbie_title.setText("👋 欢迎使用云集智能视频创意站！")
-            self._newbie_content.setText(
-                "检测到您当前没有本项目环境，系统将根据您的硬件配置进行初始化部署。\n"
-                "部署流程：UV 包管理器 → Python 环境 → 核心依赖 → 扩展组件 → 必需模型\n"
-                "整个过程全自动，请耐心等待。"
-            )
-            self._newbie_tip.setText("💡 提示：部署需下载约 10GB 文件，请确保网络稳定和磁盘空间充足")
+            self._guide_desc_label.setText(descriptions.get(step, ""))
+
+        # 更新按钮可见性
+        self._guide_next_btn.setVisible(not is_auto and step < 4)
+        self._guide_retry_btn.setVisible(not is_auto and step < 4)
+        self._guide_skip_btn.setVisible(not is_auto and step == 2)
+
+        # 引导完成
+        if step >= 4:
+            self._guide_complete()
+
+    def _on_guide_auto_toggled(self, checked):
+        """全自动开关切换"""
+        self._guide_auto = checked
+        self._write_debug_log(f"[引导] 全自动模式: {'开启' if checked else '关闭'}")
+        if checked:
+            # 切回全自动，自动执行当前步骤
+            self._execute_guide_step()
+        self._update_guide_banner()
+
+    def _execute_guide_step(self):
+        """执行当前引导步骤"""
+        if not self._guide_active:
+            return
+        step = self._guide_step
+        if step == 1:
+            # 步骤1：部署维护（跳过模型下载）
+            self._switch_page(1)
+            self._one_click_deploy(skip_models=True)
+        elif step == 2:
+            # 步骤2：模型管理
+            self._switch_page(2)
+            # 先检查是否所有必需模型已就绪
+            if self._check_required_models_ok():
+                self._write_debug_log("[引导] 必需模型已全部就绪，直接推进到步骤3")
+                self._guide_advance(3)
+            else:
+                self._download_required_models()
+        elif step == 3:
+            # 步骤3：运行服务
+            self._switch_page(0)
+            # 勾选"启动后打开"
+            if hasattr(self, 'auto_open_checkbox'):
+                self.auto_open_checkbox.setChecked(True)
+            self._start_all()
+
+    def _on_guide_next(self):
+        """半自动模式下的"下一步"按钮"""
+        step = self._guide_step
+        if step == 1:
+            # 执行部署
+            self._switch_page(1)
+            self._one_click_deploy(skip_models=True)
+        elif step == 2:
+            # 执行模型下载
+            self._switch_page(2)
+            if self._check_required_models_ok():
+                self._guide_advance(3)
+            else:
+                self._download_required_models()
+        elif step == 3:
+            # 执行服务启动
+            self._switch_page(0)
+            if hasattr(self, 'auto_open_checkbox'):
+                self.auto_open_checkbox.setChecked(True)
+            self._start_all()
+
+    def _on_guide_retry(self):
+        """重试当前步骤"""
+        self._guide_auto = True
+        if hasattr(self, '_guide_auto_switch') and self._guide_auto_switch:
+            self._guide_auto_switch.setChecked(True)
+        self._execute_guide_step()
+        self._update_guide_banner()
+
+    def _on_guide_skip(self):
+        """跳过当前步骤（仅步骤2可用）"""
+        if self._guide_step == 2:
+            self._guide_step = 3
+            self._write_debug_log("[引导] 跳过模型下载，进入步骤3")
+            if self._guide_auto:
+                self._execute_guide_step()
+            self._update_guide_banner()
+
+    def _guide_advance(self, next_step):
+        """推进到下一步"""
+        self._guide_step = next_step
+        self._write_debug_log(f"[引导] 推进到步骤 {next_step}")
+        if next_step >= 4:
+            self._guide_complete()
+            return
+        self._update_guide_banner()
+        # 全自动模式下自动执行下一步
+        if self._guide_auto:
+            self._execute_guide_step()
+
+    def _guide_on_error(self):
+        """引导步骤出错，关闭全自动开关"""
+        self._guide_auto = False
+        if hasattr(self, '_guide_auto_switch') and self._guide_auto_switch:
+            self._guide_auto_switch.setChecked(False)
+        self._update_guide_banner()
+        self._write_debug_log("[引导] 步骤出错，已切换到半自动模式")
+
+    def _guide_complete(self):
+        """引导完成"""
+        self._guide_step = 4
+        self._guide_active = False
+        self.config.set("guide_completed", True)
+        self._write_debug_log("[引导] 引导完成！")
+        # 停止浏览器检测定时器
+        if self._guide_browser_check_timer:
+            self._guide_browser_check_timer.stop()
+            self._guide_browser_check_timer = None
+        # 延迟隐藏横幅
+        QTimer.singleShot(2000, self._hide_guide_banner)
+
+    def _hide_guide_banner(self):
+        """隐藏引导横幅"""
+        if self._guide_banner:
+            self._guide_banner.setVisible(False)
+
+    def _close_guide_banner(self):
+        """关闭引导横幅（用户手动关闭）"""
+        self._guide_active = False
+        if self._guide_banner:
+            self._guide_banner.setVisible(False)
+        # 停止浏览器检测定时器
+        if self._guide_browser_check_timer:
+            self._guide_browser_check_timer.stop()
+            self._guide_browser_check_timer = None
+
+    def _start_guide_browser_check(self):
+        """启动浏览器检测定时器（步骤3使用）"""
+        if self._guide_browser_check_timer:
+            self._guide_browser_check_timer.stop()
+        self._guide_browser_check_count = 0
+        self._guide_browser_check_timer = QTimer(self)
+        self._guide_browser_check_timer.timeout.connect(self._poll_guide_browser)
+        self._guide_browser_check_timer.start(2000)
+
+    def _poll_guide_browser(self):
+        """轮询检测前端端口是否有浏览器连接"""
+        if not self._guide_active or self._guide_step != 3:
+            if self._guide_browser_check_timer:
+                self._guide_browser_check_timer.stop()
+            return
+        self._guide_browser_check_count += 1
+        # 超过60次（2分钟）停止检测
+        if self._guide_browser_check_count > 60:
+            if self._guide_browser_check_timer:
+                self._guide_browser_check_timer.stop()
+            return
+        # 检测前端端口是否可连接
+        try:
+            import threading
+            result = [False]
+            def _check():
+                try:
+                    conn = socket.create_connection(('127.0.0.1', self._frontend_port), timeout=1)
+                    conn.close()
+                    result[0] = True
+                except Exception:
+                    pass
+            t = threading.Thread(target=_check, daemon=True)
+            t.start()
+            t.join(timeout=2)
+            if result[0]:
+                self._write_debug_log("[引导] 检测到前端页面已可访问，引导完成")
+                self._guide_advance(4)
+        except Exception:
+            pass
 
     def _check_required_models_ok(self):
         """检查所有必需模型是否已下载完成"""
@@ -13295,12 +13644,9 @@ if __name__ == '__main__':
             if not is_complete:
                 self._download_model(model_id)
 
-    def _show_deploy_success_guide(self):
-        """部署完成后更新新手引导状态"""
-        self._update_newbie_guide()
-
-    def _one_click_deploy(self):
+    def _one_click_deploy(self, skip_models=False):
         self.btn_one_click_deploy.setEnabled(False)
+        self._guide_skip_models = skip_models  # 保存skip_models供部署worker使用
         selected = "auto"
         if hasattr(self, 'deploy_source_combo'):
             selected = self.deploy_source_combo.currentData()
@@ -13337,7 +13683,7 @@ if __name__ == '__main__':
         self.btn_deploy_pause.setVisible(True)
         self.btn_deploy_cancel.setVisible(True)
         self.btn_deploy_pause.setText("⏸ 暂停")
-        self._deploy_worker = DeployWorker(self._app_resources, self, mirror_source=source_key, data_dir=self._exe_data_dir, speed_cache=self._load_speed_cache(), temp_dir=self._exe_temp_dir or os.path.join(self._project_root, "temp"))
+        self._deploy_worker = DeployWorker(self._app_resources, self, mirror_source=source_key, data_dir=self._exe_data_dir, speed_cache=self._load_speed_cache(), temp_dir=self._exe_temp_dir or os.path.join(self._project_root, "temp"), skip_models=getattr(self, '_guide_skip_models', False))
         self._deploy_worker.progress.connect(self._on_deploy_progress)
         self._deploy_worker.log.connect(self._log)
         self._deploy_worker.log.connect(self._append_deploy_log)
@@ -13363,7 +13709,8 @@ if __name__ == '__main__':
             self._app_resources, self, mirror_source=source_key,
             uv_urls=uv_urls, ltx_urls=ltx_urls, data_dir=self._exe_data_dir,
             speed_cache=self._load_speed_cache(),
-            temp_dir=self._exe_temp_dir or os.path.join(self._project_root, "temp")
+            temp_dir=self._exe_temp_dir or os.path.join(self._project_root, "temp"),
+            skip_models=getattr(self, '_guide_skip_models', False)
         )
         self._deploy_worker.progress.connect(self._on_deploy_progress)
         self._deploy_worker.log.connect(self._log)
@@ -13376,7 +13723,7 @@ if __name__ == '__main__':
     def _on_deploy_progress(self, pct, msg):
         self.deploy_progress_bar.setValue(int(pct))
         self.deploy_progress_label.setText(msg)
-        self._update_newbie_guide()
+        self._update_guide_banner()
 
     def _append_deploy_log(self, msg, level):
         color_map = {"ok": "#66BB6A", "err": "#FF0000", "warn": "#FFA726", "info": "#CCCCCC"}
@@ -13401,6 +13748,7 @@ if __name__ == '__main__':
         self.btn_one_click_deploy.setEnabled(True)
         self.btn_deploy_pause.setVisible(False)
         self.btn_deploy_cancel.setVisible(False)
+        self._guide_skip_models = False  # 重置skip_models标记
         if success:
             self.deploy_progress_bar.setValue(100)
             self.deploy_progress_bar.setStyleSheet("""
@@ -13409,11 +13757,9 @@ if __name__ == '__main__':
             """)
             self.deploy_progress_label.setText("√ 部署完成")
             self._log("√ 部署维护完成！所有环境已就绪", "ok")
-            # 隐藏新手引导提示
-            if hasattr(self, '_newbie_guide_frame') and self._newbie_guide_frame:
-                self._newbie_guide_frame.setVisible(False)
-            # 部署完成提示：引导用户启动服务
-            self._show_deploy_success_guide()
+            # 引导步骤1部署成功，推进到步骤2
+            if self._guide_active and self._guide_step == 1:
+                self._guide_advance(2)
         else:
             self.deploy_progress_bar.setStyleSheet("""
                 QProgressBar { background-color: rgba(26,26,26,180); border: 1px solid rgba(239,83,80,80); border-radius: 5px; }
@@ -13421,6 +13767,9 @@ if __name__ == '__main__':
             """)
             self.deploy_progress_label.setText(f"× 部署失败")
             self._log(f"× 部署失败: {msg}", "err")
+            # 引导步骤1部署失败，关闭全自动开关
+            if self._guide_active and self._guide_step == 1:
+                self._guide_on_error()
         self._detect_paths_only()
         if self._python_exe and os.path.exists(self._python_exe):
             self._start_runtime_detect()
