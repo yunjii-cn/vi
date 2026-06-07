@@ -186,6 +186,44 @@ def update_versions_json(version, changes, exe_name):
         return False
 
 
+def generate_gitlog(limit=200):
+    """从git历史生成开发动态文件，嵌入EXE供用户查看"""
+    try:
+        result = subprocess.run(
+            ["git", "log", f"-{limit}", "--format=%h|%s|%an|%ai"],
+            capture_output=True, text=True, timeout=30,
+            cwd=str(ROOT_DIR.parent.parent)
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            print("  △ 无法获取git历史，跳过生成开发动态")
+            return False
+
+        commits = []
+        for line in result.stdout.strip().splitlines():
+            parts = line.strip().split("|", 3)
+            if len(parts) >= 4:
+                commits.append({
+                    "sha": parts[0],
+                    "message": parts[1],
+                    "author": parts[2],
+                    "date": parts[3],
+                })
+
+        if not commits:
+            return False
+
+        gitlog_file = ROOT_DIR / "gitlog.json"
+        with open(gitlog_file, 'w', encoding='utf-8') as f:
+            json.dump(commits, f, ensure_ascii=False, indent=2)
+
+        print(f"  ✓ 开发动态已生成 ({len(commits)} 条)")
+        return True
+
+    except Exception as e:
+        print(f"  △ 生成开发动态失败: {e}")
+        return False
+
+
 def strip_bom_from_py_files():
     count = 0
     for dp, dn, fns in os.walk(ROOT_DIR):
@@ -479,6 +517,13 @@ def build_exe():
         pyinstaller_args.extend(["--add-data", f"{str(vs_file)};."])
         print(f"  已添加版本列表 (versions.json)")
 
+    # 生成开发动态（与versions.json同路径逻辑）
+    generate_gitlog()
+    cl_file = ROOT_DIR / "gitlog.json"
+    if cl_file.exists():
+        pyinstaller_args.extend(["--add-data", f"{str(cl_file)};."])
+        print(f"  已添加开发动态 (gitlog.json)")
+
     pj_file = ROOT_DIR.parent.parent / "project.json"
     if pj_file.exists():
         pyinstaller_args.extend(["--add-data", f"{str(pj_file)};."])
@@ -560,7 +605,7 @@ def cleanup():
 # ── 发布EXE到 ver/ 目录 ──
 def publish_to_ver(exe_path: Path):
     """将EXE复制到 ver/ 目录，标记为稳定版"""
-    ver_dir = PROJECT_ROOT / "ver"
+    ver_dir = DEV_DIR / "ver"
     ver_dir.mkdir(parents=True, exist_ok=True)
     dest = ver_dir / exe_path.name
     if dest.exists():
@@ -747,14 +792,16 @@ def main():
             print("=" * 60)
 
             # Git 提交（开发者视角的源码修改描述）
-            commit_message = f"build: v{VERSION}\n\n" + "\n".join([f"- {c}" for c in changes])
+            # 标题行包含简要描述，body包含完整修改列表
+            brief = changes[0][:60] if changes else VERSION
+            commit_message = f"build: v{VERSION} {brief}\n\n" + "\n".join([f"- {c}" for c in changes])
             git_commit_and_push(commit_message)
             return
 
         # ── 正式发布模式：以git为依据合并版本描述 + 更新版本列表 ──
         if mode == "release":
             # 检查ver/目录中是否有待发布的EXE
-            ver_dir = PROJECT_ROOT / "ver"
+            ver_dir = DEV_DIR / "ver"
             if not ver_dir.is_dir():
                 print("❌ ver/ 目录不存在，请先将测试稳定的EXE放入 ver/ 目录")
                 sys.exit(1)
@@ -838,14 +885,24 @@ def main():
             print()
 
             # 完成
+            # 使用最新发布的EXE版本号（而非当前时间戳）
+            latest_ver_match = None
+            for ver_exe in unreleased:
+                m2 = re.search(r'v(\d{4}\.\d{2}\.\d{2}\.\d{4})', ver_exe.name)
+                if m2:
+                    latest_ver_match = m2.group(1)
+
+            release_ver = latest_ver_match or VERSION
             print("=" * 60)
             print("  正式版发布完成！")
             print(f"  发布版本数: {len(unreleased)}")
+            print(f"  最新版本: v{release_ver}")
             print(f"  版本描述: {changes[0]}")
             print("=" * 60)
 
             # Git 提交（面向用户的版本变化描述）
-            commit_message = f"release: v{VERSION}\n\n" + "\n".join([f"- {c}" for c in changes])
+            brief = changes[0][:60] if changes else release_ver
+            commit_message = f"release: v{release_ver} {brief}\n\n" + "\n".join([f"- {c}" for c in changes])
             git_commit_and_push(commit_message)
 
     except subprocess.CalledProcessError as e:
