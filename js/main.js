@@ -70,7 +70,70 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     });
+
+    // --- 检查登录状态 ---
+    checkLoginStatus();
+
+    // --- 监听 iframe 登录成功消息 ---
+    window.addEventListener('message', (e) => {
+        if (e.data && e.data.type === 'loginSuccess') {
+            closeLoginModal();
+            // 刷新页面以更新登录状态
+            window.location.reload();
+        }
+    });
 });
+
+// --- 登录状态检测与UI更新 ---
+function checkLoginStatus() {
+    fetch('/sl/islogin.php', { credentials: 'include' })
+        .then(res => res.json())
+        .then(data => {
+            if (data.code === 1 && data.data) {
+                updateNavToLoggedIn(data.data);
+            }
+        })
+        .catch(() => {});
+}
+
+function updateNavToLoggedIn(user) {
+    const navLogin = document.getElementById('navLogin');
+    if (!navLogin) return;
+
+    navLogin.outerHTML = `
+        <div class="nav-user" id="navUser">
+            <img src="${user.avatar || '/image/ico.png'}" alt="${user.nickname}" class="nav-user-avatar" onclick="toggleUserMenu()">
+            <span class="nav-user-name">${user.nickname}</span>
+            <div class="nav-user-dropdown" id="userDropdown">
+                <div class="dropdown-header">
+                    <img src="${user.avatar || '/image/ico.png'}" alt="" class="dropdown-avatar">
+                    <div class="dropdown-info">
+                        <div class="dropdown-nickname">${user.nickname}</div>
+                        <div class="dropdown-uid">${user.username || ''}</div>
+                    </div>
+                </div>
+                <div class="dropdown-divider"></div>
+                <a href="/sl/index.php" class="dropdown-item">个人中心</a>
+                <a href="/sl/logout.php" class="dropdown-item dropdown-item-danger">退出登录</a>
+            </div>
+        </div>
+    `;
+
+    // 点击外部关闭下拉菜单
+    document.addEventListener('click', (e) => {
+        const dropdown = document.getElementById('userDropdown');
+        if (dropdown && !e.target.closest('.nav-user')) {
+            dropdown.classList.remove('show');
+        }
+    });
+}
+
+function toggleUserMenu() {
+    const dropdown = document.getElementById('userDropdown');
+    if (dropdown) {
+        dropdown.classList.toggle('show');
+    }
+}
 
 // --- 粒子背景 ---
 function createParticles(container) {
@@ -152,17 +215,29 @@ function createParticles(container) {
 function openLoginModal() {
     const modal = document.getElementById('loginModal');
     const iframe = document.getElementById('loginIframe');
-    if (!modal || !iframe) return;
-    iframe.src = '/sl/connect.php?type=wx';
+    const qrcodeImg = document.getElementById('loginQrcodeImg');
+    if (!modal) return;
+
+    // 直接使用 iframe 加载二维码页面
+    if (iframe) {
+        iframe.src = '/sl/connect.php?type=wx';
+        iframe.style.display = 'block';
+    }
+    if (qrcodeImg) {
+        qrcodeImg.style.display = 'none';
+    }
+
     modal.classList.add('active');
 }
 
 function closeLoginModal() {
     const modal = document.getElementById('loginModal');
     const iframe = document.getElementById('loginIframe');
+    const qrcodeImg = document.getElementById('loginQrcodeImg');
     if (!modal) return;
     modal.classList.remove('active');
-    if (iframe) iframe.src = '';
+    if (iframe) { iframe.src = ''; iframe.style.display = 'block'; }
+    if (qrcodeImg) { qrcodeImg.src = ''; qrcodeImg.style.display = 'none'; }
 }
 
 // ESC 关闭弹窗

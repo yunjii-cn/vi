@@ -24,6 +24,10 @@
             <a href="#roadmap" class="nav-link">发展路线</a>
             <a href="#download" class="nav-link">免费下载</a>
         </div>
+        <a href="https://yunjii.cn" target="_blank" class="nav-home" title="访问官网">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+            官网
+        </a>
         <a href="javascript:void(0)" class="nav-login" id="navLogin" onclick="openLoginModal()">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             登录
@@ -356,10 +360,14 @@
                 <a href="#roadmap">发展路线</a>
                 <a href="#download">免费下载</a>
             </div>
+            <a href="https://yunjii.cn" target="_blank" class="footer-home">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                访问官网
+            </a>
         </div>
         <div class="footer-bottom">
             <p>&copy; 2026 武汉市云集智能科技有限公司 版权所有</p>
-            <p><a href="https://yunjii.cn/" target="_blank">云集智能</a> | <a href="https://beian.miit.gov.cn/" target="_blank">鄂ICP备2024085021号</a></p>
+            <p><a href="https://beian.miit.gov.cn/" target="_blank">鄂ICP备2024085021号</a></p>
         </div>
     </div>
 </footer>
@@ -373,6 +381,7 @@
         <div class="login-modal-title">微信扫码登录</div>
         <div class="login-modal-subtitle">打开微信扫一扫，快速登录</div>
         <div class="login-modal-qrcode">
+            <img id="loginQrcodeImg" src="" alt="扫码登录" style="display:none; width:180px; height:180px; border-radius:8px;">
             <iframe id="loginIframe" src="" width="150" height="150" frameborder="0" scrolling="no"></iframe>
         </div>
         <div class="login-modal-hint">扫码即代表同意用户协议和隐私政策</div>

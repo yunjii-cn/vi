@@ -18,5 +18,16 @@ if (ini_get("session.use_cookies")) {
 }
 
 session_destroy();
-header("Location: index.php");
+
+// 判断请求来源：如果是 AJAX 请求或来自首页，跳转回首页
+$redirect = '/';
+if (isset($_SERVER['HTTP_REFERER'])) {
+    $referer = $_SERVER['HTTP_REFERER'];
+    // 如果来源是首页，跳转回首页
+    if (strpos($referer, 'vi.yunjii.cn') !== false && strpos($referer, '/sl/') === false) {
+        $redirect = $referer;
+    }
+}
+
+header("Location: $redirect");
 exit;
