@@ -12,10 +12,14 @@
     const userB64 = params.get('yunji_user');
     let yunjiUser = null;
 
-    // 解析 yunji_user 参数
+    // 解析 yunji_user 参数(用 TextDecoder 处理 UTF-8,避免中文乱码)
     function parseUserB64(b64) {
         try {
-            const u = JSON.parse(atob(decodeURIComponent(b64)));
+            // ★ 2026-06-08: 修复中文昵称乱码(atob 不自动转 UTF-8)
+            const cleaned = b64.replace(/ /g, '+');  // base64 url-safe 兼容
+            const bytes = Uint8Array.from(atob(cleaned), c => c.charCodeAt(0));
+            const json = new TextDecoder('utf-8').decode(bytes);
+            const u = JSON.parse(json);
             return (u && typeof u === 'object') ? u : null;
         } catch (e) {
             console.warn('[yunji] yunji_user 参数解析失败:', e);
@@ -58,38 +62,206 @@
         }
     }
 
-    // 注入已登录用户信息框(替换 LTX-2 STUDIO 区)
+    // 注入已登录用户信息框(整体一个下拉按钮: 头像+昵称+在线)
     function injectUserInfoBox(user) {
         const box = document.getElementById('user-info-box');
         if (!box) return;
         if (box.dataset.injected === '1') return;  // 防止重复注入
         box.dataset.injected = '1';
 
-        const nick = (user.nickname || user.username || '已登录').replace(/</g, '&lt;');
+        const nick = user.nickname || user.username || '已登录';
         const av = user.avatar || '';
         const initial = (nick[0] || '?').toUpperCase();
-        const avHtml = av
-            ? `<img src="${av.replace(/"/g, '&quot;')}" style="width:26px;height:26px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,.15);" onerror="this.outerHTML='<div style=&quot;width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff&quot;>${initial}</div>'">`
-            : `<div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0;">${initial}</div>`;
+        const avMini = av
+            ? `<img src="${av.replace(/"/g, '&quot;')}" style="width:22px;height:22px;border-radius:50%;object-fit:cover;display:block;" onerror="this.outerHTML='<div style=&quot;width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff&quot;>${initial}</div>'">`
+            : `<div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0;">${initial}</div>`;
 
-        // 保留 sys-indicator(系统状态小圆点),加头像+昵称+退出按钮
+        // 保留 sys-indicator(系统状态小圆点,移到按钮里跟"在线"合并)
         const indicator = box.querySelector('#sys-indicator');
         box.innerHTML = '';
-        if (indicator) box.appendChild(indicator);
-        const wrap = document.createElement('div');
-        wrap.style.cssText = 'display:flex; align-items:center; gap:6px; flex-shrink:0;';
-        wrap.innerHTML =
-            avHtml +
-            `<span style="font-weight:600;font-size:13px;color:var(--text-main);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${nick}">${nick}</span>`;
-        box.appendChild(wrap);
+        if (indicator) indicator.remove();  // 不再用外置小圆点,合并进"在线"标识
 
-        const logoutBtn = document.createElement('button');
-        logoutBtn.type = 'button';
-        logoutBtn.title = '退出登录';
-        logoutBtn.style.cssText = 'font-size:10px;padding:2px 7px;border-radius:5px;background:rgba(239,68,68,.12);color:#f87171;border:1px solid rgba(239,68,68,.3);cursor:pointer;line-height:1.4;font-weight:600;';
-        logoutBtn.textContent = '退出';
-        logoutBtn.onclick = window.yunjiLogout;
-        box.appendChild(logoutBtn);
+        // 整体下拉按钮
+        const trigger = document.createElement('button');
+        trigger.id = 'user-info-trigger';
+        trigger.type = 'button';
+        trigger.title = '点击查看账户信息';
+        trigger.style.cssText = [
+            'display:inline-flex',
+            'align-items:center',
+            'gap:6px',
+            'padding:3px 8px 3px 3px',
+            'border-radius:999px',
+            'background:rgba(255,255,255,.05)',
+            'border:1px solid rgba(255,255,255,.12)',
+            'cursor:pointer',
+            'color:#e5e7eb',
+            'font-family:inherit',
+            'font-size:12px',
+            'line-height:1.2',
+            'transition:background .15s,border-color .15s',
+            'max-width:180px'
+        ].join(';');
+        trigger.innerHTML =
+            avMini +
+            `<span style="font-weight:600;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(nick)}</span>` +
+            `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:999px;background:rgba(34,197,94,.14);color:#4ade80;font-size:9px;font-weight:600;line-height:1.3;">` +
+                `<span style="width:5px;height:5px;border-radius:50%;background:#22c55e;box-shadow:0 0 4px #22c55e;"></span>在线` +
+            `</span>` +
+            `<span style="opacity:.5;font-size:9px;margin-left:1px;">▾</span>`;
+        // hover 效果
+        trigger.addEventListener('mouseenter', () => {
+            trigger.style.background = 'rgba(255,255,255,.1)';
+            trigger.style.borderColor = 'rgba(255,255,255,.2)';
+        });
+        trigger.addEventListener('mouseleave', () => {
+            if (panel.style.display !== 'block') {  // 下拉打开时不重置
+                trigger.style.background = 'rgba(255,255,255,.05)';
+                trigger.style.borderColor = 'rgba(255,255,255,.12)';
+            }
+        });
+        box.appendChild(trigger);
+
+        // 创建下拉面板(只创建一次)
+        let panel = document.getElementById('user-info-panel');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.id = 'user-info-panel';
+            panel.style.cssText = 'display:none;position:absolute;z-index:99999;min-width:300px;background:rgba(15,20,30,.97);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.12);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.5);padding:0;overflow:hidden;color:#e5e7eb;font-family:system-ui,-apple-system,sans-serif;';
+            document.body.appendChild(panel);
+        }
+
+        // 切换显示
+        const toggle = (e) => {
+            e.stopPropagation();
+            const visible = panel.style.display === 'block';
+            if (visible) {
+                closePanel();
+            } else {
+                renderUserPanel(panel, user);
+                positionPanel(panel, trigger);
+                panel.style.display = 'block';
+                trigger.style.background = 'rgba(255,255,255,.1)';
+                trigger.style.borderColor = 'rgba(34,197,94,.4)';
+            }
+        };
+        trigger.addEventListener('click', toggle);
+
+        function closePanel() {
+            panel.style.display = 'none';
+            trigger.style.background = 'rgba(255,255,255,.05)';
+            trigger.style.borderColor = 'rgba(255,255,255,.12)';
+        }
+
+        // 点击空白处关闭
+        setTimeout(() => {
+            document.addEventListener('click', (e) => {
+                if (!panel.contains(e.target) && !trigger.contains(e.target)) {
+                    closePanel();
+                }
+            });
+            // ESC 关闭
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && panel.style.display === 'block') closePanel();
+            });
+            // 滚动/窗口大小变化时关闭
+            window.addEventListener('scroll', closePanel, true);
+            window.addEventListener('resize', closePanel);
+        }, 0);
+    }
+
+    // 定位下拉面板
+    function positionPanel(panel, trigger) {
+        const rect = trigger.getBoundingClientRect();
+        let top = rect.bottom + 6 + window.scrollY;
+        let left = rect.left + window.scrollX;
+        const panelW = 300;
+        // 防止右侧超出
+        if (left + panelW > window.innerWidth - 8) {
+            left = Math.max(8, window.innerWidth - panelW - 8 + window.scrollX);
+        }
+        panel.style.top = top + 'px';
+        panel.style.left = left + 'px';
+    }
+
+    // 渲染用户信息下拉面板
+    function renderUserPanel(panel, user) {
+        const nick = user.nickname || user.username || '已登录';
+        const av = user.avatar || '';
+        const initial = (nick[0] || '?').toUpperCase();
+        const avBig = av
+            ? `<img src="${av.replace(/"/g, '&quot;')}" style="width:56px;height:56px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.2);" onerror="this.outerHTML='<div style=&quot;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:#fff&quot;>${initial}</div>'">`
+            : `<div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:#fff;">${initial}</div>`;
+
+        // 格式化时间戳
+        let loginAtStr = '—';
+        if (user.login_at) {
+            try {
+                const d = new Date(user.login_at * 1000);
+                loginAtStr = d.toLocaleString('zh-CN', { hour12: false });
+            } catch (_) {}
+        }
+        // 简化 openid(中间打码)
+        const openidShort = user.openid ? (user.openid.substring(0, 6) + '…' + user.openid.substring(user.openid.length - 4)) : '—';
+        const siteLabel = user.site === '1' ? '主站' : (user.site || '—');
+        const tokenShort = user.token ? (user.token.substring(0, 8) + '…' + user.token.substring(user.token.length - 6)) : '—';
+
+        const rowStyle = 'display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:12px;';
+        const kStyle = 'color:#94a3b8;';
+        const vStyle = 'color:#e5e7eb;font-family:ui-monospace,Consolas,monospace;font-size:11px;';
+
+        panel.innerHTML = `
+            <div style="padding:16px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:12px;">
+                ${avBig}
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:15px;font-weight:700;color:#f1f5f9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(nick)}</div>
+                    <div style="font-size:11px;color:#94a3b8;margin-top:2px;display:flex;align-items:center;gap:4px;">
+                        <span style="width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e;"></span>
+                        <span>已登录 · ${escapeHtml(siteLabel)}</span>
+                    </div>
+                </div>
+            </div>
+            <div style="padding:12px 16px;">
+                <div style="${rowStyle}">
+                    <span style="${kStyle}">用户名</span>
+                    <span style="${vStyle}" title="${escapeHtml(user.username || '')}">${escapeHtml(user.username || '—')}</span>
+                </div>
+                <div style="${rowStyle}">
+                    <span style="${kStyle}">OpenID</span>
+                    <span style="${vStyle}" title="${escapeHtml(user.openid || '')}">${escapeHtml(openidShort)}</span>
+                </div>
+                <div style="${rowStyle}">
+                    <span style="${kStyle}">登录时间</span>
+                    <span style="${vStyle}">${escapeHtml(loginAtStr)}</span>
+                </div>
+                <div style="${rowStyle}">
+                    <span style="${kStyle}">Token</span>
+                    <span style="${vStyle}" title="${escapeHtml(user.token || '')}">${escapeHtml(tokenShort)}</span>
+                </div>
+            </div>
+            <div style="border-top:1px solid rgba(255,255,255,.08);">
+                <button id="user-panel-switch" type="button" style="width:100%;text-align:left;padding:10px 16px;background:transparent;border:none;color:#e5e7eb;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;" onmouseover="this.style.background='rgba(255,255,255,.05)'" onmouseout="this.style.background='transparent'">
+                    <span>🔄</span><span>切换账号</span>
+                </button>
+                <button id="user-panel-logout" type="button" style="width:100%;text-align:left;padding:10px 16px;background:transparent;border:none;color:#f87171;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;" onmouseover="this.style.background='rgba(239,68,68,.1)'" onmouseout="this.style.background='transparent'">
+                    <span>⏏</span><span>退出登录</span>
+                </button>
+            </div>
+        `;
+
+        // 绑定按钮事件
+        panel.querySelector('#user-panel-switch').onclick = () => {
+            if (confirm('确定要切换账号吗?将退出当前登录并跳到登录页。')) {
+                const next = `${location.origin}${location.pathname}`;
+                location.href = `https://vi.yunjii.cn/sl/logout.php?next=${encodeURIComponent('https://vi.yunjii.cn/sl/login.php?next=' + next)}`;
+            }
+        };
+        panel.querySelector('#user-panel-logout').onclick = window.yunjiLogout;
+    }
+
+    // HTML 转义辅助
+    function escapeHtml(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
     // 退出登录(给 injectUserInfoBox 暴露成 window.yunjiLogout)
