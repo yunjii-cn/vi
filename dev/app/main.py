@@ -5470,7 +5470,6 @@ class MainWindow(QMainWindow):
 
         # ★ 2026-06-08:托盘常驻相关标志
         self._truly_quit = False  # True = 真正退出进程;False = 关闭事件是"最小化到托盘"
-        self._user_show_window = False  # True = 用户主动展开过主窗口(后续不再自动最小化)
         self._monitor_status_cache = {}  # 缓存服务状态,供托盘 tooltip 使用
         self._guide_retry_btn = None  # 重试按钮
         self._guide_skip_btn = None  # 跳过按钮（仅步骤2）
@@ -10652,32 +10651,9 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
 
-            # ★ 2026-06-08:启动后端/前端就绪后,如果主窗口还显示,自动最小化到托盘
-            # (启动器只是"服务管理面板",用完就缩到托盘,别挡视野)
-            if self.config.get("services.auto_minimize_to_tray", True):
-                QTimer.singleShot(2500, self._auto_minimize_to_tray)
-        except Exception:
-            pass
-
-    def _auto_minimize_to_tray(self):
-        """★ 2026-06-08:启动完成后,如果窗口还可见,自动最小化到托盘"""
-        try:
-            if not hasattr(self, 'tray') or self.tray is None:
-                return
-            if not self.tray.isSystemTrayAvailable():
-                return
-            # 仅当:窗口当前可见 + 没有被用户手动展开
-            if self.isVisible() and not self._user_show_window:
-                self.hide()
-                # 首次最小化时给个气泡提示
-                if not self.config.get("_tray_first_hint_shown", False):
-                    self.tray.showMessage(
-                        "云集智能视频创意站",
-                        "已最小化到系统托盘,服务在后台继续运行\n右键托盘图标可随时唤回",
-                        QSystemTrayIcon.MessageIcon.Information,
-                        3000,
-                    )
-                    self.config.set("_tray_first_hint_shown", True)
+            # ★ 2026-06-08(移除):启动后不再自动最小化到托盘
+            # 原逻辑: 2.5s 后自动隐藏到托盘
+            # 新逻辑: 主窗口保持激活,只有用户点窗口右上角 X 时才最小化到托盘
         except Exception:
             pass
 
@@ -10693,12 +10669,9 @@ class MainWindow(QMainWindow):
     def _tray_show_window(self):
         """★ 2026-06-08:从托盘恢复主窗口"""
         try:
-            self._user_show_window = True
             self.showNormal()
             self.raise_()
             self.activateWindow()
-            # 用户主动展开后,后续启动不再自动最小化
-            self.config.set("services.auto_minimize_to_tray", False)
         except Exception:
             pass
 
