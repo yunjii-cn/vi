@@ -871,7 +871,7 @@ SERVICES = {
         "port": DEFAULT_BACKEND_PORT,
         "url": f"http://127.0.0.1:{DEFAULT_BACKEND_PORT}",
         "icon": "⚙️",
-        "color": "#FF0000",
+        "color": "#43A047",          # ★ 2026-06-09: 与"打开工作台"互换(信息按钮用静默绿)
         "desc": "LTX-2.3 视频生成引擎",
     },
     "frontend": {
@@ -879,7 +879,7 @@ SERVICES = {
         "port": DEFAULT_FRONTEND_PORT,
         "url": f"http://127.0.0.1:{DEFAULT_FRONTEND_PORT}",
         "icon": "🖥️",
-        "color": "#43A047",
+        "color": "#FF0000",          # ★ 2026-06-09: 与"引擎详情"互换(主操作按钮用品牌红)
         "desc": "AI视频创意工作站界面",
     },
 }
@@ -4915,12 +4915,13 @@ class ServiceCard(QFrame):
             self.status_dot.setStyleSheet("background-color: #4CAF50; border: 2px solid #388E3C; border-radius: 7px;")
             self.status_text.setText("运行中")
             self.status_text.setStyleSheet("font-size: 12px; color: #4CAF50; font-weight: bold; background: transparent;")
-            self.setStyleSheet(f"""
-                QFrame#cardFrame {{
+            # ★ 2026-06-09: 两张卡都跑起来时,边框统一为绿色(#4CAF50),与状态点一致
+            self.setStyleSheet("""
+                QFrame#cardFrame {
                     background-color: #1A1A1A;
-                    border: 2px solid {self.service_info["color"]};
+                    border: 2px solid #4CAF50;
                     border-radius: 10px;
-                }}
+                }
             """)
         else:
             self.status_dot.setStyleSheet("background-color: #424242; border: 2px solid #616161; border-radius: 7px;")
