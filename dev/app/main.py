@@ -777,8 +777,8 @@ from PyQt6.QtWidgets import (
     QColorDialog, QFontDialog, QInputDialog, QWizard, QDialog,
     QButtonGroup, QAbstractButton, QHeaderView,
 )
-from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal, QTimer, QRectF, pyqtProperty, QProcess, QPropertyAnimation
-from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QLinearGradient, QPen, QPalette
+from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal, QTimer, QRectF, pyqtProperty, QProcess, QPropertyAnimation, QUrl
+from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QLinearGradient, QPen, QPalette, QDesktopServices
 from PyQt6.QtSvg import QSvgRenderer
 
 
@@ -944,6 +944,38 @@ QGroupBox::title {
     subcontrol-origin: margin;
     left: 12px;
     padding: 0 6px;
+}
+
+/* ★ 2026-06-09: 托盘右键菜单样式(暗底 + 鼠标经过红色高亮 + 点击更深红) */
+QMenu {
+    background-color: #1E1E1E;
+    border: 1px solid #333333;
+    border-radius: 6px;
+    padding: 4px;
+    color: #E0E0E0;
+}
+QMenu::item {
+    padding: 7px 28px 7px 24px;
+    border-radius: 4px;
+    color: #E0E0E0;
+    background: transparent;
+}
+QMenu::item:disabled {
+    color: #888888;
+    background: transparent;
+}
+QMenu::item:hover {
+    background-color: #CC0000;     /* 鼠标经过:深红高亮 */
+    color: #FFFFFF;
+}
+QMenu::item:pressed {
+    background-color: #FF0000;     /* 鼠标点击:正红 */
+    color: #FFFFFF;
+}
+QMenu::separator {
+    height: 1px;
+    background: #333333;
+    margin: 4px 8px;
 }
 """
 
@@ -4794,9 +4826,9 @@ class ServiceCard(QFrame):
         btn_row.addWidget(self.restart_btn)
 
         if self.service_id == "backend":
-            self.open_btn = QPushButton("ℹ️ 信息")
+            self.open_btn = QPushButton("ℹ️ 引擎详情")
         else:
-            self.open_btn = QPushButton("🌐 打开")
+            self.open_btn = QPushButton("🌐 打开工作台")
         btn_color = self.service_info["color"]
         hover_color = "#FF3333" if btn_color == "#FF0000" else "#4CAF50"
         self.open_btn.setStyleSheet(f"""
@@ -10633,6 +10665,39 @@ class MainWindow(QMainWindow):
                 tray_icon = QIcon()
             self.tray = QSystemTrayIcon(tray_icon, self)
             tray_menu = QMenu()
+            # ★ 2026-06-09: 托盘菜单单独应用 QMenu 样式(hover=#CC0000, pressed=#FF0000)
+            tray_menu.setStyleSheet("""
+                QMenu {
+                    background-color: #1E1E1E;
+                    border: 1px solid #333333;
+                    border-radius: 6px;
+                    padding: 4px;
+                    color: #E0E0E0;
+                }
+                QMenu::item {
+                    padding: 7px 28px 7px 24px;
+                    border-radius: 4px;
+                    color: #E0E0E0;
+                    background: transparent;
+                }
+                QMenu::item:disabled {
+                    color: #888888;
+                    background: transparent;
+                }
+                QMenu::item:hover {
+                    background-color: #CC0000;     /* 鼠标经过:深红高亮 */
+                    color: #FFFFFF;
+                }
+                QMenu::item:pressed {
+                    background-color: #FF0000;     /* 鼠标点击:正红 */
+                    color: #FFFFFF;
+                }
+                QMenu::separator {
+                    height: 1px;
+                    background: #333333;
+                    margin: 4px 8px;
+                }
+            """)
 
             # ── 状态信息(只读) ──
             status_action = tray_menu.addAction("🎬 云集智能视频创意站")
@@ -12665,41 +12730,37 @@ if __name__ == '__main__':
 
     def _show_engine_info(self):
         """Show engine details dialog for the backend service."""
+        # ★ 2026-06-09: 重做为富内容弹窗(对齐 UsageGuideDialog 风格)+ 居中显示
         dlg = QDialog(self)
-        dlg.setWindowTitle("核心引擎信息")
-        dlg.setMinimumWidth(480)
+        dlg.setWindowTitle("核心引擎详情 - LTX-2.3")
+        dlg.setMinimumSize(680, 560)
+        dlg.resize(780, 640)
         dlg.setStyleSheet("""
-            QDialog { background-color: #1E1E1E; color: #E0E0E0; }
-            QGroupBox {
-                color: #FFFFFF; font-weight: bold; font-size: 13px;
-                border: 1px solid #444444; border-radius: 6px;
-                margin-top: 12px; padding-top: 16px;
+            QDialog { background-color: #0D0D0D; }
+            QTextBrowser {
+                background-color: #111118; color: #E0E0F0; border: none;
+                font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+                font-size: 13px; padding: 24px 32px;
             }
-            QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; }
-            QLabel { color: #CCCCCC; font-size: 12px; background: transparent; }
+            QTextBrowser:hover { border: none; }
+            QPushButton {
+                background-color: #252525; color: #CCCCCC; border: 1px solid #444444;
+                border-radius: 6px; padding: 8px 22px; font-size: 13px;
+            }
+            QPushButton:hover { background-color: #333333; color: #FFFFFF; }
+            QPushButton#primary {
+                background-color: #CC0000; color: #FFFFFF; border: 1px solid #FF0000;
+            }
+            QPushButton#primary:hover { background-color: #FF0000; }
         """)
         layout = QVBoxLayout(dlg)
-        layout.setSpacing(8)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # --- Engine Info ---
-        grp1 = QGroupBox("引擎信息")
-        g1 = QFormLayout(grp1)
-        g1.setSpacing(6)
-        g1.addRow("名称:", QLabel("LTX Video 引擎"))
-        g1.addRow("版本:", QLabel(VERSION))
-        g1.addRow("端口:", QLabel(str(SERVICES.get("backend", {}).get("port", "—"))))
-        api_url = f"http://127.0.0.1:{SERVICES.get('backend', {}).get('port', 3000)}"
-        g1.addRow("API 地址:", QLabel(api_url))
+        # ── 实时数据(状态/端口/版本/GPU/模型数) ──
+        port = SERVICES.get("backend", {}).get("port", 3000)
+        api_url = f"http://127.0.0.1:{port}"
         running = self.service_cards.get("backend").is_running if self.service_cards.get("backend") else False
-        status_lbl = QLabel("✅ 运行中" if running else "⏹ 已停止")
-        status_lbl.setStyleSheet("color: #4CAF50;" if running else "color: #FF0000;")
-        g1.addRow("状态:", status_lbl)
-        layout.addWidget(grp1)
-
-        # --- Hardware ---
-        grp2 = QGroupBox("硬件信息")
-        g2 = QFormLayout(grp2)
-        g2.setSpacing(6)
         gpu_name = "—"
         vram_str = "—"
         try:
@@ -12714,36 +12775,140 @@ if __name__ == '__main__':
             gpu_name = "PyTorch 未安装"
         except Exception as e:
             gpu_name = f"检测失败: {e}"
-        g2.addRow("GPU:", QLabel(gpu_name))
-        g2.addRow("显存:", QLabel(vram_str))
-        layout.addWidget(grp2)
-
-        # --- Model Status ---
-        grp3 = QGroupBox("模型状态")
-        g3 = QFormLayout(grp3)
-        g3.setSpacing(6)
         model_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models")
         file_count = 0
         if os.path.isdir(model_dir):
             for root, dirs, files in os.walk(model_dir):
                 file_count += len(files)
-        g3.addRow("模型目录:", QLabel(model_dir))
-        g3.addRow("文件数量:", QLabel(str(file_count)))
-        layout.addWidget(grp3)
 
-        # Close button
-        close_btn = QPushButton("关闭")
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #333333; color: #FFFFFF;
-                border: 1px solid #555555; border-radius: 6px;
-                padding: 8px 24px; font-size: 13px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #444444; }
-        """)
+        # ── 富文本浏览区(对齐 UsageGuideDialog 风格) ──
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(True)
+        browser.setHtml(self._build_engine_info_html(
+            version=VERSION, port=port, api_url=api_url, running=running,
+            gpu_name=gpu_name, vram_str=vram_str, model_dir=model_dir, file_count=file_count,
+        ))
+        layout.addWidget(browser)
+
+        # ── 底部操作行 ──
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(16, 10, 16, 12)
+        btn_row.setSpacing(8)
+        # 复制 API 地址
+        copy_btn = QPushButton("📋 复制 API 地址")
+        def _copy_api():
+            try:
+                QApplication.clipboard().setText(api_url)
+                self._log(f"√ 已复制 API 地址到剪贴板: {api_url}", "ok")
+            except Exception as e:
+                self._log(f"× 复制失败: {e}", "err")
+        copy_btn.clicked.connect(_copy_api)
+        btn_row.addWidget(copy_btn)
+        # 官方 GitHub
+        github_btn = QPushButton("🚀 查看官方引擎介绍")
+        github_btn.setObjectName("primary")
+        def _open_github():
+            try:
+                QDesktopServices.openUrl(QUrl("https://github.com/Lightricks/LTX-2"))
+            except Exception as e:
+                self._log(f"× 打开浏览器失败: {e}", "err")
+        github_btn.clicked.connect(_open_github)
+        btn_row.addWidget(github_btn)
+        btn_row.addStretch()
+        # 关闭
+        close_btn = QPushButton("✖ 关闭")
         close_btn.clicked.connect(dlg.accept)
-        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+        # ★ 2026-06-09: 显式居中到主窗口(避免点了"没反应"的错觉)
+        try:
+            dlg.adjustSize()
+            if self.isVisible():
+                parent_geo = self.geometry()
+                dlg_geo = dlg.geometry()
+                x = parent_geo.x() + (parent_geo.width() - dlg_geo.width()) // 2
+                y = parent_geo.y() + (parent_geo.height() - dlg_geo.height()) // 2
+                dlg.move(max(0, x), max(0, y))
+        except Exception:
+            pass
         dlg.exec()
+
+    @staticmethod
+    def _build_engine_info_html(version: str, port: int, api_url: str, running: bool,
+                                gpu_name: str, vram_str: str, model_dir: str, file_count: int) -> str:
+        """★ 2026-06-09: 引擎详情弹窗的富文本 HTML(对齐 UsageGuideDialog 视觉)"""
+        BG = "#111118"
+        SURFACE = "#1a1d27"
+        SURFACE2 = "#242836"
+        BORDER = "#2e3347"
+        TEXT = "#e4e6ef"
+        TEXT2 = "#9498ab"
+        ACCENT = "#6c7bf0"
+        GREEN = "#34d399"
+        YELLOW = "#fbbf24"
+        RED = "#f87171"
+        ORANGE = "#FF7043"
+        status_color = GREEN if running else RED
+        status_text = "✅ 运行中" if running else "⏹ 已停止"
+
+        def h2(t): return f'<h2 style="font-size:18px;font-weight:600;color:{TEXT};border-bottom:1px solid {BORDER};padding-bottom:6px;margin-top:24px;margin-bottom:12px;">{t}</h2>'
+        def p(t):  return f'<p style="margin:6px 0;font-size:13px;color:{TEXT};">{t}</p>'
+        def row(k, v, color=TEXT):
+            return (f'<tr><td style="padding:8px 10px;background:{SURFACE2};color:{TEXT2};'
+                    f'font-size:12px;font-weight:600;width:120px;border-bottom:1px solid {BORDER};">{k}</td>'
+                    f'<td style="padding:8px 10px;color:{color};font-size:13px;'
+                    f'border-bottom:1px solid {BORDER};">{v}</td></tr>')
+        def card(title, desc, color=ACCENT):
+            return (f'<div style="background:{SURFACE};border:1px solid {BORDER};border-left:3px solid {color};'
+                    f'border-radius:6px;padding:12px 14px;margin:6px 0;">'
+                    f'<div style="font-size:13px;font-weight:600;color:{TEXT};margin-bottom:4px;">{title}</div>'
+                    f'<div style="font-size:12px;color:{TEXT2};">{desc}</div></div>')
+
+        return f"""
+        <div style="max-width:780px;margin:0 auto;">
+        <h1 style="font-size:24px;font-weight:700;color:{ORANGE};margin-bottom:4px;">⚙️ 核心引擎详情</h1>
+        <p style="color:{TEXT2};font-size:13px;margin-bottom:18px;">LTX-2.3 视频生成引擎 · 由 Lightricks 官方开源 · 云集智能视频创意站集成</p>
+
+        {h2("一、引擎基本信息")}
+        <table style="width:100%;border-collapse:collapse;margin:6px 0 14px 0;">
+            {row("引擎名称", "LTX Video 2.3 (22B Distilled)")}
+            {row("当前版本", f'<code style="color:{ORANGE};">{version}</code>')}
+            {row("监听端口", f'<code style="color:{ORANGE};">{port}</code>')}
+            {row("API 地址", f'<code style="color:#60a5fa;">{api_url}</code>')}
+            {row("运行状态", f'<span style="color:{status_color};font-weight:700;">{status_text}</span>', color=status_color)}
+        </table>
+
+        {h2("二、运行环境")}
+        <table style="width:100%;border-collapse:collapse;margin:6px 0 14px 0;">
+            {row("GPU 型号", gpu_name)}
+            {row("显存大小", f'<span style="color:{ORANGE};font-weight:700;">{vram_str}</span>')}
+            {row("模型目录", f'<code style="color:#60a5fa;font-size:11px;">{model_dir}</code>')}
+            {row("模型文件", f'{file_count} 个')}
+        </table>
+
+        {h2("三、核心能力")}
+        {card("文生视频 (T2V)", "纯文本描述生成电影级视频,支持 24FPS 多分辨率输出", color=ACCENT)}
+        {card("图生视频 (I2V)", "静态图片+运动提示生成动态视频,首尾帧精确控制", color=GREEN)}
+        {card("智能多帧拼接", "多张关键帧自动补全过渡,支持镜头运动方向控制", color=YELLOW)}
+        {card("视频迁移 (V2V)", "源视频风格/动作迁移到目标图,保持时序一致性", color=ORANGE)}
+        {card("空间/时间超分", "x2 空间分辨率提升 + x2 时间插帧,画质与流畅度双增强", color=RED)}
+        {card("图像生成", "基于 LTX-2 引擎的静态图像生成,9 种画幅比例", color=ACCENT)}
+
+        {h2("四、技术亮点")}
+        {p("• <strong>原生 BF16/FP8 硬件加速</strong>:Blackwell / Ada Lovelace 架构 GPU 享受全速推理")}
+        {p("• <strong>SageAttention 加速</strong>:RTX 40/50 系列 GPU 注意力计算 2-3 倍加速")}
+        {p("• <strong>Layer Streaming 分段加载</strong>:44GB BF16 模型可在 24GB 显卡上运行")}
+        {p("• <strong>CPU offload 低显存模式</strong>:8GB 显存即可启动,适合普通用户")}
+        {p("• <strong>IC-LoRA 联合控制</strong>:运镜/光圈/景深等专业镜头语言控制")}
+
+        {h2("五、官方资源")}
+        {p(f'• <strong>官方 GitHub</strong>: <a href="https://github.com/Lightricks/LTX-2" style="color:{ACCENT};">https://github.com/Lightricks/LTX-2</a>')}
+        {p(f'• <strong>模型仓库 (HuggingFace)</strong>: <a href="https://huggingface.co/Lightricks/LTX-2.3-fp8" style="color:{ACCENT};">Lightricks/LTX-2.3-fp8</a>')}
+        {p(f'• <strong>模型仓库 (魔搭社区)</strong>: <a href="https://www.modelscope.cn/organization/Lightricks" style="color:{ACCENT};">modelscope.cn/organization/Lightricks</a>')}
+        {p(f'• <strong>技术报告</strong>: <a href="https://github.com/Lightricks/LTX-2/blob/main/tech-report.pdf" style="color:{ACCENT};">LTX-2 Tech Report (PDF)</a>')}
+        </div>
+        """
 
     def _open_usage_guide(self):
         dlg = UsageGuideDialog(self)
