@@ -85,7 +85,7 @@
         const trigger = document.createElement('button');
         trigger.id = 'user-info-trigger';
         trigger.type = 'button';
-        trigger.title = '点击查看账户信息';
+        trigger.title = `${nick}  ·  点击查看账户信息`;  // hover 显示完整昵称(截断时不丢信息)
         trigger.style.cssText = [
             'display:inline-flex',
             'align-items:center',
@@ -100,15 +100,16 @@
             'font-size:12px',
             'line-height:1.2',
             'transition:background .15s,border-color .15s',
-            'max-width:180px'
+            'max-width:240px',     // ★ 2026-06-08: 加宽,理论上可容纳微信最长昵称(16个汉字)
+            'flex-shrink:0'
         ].join(';');
         trigger.innerHTML =
             avMini +
-            `<span style="font-weight:600;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(nick)}</span>` +
-            `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:999px;background:rgba(34,197,94,.14);color:#4ade80;font-size:9px;font-weight:600;line-height:1.3;">` +
+            `<span style="font-weight:600;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(nick)}">${escapeHtml(nick)}</span>` +
+            `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:999px;background:rgba(34,197,94,.14);color:#4ade80;font-size:9px;font-weight:600;line-height:1.3;flex-shrink:0;">` +
                 `<span style="width:5px;height:5px;border-radius:50%;background:#22c55e;box-shadow:0 0 4px #22c55e;"></span>在线` +
             `</span>` +
-            `<span style="opacity:.5;font-size:9px;margin-left:1px;">▾</span>`;
+            `<span style="opacity:.5;font-size:9px;margin-left:1px;flex-shrink:0;">▾</span>`;
         // hover 效果
         trigger.addEventListener('mouseenter', () => {
             trigger.style.background = 'rgba(255,255,255,.1)';
@@ -127,7 +128,7 @@
         if (!panel) {
             panel = document.createElement('div');
             panel.id = 'user-info-panel';
-            panel.style.cssText = 'display:none;position:absolute;z-index:99999;min-width:300px;background:rgba(15,20,30,.97);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.12);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.5);padding:0;overflow:hidden;color:#e5e7eb;font-family:system-ui,-apple-system,sans-serif;';
+            panel.style.cssText = 'display:none;position:absolute;z-index:99999;min-width:300px;background:#111111;backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.12);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.5);padding:0;overflow:hidden;color:#e5e7eb;font-family:system-ui,-apple-system,sans-serif;';
             document.body.appendChild(panel);
         }
 

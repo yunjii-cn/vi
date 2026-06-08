@@ -37,7 +37,7 @@
         ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
 
         .sidebar-header {
-            padding: 14px 24px 4px;
+            padding: 10px 24px 4px;     /* ★ 2026-06-08: logo 行顶部 10px */
             position: sticky;
             top: 0;
             z-index: 25;
