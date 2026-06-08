@@ -70,11 +70,14 @@
 </head>
 <body>
 
-<!-- ★ 2026-06-09: 登录遮罩(收敛:仅大LOGO 100px + 下方一个细环转圈替代进度条,无其他元素) -->
+<!-- ★ 2026-06-09: 登录遮罩(同 splash 启动界面:LOGO + 标题 + 副标题 + 转圈替代进度条 + 状态) -->
 <div id="yunji-login-veil" aria-hidden="true">
     <div class="veil-content">
         <img src="/app-icon.png" class="veil-logo" alt="logo" onerror="this.outerHTML='<div class=&quot;veil-logo-fallback&quot;>云</div>'">
-        <div class="veil-spinner"></div>
+        <div class="veil-name">云集智能视频创意站</div>
+        <div class="veil-en">LTX-2.3 Cinematic Workstation</div>
+        <div class="veil-progress-ring"></div>
+        <div class="veil-sub">正在准备登录环境…</div>
     </div>
 </div>
 

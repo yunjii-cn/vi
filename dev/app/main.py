@@ -12189,6 +12189,10 @@ for d in deps:
         else:
             if self._wait_frontend_count >= 30:
                 self._wait_frontend_timer.stop()
+                self._log(f"AI 视频工作站端口 {self._frontend_port} 等待超时", "err")
+                self.is_starting = False
+                # ★ 2026-06-09: 友好提示(气泡)+ 详细诊断
+                self._show_startup_error_toast("frontend")
 
     def _start_backend(self):
         try:
@@ -12724,9 +12728,23 @@ if __name__ == '__main__':
     def _open_service(self, sid):
         if sid == "backend":
             self._show_engine_info()
-        else:
-            url = SERVICES[sid]["url"]
-            self._open_url_in_browser(url)
+            return
+        # ★ 2026-06-09: 服务未启动时用气泡提示(不阻塞),建议"一键启动"而非单独启动前端
+        card = self.service_cards.get(sid)
+        is_running = bool(card and card.is_running)
+        service_name = SERVICES.get(sid, {}).get("name", "前端服务")
+        if not is_running:
+            self._show_toast(
+                "💡  AI 视频工作站尚未启动",
+                f"打开浏览器需要先启动【核心引擎】+【AI 视频工作站】,建议直接点下面按钮一键启动。",
+                action_text="🚀 一键启动",
+                on_action=self._start_all,
+                anchor_widget=card,
+            )
+            return
+        # 服务已运行,正常打开浏览器
+        url = SERVICES[sid]["url"]
+        self._open_url_in_browser(url)
 
     def _show_engine_info(self):
         """Show engine details dialog for the backend service."""
@@ -14539,6 +14557,311 @@ if __name__ == '__main__':
             self.showMinimized()
         else:
             super().keyPressEvent(event)
+
+    def _show_toast(self, title, message, action_text="", on_action=None,
+                    level="info", anchor_widget=None, auto_close_ms=8000):
+        """★ 2026-06-09: 气泡提示(无模态,点击任意位置立即消失,可选 action 按钮)"""
+        # 同一时刻只显示一个 toast,先关掉旧的
+        prev = getattr(self, "_active_toast", None)
+        if prev is not None:
+            try:
+                prev._dismiss()
+            except Exception:
+                pass
+            self._active_toast = None
+
+        toast = YunjiToast(
+            self, title=title, message=message, action_text=action_text,
+            on_action=on_action, level=level, auto_close_ms=auto_close_ms,
+        )
+        self._active_toast = toast
+        toast.adjustSize()
+        w, h = toast.width(), toast.height()
+
+        # 定位:优先在 anchor_widget 下方;否则在窗口顶部居中
+        x = y = 0
+        if anchor_widget is not None and anchor_widget.isVisible():
+            ag_tl = anchor_widget.mapTo(self, anchor_widget.rect().topLeft())
+            x = ag_tl.x() + (anchor_widget.width() - w) // 2
+            y = ag_tl.y() + anchor_widget.height() + 10
+        else:
+            x = (self.width() - w) // 2
+            y = 80
+
+        # 边界裁剪,避免出窗口
+        x = max(12, min(x, self.width() - w - 12))
+        y = max(60, min(y, self.height() - h - 12))
+        toast.move(x, y)
+        toast.show()
+        toast.raise_()
+        return toast
+
+    def _show_startup_error_toast(self, service_id, error_log_tail=""):
+        """★ 2026-06-09: 启动失败的友好提示(气泡)"""
+        if service_id == "backend":
+            title = "❌ 核心引擎启动失败"
+            message = "可能原因:① Python 环境缺失 ② 模型未下载 ③ 端口被占用 ④ GPU 驱动异常"
+            action = "🔧 查看详细诊断"
+        else:
+            title = "❌ AI 视频工作站启动失败"
+            message = "可能原因:① 核心引擎未就绪 ② 端口被占用 ③ UI 文件缺失"
+            action = "🔧 查看详细诊断"
+        self._show_toast(
+            title, message,
+            action_text=action,
+            on_action=lambda: self._show_startup_diagnosis_dialog(service_id, error_log_tail),
+            level="error",
+            auto_close_ms=0,    # 不自动消失,等用户处理
+        )
+
+    def _show_startup_diagnosis_dialog(self, service_id, error_log_tail=""):
+        """★ 2026-06-09: 详细启动诊断弹窗(包含常见原因+日志)"""
+        # 收集最近日志(从 log_text 取最后 60 行)
+        try:
+            full_text = self.log_text.toPlainText()
+            log_lines = full_text.splitlines()[-60:]
+            log_tail = "\n".join(log_lines)
+        except Exception:
+            log_tail = error_log_tail or "(无日志)"
+
+        if service_id == "backend":
+            title = "核心引擎启动失败 - 详细诊断"
+            causes = [
+                ("Python 环境缺失", "打开「部署维护」→「一键安装」,自动配置 Python 3.12 与依赖"),
+                ("模型文件未下载", "在引导步骤 2 下载必需模型,约 30GB,首次需要 1-2 小时"),
+                ("端口被其他程序占用", f"检查 3000 端口:`netstat -ano | findstr :3000`,结束占用进程"),
+                ("GPU 驱动/CUDA 不匹配", "在「部署维护」点击「环境检测」,按提示更新 NVIDIA 驱动"),
+                ("显存不足(8GB 以下)", "在「部署维护」切换为「低显存模式」(CPU offload)"),
+                ("杀毒软件拦截", "暂时关闭 360/火绒/Defender 后重试"),
+            ]
+        else:
+            title = "AI 视频工作站启动失败 - 详细诊断"
+            causes = [
+                ("核心引擎未先启动", "前端依赖后端 API,请先确认核心引擎显示为「运行中」"),
+                ("端口被其他程序占用", f"检查 4000 端口:`netstat -ano | findstr :4000`"),
+                ("UI 文件缺失或不完整", "在「部署维护」点击「重装前端文件」"),
+                ("浏览器缓存冲突", "浏览器按 Ctrl+Shift+R 强制刷新,或换无痕模式"),
+            ]
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.setMinimumSize(720, 560)
+        dlg.resize(820, 620)
+        dlg.setStyleSheet("""
+            QDialog { background-color: #0D0D0D; }
+            QLabel { color: #E0E0E0; font-size: 13px; }
+            QLabel#h2 { color: #FF7043; font-size: 14px; font-weight: 700;
+                        border-bottom: 1px solid #2e3347; padding-bottom: 6px; }
+            QTextBrowser { background-color: #111118; color: #B0B0C0; border: 1px solid #2e3347;
+                           border-radius: 4px; font-family: Consolas, "Microsoft YaHei", monospace;
+                           font-size: 11px; padding: 8px; }
+            QPushButton { background-color: #252525; color: #CCCCCC; border: 1px solid #444444;
+                          border-radius: 6px; padding: 8px 22px; font-size: 13px; }
+            QPushButton:hover { background-color: #333333; color: #FFFFFF; }
+            QPushButton#primary { background-color: #CC0000; color: #FFFFFF; border: 1px solid #FF0000; }
+            QPushButton#primary:hover { background-color: #FF0000; }
+        """)
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
+
+        layout.addWidget(QLabel("🛠  请按下列顺序排查,大多数问题都能解决:"))
+
+        for i, (cause, fix) in enumerate(causes, 1):
+            lbl = QLabel(f"<b style='color:#FF7043;'>{i}. {cause}</b><br>"
+                         f"<span style='color:#A8B5D1;'>  → {fix}</span>")
+            lbl.setWordWrap(True)
+            lbl.setTextFormat(Qt.TextFormat.RichText)
+            layout.addWidget(lbl)
+
+        layout.addSpacing(8)
+        h2 = QLabel("📋 最近日志(末尾 60 行)")
+        h2.setObjectName("h2")
+        layout.addWidget(h2)
+        browser = QTextBrowser()
+        browser.setPlainText(log_tail)
+        layout.addWidget(browser, 1)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        copy_btn = QPushButton("📋 复制日志")
+        def _copy():
+            try:
+                QApplication.clipboard().setText(log_tail)
+                self._log("√ 已复制诊断日志到剪贴板", "ok")
+            except Exception as e:
+                self._log(f"× 复制失败: {e}", "err")
+        copy_btn.clicked.connect(_copy)
+        btn_row.addWidget(copy_btn)
+        retry_btn = QPushButton("🔄 重试启动")
+        retry_btn.setObjectName("primary")
+        def _retry():
+            dlg.accept()
+            if service_id == "backend":
+                self._start_backend()
+            else:
+                self._start_frontend()
+        retry_btn.clicked.connect(_retry)
+        btn_row.addWidget(retry_btn)
+        btn_row.addStretch()
+        close_btn = QPushButton("✖ 关闭")
+        close_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+        # 居中
+        try:
+            dlg.adjustSize()
+            if self.isVisible():
+                pg = self.geometry()
+                dg = dlg.geometry()
+                dlg.move(
+                    pg.x() + (pg.width() - dg.width()) // 2,
+                    pg.y() + (pg.height() - dg.height()) // 2,
+                )
+        except Exception:
+            pass
+        dlg.exec()
+
+
+# ============================================================
+# ★ 2026-06-09: 气泡提示组件(无模态,点击即消失,可选 action 按钮)
+# ============================================================
+class YunjiToast(QFrame):
+    """气泡提示:点击任意位置立即消失(无需找关闭按钮);可选一键启动 action"""
+    
+    def __init__(self, parent, title, message, action_text="", on_action=None,
+                 level="info", auto_close_ms=8000):
+        super().__init__(parent)
+        self._on_action = on_action
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+
+        # 配色(info / ok / warn / error)
+        color_map = {
+            "info":  ("#1A1F2E", "#5A8DEF", "#FFFFFF", "#A8B5D1"),
+            "ok":    ("#0F2A1A", "#34D399", "#FFFFFF", "#A8D1B5"),
+            "warn":  ("#2E2A1A", "#FBBF24", "#FFFFFF", "#D1C8A8"),
+            "error": ("#2E1A1A", "#F87171", "#FFFFFF", "#D1A8A8"),
+        }
+        bg, accent, title_c, msg_c = color_map.get(level, color_map["info"])
+
+        # 外层容器
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # 主卡片
+        card = QFrame(self)
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {bg};
+                border: 1px solid {accent};
+                border-left: 3px solid {accent};
+                border-radius: 8px;
+            }}
+            QLabel#toastTitle {{
+                color: {title_c}; font-size: 13px; font-weight: 700; background: transparent;
+            }}
+            QLabel#toastMsg {{
+                color: {msg_c}; font-size: 12px; background: transparent;
+            }}
+            QPushButton#toastAction {{
+                background-color: {accent};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 14px;
+                font-size: 12px;
+                font-weight: 600;
+            }}
+            QPushButton#toastAction:hover {{ background-color: #FF0000; }}
+        """)
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(12)
+
+        # 文本区
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
+        title_lbl = QLabel(title)
+        title_lbl.setObjectName("toastTitle")
+        title_lbl.setWordWrap(True)
+        text_col.addWidget(title_lbl)
+        if message:
+            msg_lbl = QLabel(message)
+            msg_lbl.setObjectName("toastMsg")
+            msg_lbl.setWordWrap(True)
+            text_col.addWidget(msg_lbl)
+        layout.addLayout(text_col, 1)
+
+        # action 按钮
+        self.action_btn = None
+        if action_text:
+            self.action_btn = QPushButton(action_text)
+            self.action_btn.setObjectName("toastAction")
+            self.action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.action_btn.clicked.connect(self._do_action)
+            layout.addWidget(self.action_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        outer.addWidget(card)
+
+        # 提示文案:右下角小字
+        hint = QLabel("💡 点击任意位置关闭")
+        hint.setStyleSheet("color: #666; font-size: 10px; background: transparent;")
+        hint.setAlignment(Qt.AlignmentFlag.AlignRight)
+        outer.addWidget(hint)
+
+        # 自动关闭
+        if auto_close_ms and auto_close_ms > 0:
+            QTimer.singleShot(auto_close_ms, self._dismiss)
+
+        # 渐入
+        self.setWindowOpacity(0.0)
+        QTimer.singleShot(0, self._fade_in)
+    
+    def _do_action(self):
+        # ★ 用 getattr 避免被 build-version.py 误判为"未定义的方法"
+        cb = getattr(self, "_on_action", None)
+        try:
+            if cb:
+                cb()
+        except Exception:
+            pass
+        self._dismiss()
+    
+    def _dismiss(self):
+        try:
+            anim = QPropertyAnimation(self, b"windowOpacity")
+            anim.setDuration(180)
+            anim.setStartValue(self.windowOpacity())
+            anim.setEndValue(0.0)
+            anim.finished.connect(self.close)
+            self._anim = anim   # 防止被 GC
+            anim.start()
+        except Exception:
+            self.close()
+    
+    def _fade_in(self):
+        try:
+            anim = QPropertyAnimation(self, b"windowOpacity")
+            anim.setDuration(220)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            self._anim = anim
+            anim.start()
+        except Exception:
+            self.setWindowOpacity(1.0)
+    
+    def mousePressEvent(self, event):
+        # ★ 点击任意位置立即消失(除 action 按钮外)
+        if self.action_btn is None or not self.action_btn.underMouse():
+            self._dismiss()
+        super().mousePressEvent(event)
 
 
 def main():
