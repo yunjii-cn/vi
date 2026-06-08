@@ -6,15 +6,16 @@
     <title>LTX-2 | Multi-GPU Cinematic Studio</title>
     <link rel="stylesheet" href="index.css?v=fix-replay-progress">
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/plyr/3.7.8/plyr.css" media="print" onload="this.media='all'" />
-    <!-- ★ 2026-06-08: 登录门控遮罩(在 index.js 执行前就显示,避免闪屏) -->
+    <!-- ★ 2026-06-09: 登录门控遮罩(对齐 splash 启动界面:大LOGO + 三环转圈替代进度条 + 扫描点 + 8 粒子上浮) -->
     <style>
         #yunji-login-veil {
             position: fixed; inset: 0; z-index: 999999;
-            background: rgba(10, 10, 10, 0.85);                 /* 接近 vi 登录页 #0a0a0a */
+            background: rgba(13, 13, 13, 0.94);                 /* 同 splash #0D0D0D */
             backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
             display: flex; align-items: center; justify-content: center; flex-direction: column;
             overflow: hidden;
-            color: #e5e7eb; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+            color: #e5e7eb;
+            font-family: "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif;
             transition: opacity .5s ease;
         }
 
@@ -24,7 +25,7 @@
             bottom: -8px;
             width: 3px; height: 3px;
             border-radius: 50%;
-            background: rgba(220, 38, 38, 0.7);
+            background: rgba(220, 38, 38, 0.6);
             box-shadow: 0 0 6px rgba(220, 38, 38, 0.5);
             pointer-events: none;
             opacity: 0;
@@ -32,54 +33,134 @@
         }
         @keyframes yunji-veil-flow {
             0%   { transform: translate3d(0, 0, 0);    opacity: 0; }
-            8%   { opacity: .6; }
-            50%  { transform: translate3d(8px, -50vh, 0); opacity: .5; }
-            92%  { opacity: .35; }
+            8%   { opacity: .55; }
+            50%  { transform: translate3d(8px, -50vh, 0); opacity: .45; }
+            92%  { opacity: .3; }
             100% { transform: translate3d(-6px, -105vh, 0); opacity: 0; }
         }
 
-        /* 中心内容区 */
+        /* 中心内容区(纵向紧密对齐 splash 风格) */
         #yunji-login-veil .veil-content {
             position: relative; z-index: 1;
-            display: flex; flex-direction: column; align-items: center; gap: 16px;
+            display: flex; flex-direction: column; align-items: center;
             text-align: center; padding: 20px;
         }
-        /* 品牌头(收敛) */
-        #yunji-login-veil .veil-brand {
-            display: flex; align-items: center; gap: 10px;
-            opacity: .92;
+
+        /* 三环旋转组(splash 进度条 → 转圈化) */
+        #yunji-login-veil .veil-rings {
+            position: relative;
+            width: 220px; height: 220px;
+            margin-bottom: 22px;
+            display: flex; align-items: center; justify-content: center;
         }
+        #yunji-login-veil .veil-ring {
+            position: absolute;
+            border-radius: 50%;
+            box-sizing: border-box;
+        }
+        /* 外环:大圆,红渐变边,慢速正转 */
+        #yunji-login-veil .ring-outer {
+            width: 220px; height: 220px;
+            border: 1.5px solid transparent;
+            border-top-color: #FF0000;
+            border-right-color: rgba(255, 112, 67, 0.75);
+            animation: yunji-veil-spin 3.6s linear infinite;
+            filter: drop-shadow(0 0 5px rgba(255, 0, 0, 0.35));
+        }
+        /* 中环:中圆,深红渐变边,反向转 */
+        #yunji-login-veil .ring-mid {
+            width: 170px; height: 170px;
+            border: 2px solid transparent;
+            border-bottom-color: #DC2626;
+            border-left-color: rgba(239, 68, 68, 0.65);
+            animation: yunji-veil-spin-rev 2.4s linear infinite;
+            filter: drop-shadow(0 0 4px rgba(220, 38, 38, 0.3));
+        }
+        /* 内环:小圆,虚线橙,中速正转 */
+        #yunji-login-veil .ring-inner {
+            width: 130px; height: 130px;
+            border: 1px dashed rgba(255, 112, 67, 0.5);
+            animation: yunji-veil-spin 4.8s linear infinite;
+        }
+        /* 脉冲环:与内环同径,呼吸缩放 */
+        #yunji-login-veil .ring-pulse {
+            width: 130px; height: 130px;
+            border: 1px solid rgba(220, 38, 38, 0.2);
+            animation: yunji-veil-pulse 2.6s ease-in-out infinite;
+        }
+        /* 轨道扫描点(在外环上转的小亮点) */
+        #yunji-login-veil .veil-orbit {
+            position: absolute;
+            width: 220px; height: 220px;
+            animation: yunji-veil-spin 4.2s linear infinite;
+            pointer-events: none;
+        }
+        #yunji-login-veil .veil-orbit-dot {
+            position: absolute;
+            top: -4px; left: 50%;
+            transform: translateX(-50%);
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #FF7043;
+            box-shadow:
+                0 0 10px #FF7043,
+                0 0 22px rgba(255, 112, 67, 0.55);
+        }
+        @keyframes yunji-veil-spin     { to { transform: rotate(360deg); } }
+        @keyframes yunji-veil-spin-rev { to { transform: rotate(-360deg); } }
+        @keyframes yunji-veil-pulse {
+            0%, 100% { transform: scale(1);    opacity: .55; }
+            50%      { transform: scale(1.22); opacity: .12; }
+        }
+
+        /* 大LOGO(同 splash 80px 风格放大 1.25× = 100px,带红色光晕) */
         #yunji-login-veil .veil-logo {
-            width: 28px; height: 28px; border-radius: 6px;
+            width: 100px; height: 100px;
+            border-radius: 20px;
             object-fit: cover;
-            box-shadow: 0 0 10px rgba(220,38,38,.35);
+            position: relative; z-index: 2;
+            box-shadow:
+                0 0 0 5px rgba(13, 13, 13, 1),                  /* 硬分隔,避免和环相切 */
+                0 0 28px rgba(220, 38, 38, 0.55),
+                0 0 60px rgba(220, 38, 38, 0.2);
+            animation: yunji-veil-logo 3.2s ease-in-out infinite;
+        }
+        @keyframes yunji-veil-logo {
+            0%, 100% { transform: scale(1); }
+            50%      { transform: scale(1.05); }
         }
         #yunji-login-veil .veil-logo-fallback {
-            width: 28px; height: 28px; border-radius: 6px;
+            width: 100px; height: 100px;
+            border-radius: 20px;
             background: linear-gradient(135deg, #DC2626, #7F1D1D);
-            color: #fff; font-weight: 900; font-size: 14px;
+            color: #fff; font-weight: 900; font-size: 48px;
             display: flex; align-items: center; justify-content: center;
-            box-shadow: 0 0 10px rgba(220,38,38,.45);
+            position: relative; z-index: 2;
+            box-shadow:
+                0 0 0 5px rgba(13, 13, 13, 1),
+                0 0 28px rgba(220, 38, 38, 0.55),
+                0 0 60px rgba(220, 38, 38, 0.2);
+            animation: yunji-veil-logo 3.2s ease-in-out infinite;
         }
+
+        /* 标题(同 splash:22px Bold #F0F0F0,字距 2px) */
         #yunji-login-veil .veil-name {
-            font-size: 15px; font-weight: 700; letter-spacing: 1px;
-            color: #f5f5f5;
+            font-size: 22px; font-weight: 700; letter-spacing: 2px;
+            color: #F0F0F0;
+            margin-bottom: 4px;
         }
-
-        /* 单一细环加载器(慢转,克制) */
-        #yunji-login-veil .veil-spinner {
-            width: 28px; height: 28px;
-            border: 1.5px solid rgba(255,255,255,.08);
-            border-top-color: rgba(220,38,38,.75);
-            border-radius: 50%;
-            animation: yunji-veil-spin 1.6s linear infinite;
+        /* 副标题(同 splash:11px #888888) */
+        #yunji-login-veil .veil-en {
+            font-size: 11px; color: #888888; letter-spacing: 1.5px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
         }
-        @keyframes yunji-veil-spin { to { transform: rotate(360deg); } }
-
-        /* 状态文案 */
+        /* 状态文案(同 splash:10px;这里用品牌橙 #FF7043 突出"进行中") */
         #yunji-login-veil .veil-sub {
-            font-size: 12px; opacity: .55; letter-spacing: .5px;
-            min-height: 18px;
+            font-size: 10px; letter-spacing: 1px;
+            color: #FF7043;
+            opacity: .9;
+            min-height: 16px;
         }
 
         #yunji-login-veil.hide { opacity: 0; pointer-events: none; }
@@ -87,24 +168,31 @@
 </head>
 <body>
 
-<!-- ★ 2026-06-08: 登录遮罩(收敛版:暗背景+上浮粒子+细环加载器,接近 vi 登录页色) -->
+<!-- ★ 2026-06-09: 登录遮罩(splash 风格:大LOGO(100px) + 三环转圈 + 扫描点 + 标题/副标题/状态) -->
 <div id="yunji-login-veil" aria-hidden="true">
     <!-- 8 个流转粒子(不同位置/速度/延迟) -->
     <div class="veil-particle" style="left:10%; animation-duration:9s;  animation-delay:0s;"></div>
     <div class="veil-particle" style="left:22%; animation-duration:11s; animation-delay:1.2s; width:2px; height:2px; opacity:.5;"></div>
     <div class="veil-particle" style="left:35%; animation-duration:8s;  animation-delay:3s;"></div>
-    <div class="veil-particle" style="left:48%; animation-duration:12s; animation-delay:0.6s; background:rgba(239,68,68,.55);"></div>
+    <div class="veil-particle" style="left:48%; animation-duration:12s; animation-delay:0.6s; background:rgba(239,68,68,.5);"></div>
     <div class="veil-particle" style="left:60%; animation-duration:10s; animation-delay:2.4s;"></div>
     <div class="veil-particle" style="left:72%; animation-duration:9.5s;animation-delay:4s;   width:2px; height:2px; opacity:.5;"></div>
-    <div class="veil-particle" style="left:85%; animation-duration:11.5s;animation-delay:1.8s; background:rgba(239,68,68,.55);"></div>
+    <div class="veil-particle" style="left:85%; animation-duration:11.5s;animation-delay:1.8s; background:rgba(239,68,68,.5);"></div>
     <div class="veil-particle" style="left:93%; animation-duration:8.5s; animation-delay:3.6s;"></div>
 
     <div class="veil-content">
-        <div class="veil-brand">
+        <!-- 三环旋转组(替代 splash 的进度条) -->
+        <div class="veil-rings">
+            <div class="veil-ring ring-outer"></div>
+            <div class="veil-ring ring-mid"></div>
+            <div class="veil-ring ring-inner"></div>
+            <div class="veil-ring ring-pulse"></div>
+            <div class="veil-orbit"><div class="veil-orbit-dot"></div></div>
             <img src="/app-icon.png" class="veil-logo" alt="logo" onerror="this.outerHTML='<div class=&quot;veil-logo-fallback&quot;>云</div>'">
-            <div class="veil-name">云集智能视频创意站</div>
         </div>
-        <div class="veil-spinner"></div>
+        <!-- 标题 + 副标题(完全对齐 splash 风格) -->
+        <div class="veil-name">云集智能视频创意站</div>
+        <div class="veil-en">LTX-2.3 Cinematic Workstation</div>
         <div class="veil-sub">正在准备登录环境…</div>
     </div>
 </div>
