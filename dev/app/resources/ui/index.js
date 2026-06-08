@@ -1,51 +1,110 @@
-// ═══ 微信登录门控 (2026-06-07) ═══
-// 逻辑:前端自己判断登录态
-//   - 有 ?yunji_user= 参数 → 已登录,显示用户信息 + 正常使用
-//   - 没有 → 自动跳转 sl/client.php?from=client(扫码后自动回来)
+// ═══ 微信登录门控 (2026-06-08) ═══
+// 流程(基于 VI v3 教程):
+//   1. 有 ?yunji_user= 参数 → 解析 base64 → 已登录,显示用户信息 + 正常使用
+//   2. 没有参数 → 调 islogin.php 检查 cookie → 已登录就构造 yunji_user 复用
+//   3. 都没登录 → 跳 vi.yunjii.cn/sl/login.php?next=本机地址,扫码后跳回
+//
+// 关键点:启动器(PyQt6 EXE)完全不参与登录,只负责开端口
+//         所有登录逻辑在前端 JS 里完成,UI 都在浏览器
 (function() {
     'use strict';
     const params = new URLSearchParams(location.search);
     const userB64 = params.get('yunji_user');
     let yunjiUser = null;
 
-    if (userB64) {
+    // 解析 yunji_user 参数
+    function parseUserB64(b64) {
         try {
-            yunjiUser = JSON.parse(atob(decodeURIComponent(userB64)));
-            if (!yunjiUser || typeof yunjiUser !== 'object') yunjiUser = null;
+            const u = JSON.parse(atob(decodeURIComponent(b64)));
+            return (u && typeof u === 'object') ? u : null;
         } catch (e) {
             console.warn('[yunji] yunji_user 参数解析失败:', e);
-            yunjiUser = null;
+            return null;
         }
     }
 
-    if (yunjiUser) {
-        // ── 已登录:暴露全局变量 + 注入用户信息徽章 ──
-        window.__yunjiUser = yunjiUser;
-        // 清理 URL(避免泄漏到 history / share)
-        try { history.replaceState(null, '', location.pathname); } catch (_) {}
-        // 等 DOM ready 后注入徽章
-        const inject = () => {
-            const brand = document.getElementById('app-brand');
-            if (!brand) return;
-            if (document.getElementById('yunji-user-badge')) return;
-            const badge = document.createElement('div');
-            badge.id = 'yunji-user-badge';
-            badge.style.cssText = 'display:inline-flex;align-items:center;gap:6px;margin-left:8px;padding:3px 8px 3px 3px;background:rgba(22,163,74,0.18);border:1px solid rgba(22,163,74,0.45);border-radius:999px;font-size:11px;color:#16a34a;font-weight:600;line-height:1;';
-            const av = yunjiUser.avatar || '';
-            badge.innerHTML =
-                (av ? `<img src="${av.replace(/"/g, '&quot;')}" style="width:18px;height:18px;border-radius:50%;object-fit:cover;" onerror="this.outerHTML='<span style=\\'font-size:14px\\'>👤</span>'">` : '<span style="font-size:14px">👤</span>') +
-                `<span>${(yunjiUser.nickname || '已登录').replace(/</g, '&lt;')}</span>`;
-            brand.appendChild(badge);
-        };
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', inject);
-        } else {
-            inject();
+    // 构造 yunji_user base64 + 跳到 next 页面
+    function gotoNext(userObj) {
+        try {
+            const enc = btoa(unescape(encodeURIComponent(JSON.stringify(userObj))));
+            const next = `${location.origin}${location.pathname}`;
+            // 跳到当前页(去掉原 query),带上 yunji_user
+            location.href = `${next}?yunji_user=${encodeURIComponent(enc)}`;
+        } catch (e) {
+            console.error('[yunji] 构造跳转 URL 失败:', e);
+            // 失败时回退到正常登录页
+            redirectToLogin();
         }
-    } else {
-        // ── 未登录:自动跳转到登录页(扫码后自动回来) ──
-        location.href = 'https://vi.yunjii.cn/sl/client.php?from=client';
     }
+
+    // 跳到 vi 官方登录页
+    function redirectToLogin() {
+        const next = `${location.origin}${location.pathname}`;
+        location.href = `https://vi.yunjii.cn/sl/login.php?next=${encodeURIComponent(next)}`;
+    }
+
+    // 走 islogin.php 检查服务端 cookie 是否已登录
+    async function checkIsLogin() {
+        try {
+            const r = await fetch('https://vi.yunjii.cn/sl/islogin.php', { credentials: 'include' });
+            const data = await r.json();
+            if (data && data.code === 1 && data.data) {
+                return data.data;  // {nickname, avatar, openid, username, token, site}
+            }
+            return null;
+        } catch (e) {
+            console.warn('[yunji] islogin.php 请求失败:', e);
+            return null;
+        }
+    }
+
+    // 注入已登录用户徽章
+    function injectUserBadge(user) {
+        const brand = document.getElementById('app-brand');
+        if (!brand) return;
+        if (document.getElementById('yunji-user-badge')) return;
+        const badge = document.createElement('div');
+        badge.id = 'yunji-user-badge';
+        badge.style.cssText = 'display:inline-flex;align-items:center;gap:6px;margin-left:8px;padding:3px 8px 3px 3px;background:rgba(22,163,74,0.18);border:1px solid rgba(22,163,74,0.45);border-radius:999px;font-size:11px;color:#16a34a;font-weight:600;line-height:1;';
+        const av = user.avatar || '';
+        badge.innerHTML =
+            (av ? `<img src="${av.replace(/"/g, '&quot;')}" style="width:18px;height:18px;border-radius:50%;object-fit:cover;" onerror="this.outerHTML='<span style=\\'font-size:14px\\'>👤</span>'">` : '<span style="font-size:14px">👤</span>') +
+            `<span>${(user.nickname || '已登录').replace(/</g, '&lt;')}</span>`;
+        brand.appendChild(badge);
+    }
+
+    // 已登录:暴露全局变量 + 注入徽章
+    function onLoggedIn(user) {
+        window.__yunjiUser = user;
+        try { history.replaceState(null, '', location.pathname); } catch (_) {}
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => injectUserBadge(user));
+        } else {
+            injectUserBadge(user);
+        }
+    }
+
+    // 异步门控主流程
+    (async function gate() {
+        // 1) 优先用 URL 上的 yunji_user 参数
+        if (userB64) {
+            const u = parseUserB64(userB64);
+            if (u) {
+                onLoggedIn(u);
+                return;
+            }
+        }
+
+        // 2) 没参数 → 检查服务端 cookie(浏览器可能在 vi.yunjii.cn 已登录)
+        const serverUser = await checkIsLogin();
+        if (serverUser) {
+            gotoNext(serverUser);
+            return;
+        }
+
+        // 3) 都没登录 → 跳官方登录页
+        redirectToLogin();
+    })();
 })();
 
 // ─── Resizable panel drag logic ───────────────────────────────────────────────
