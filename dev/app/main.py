@@ -5467,6 +5467,11 @@ class MainWindow(QMainWindow):
         self._guide_desc_label = None  # 步骤描述标签
         self._guide_auto_switch = None  # 全自动开关
         self._guide_next_btn = None  # 下一步按钮
+
+        # ★ 2026-06-08:托盘常驻相关标志
+        self._truly_quit = False  # True = 真正退出进程;False = 关闭事件是"最小化到托盘"
+        self._user_show_window = False  # True = 用户主动展开过主窗口(后续不再自动最小化)
+        self._monitor_status_cache = {}  # 缓存服务状态,供托盘 tooltip 使用
         self._guide_retry_btn = None  # 重试按钮
         self._guide_skip_btn = None  # 跳过按钮（仅步骤2）
         self._guide_browser_check_timer = None  # 浏览器检测定时器
@@ -10610,14 +10615,128 @@ class MainWindow(QMainWindow):
                 tray_icon = QIcon()
             self.tray = QSystemTrayIcon(tray_icon, self)
             tray_menu = QMenu()
-            show_action = tray_menu.addAction("显示主窗口")
-            show_action.triggered.connect(self.showNormal)
-            quit_action = tray_menu.addAction("退出")
+
+            # ── 状态信息(只读) ──
+            status_action = tray_menu.addAction("🎬 云集智能视频创意站")
+            status_action.setEnabled(False)
+            tray_menu.addSeparator()
+
+            # ── 快捷操作 ──
+            open_action = tray_menu.addAction("🌐 打开工作台")
+            open_action.triggered.connect(self._tray_open_ui)
+            self._tray_status_action = tray_menu.addAction("⚙ 服务状态查看")
+            self._tray_status_action.triggered.connect(self._tray_show_window)
+            tray_menu.addSeparator()
+
+            # ── 服务管理快捷 ──
+            self._tray_start_action = tray_menu.addAction("▶ 启动全部服务")
+            self._tray_start_action.triggered.connect(self._tray_start_all)
+            self._tray_stop_action = tray_menu.addAction("⏹ 停止全部服务")
+            self._tray_stop_action.triggered.connect(self._stop_all)
+            tray_menu.addSeparator()
+
+            # ── 窗口控制 ──
+            show_action = tray_menu.addAction("🪟 显示主窗口")
+            show_action.triggered.connect(self._tray_show_window)
+            quit_action = tray_menu.addAction("❌ 退出")
             quit_action.triggered.connect(self._quit_app)
+
             self.tray.setContextMenu(tray_menu)
-            self.tray.activated.connect(lambda reason: self.showNormal() if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None)
+            self.tray.activated.connect(self._on_tray_activated)
             self.tray.show()
-        except:
+
+            # ★ 2026-06-08:服务状态变化时刷新托盘提示
+            if hasattr(self, 'monitor') and self.monitor is not None:
+                try:
+                    self.monitor.status_changed.connect(self._on_tray_status_changed)
+                except Exception:
+                    pass
+
+            # ★ 2026-06-08:启动后端/前端就绪后,如果主窗口还显示,自动最小化到托盘
+            # (启动器只是"服务管理面板",用完就缩到托盘,别挡视野)
+            if self.config.get("services.auto_minimize_to_tray", True):
+                QTimer.singleShot(2500, self._auto_minimize_to_tray)
+        except Exception:
+            pass
+
+    def _auto_minimize_to_tray(self):
+        """★ 2026-06-08:启动完成后,如果窗口还可见,自动最小化到托盘"""
+        try:
+            if not hasattr(self, 'tray') or self.tray is None:
+                return
+            if not self.tray.isSystemTrayAvailable():
+                return
+            # 仅当:窗口当前可见 + 没有被用户手动展开
+            if self.isVisible() and not self._user_show_window:
+                self.hide()
+                # 首次最小化时给个气泡提示
+                if not self.config.get("_tray_first_hint_shown", False):
+                    self.tray.showMessage(
+                        "云集智能视频创意站",
+                        "已最小化到系统托盘,服务在后台继续运行\n右键托盘图标可随时唤回",
+                        QSystemTrayIcon.MessageIcon.Information,
+                        3000,
+                    )
+                    self.config.set("_tray_first_hint_shown", True)
+        except Exception:
+            pass
+
+    def _on_tray_activated(self, reason):
+        """★ 2026-06-08:托盘点击行为 - 双击显示窗口,单击也显示(更友好)"""
+        try:
+            if reason in (QSystemTrayIcon.ActivationReason.DoubleClick,
+                          QSystemTrayIcon.ActivationReason.Trigger):
+                self._tray_show_window()
+        except Exception:
+            pass
+
+    def _tray_show_window(self):
+        """★ 2026-06-08:从托盘恢复主窗口"""
+        try:
+            self._user_show_window = True
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
+            # 用户主动展开后,后续启动不再自动最小化
+            self.config.set("services.auto_minimize_to_tray", False)
+        except Exception:
+            pass
+
+    def _tray_open_ui(self):
+        """★ 2026-06-08:从托盘直接打开工作台(浏览器)"""
+        try:
+            # 优先复用现有 _open_ui(会走浏览器选择 + auto_open 检查)
+            if hasattr(self, '_open_ui'):
+                self._open_ui()
+            else:
+                self._open_url_in_browser(f"http://127.0.0.1:{self._frontend_port}")
+        except Exception:
+            pass
+
+    def _tray_start_all(self):
+        """★ 2026-06-08:从托盘启动全部服务"""
+        try:
+            if hasattr(self, '_start_all'):
+                self._start_all()
+            # 显示窗口让用户看到启动进度
+            self._tray_show_window()
+        except Exception:
+            pass
+
+    def _on_tray_status_changed(self, service_id, is_alive):
+        """★ 2026-06-08:服务状态变化时更新托盘提示"""
+        try:
+            if not hasattr(self, 'tray') or self.tray is None:
+                return
+            # 统计当前在线服务数
+            alive_count = sum(1 for v in self._monitor_status_cache.values() if v) if hasattr(self, '_monitor_status_cache') else 0
+            total = len(SERVICES) if 'SERVICES' in globals() else 0
+            # 简单设置 tooltip
+            if is_alive:
+                self.tray.setToolTip(f"云集智能视频创意站 - 服务运行中")
+            else:
+                self.tray.setToolTip(f"云集智能视频创意站 - {service_id} 离线")
+        except Exception:
             pass
 
     def _deferred_init(self):
@@ -11856,6 +11975,8 @@ for d in deps:
     def _on_status_changed(self, sid, alive):
         if sid in self.service_cards:
             self.service_cards[sid].update_status(alive)
+        # ★ 2026-06-08:同步给托盘 tooltip 用
+        self._monitor_status_cache[sid] = alive
         any_alive = any(card.is_running for card in self.service_cards.values())
         if any_alive:
             if not self.is_starting:
@@ -14177,8 +14298,11 @@ if __name__ == '__main__':
             pass
 
     def _quit_app(self):
+        # ★ 2026-06-08:标记"真正退出",让 closeEvent 走真正退出路径
+        self._truly_quit = True
         self._save_window_state()
-        self.tray.hide()
+        if hasattr(self, 'tray') and self.tray is not None:
+            self.tray.hide()
         QApplication.quit()
 
     def _save_window_state(self):
@@ -14188,44 +14312,70 @@ if __name__ == '__main__':
             pass
 
     def closeEvent(self, event):
-        self._cancel_race_procs()
-        self._cancel_commits_race_procs()
-        for proc_attr in ('_ping_proc', '_gh_proc'):
-            proc = getattr(self, proc_attr, None)
-            if proc:
-                try:
-                    proc.finished.disconnect()
-                except Exception:
-                    pass
-                try:
-                    proc.errorOccurred.disconnect()
-                except Exception:
-                    pass
-                try:
-                    proc.terminate()
-                except Exception:
-                    pass
-                proc.deleteLater()
-                setattr(self, proc_attr, None)
-        # 关闭时保留前后端服务进程，只停止其他子进程
-        self._stop_non_service_procs()
-        try:
-            self.monitor.stop()
-        except Exception:
-            pass
-        if hasattr(self, '_probe_timer') and self._probe_timer.isActive():
-            self._probe_timer.stop()
-        if _DBG:
-            _DBG.shutdown()
-        if self._debug_log_file:
+        # ★ 2026-06-08:点X最小化到托盘,服务在后台继续跑
+        # 真正退出只走两个路径:
+        #   1. 托盘菜单 "❌ 退出" → _quit_app → QApplication.quit()
+        #   2. 用户在主窗口"停止全部"后再点X(此时 self._truly_quit=True)
+        if hasattr(self, '_truly_quit') and self._truly_quit:
+            # 真正退出路径
+            self._cancel_race_procs()
+            self._cancel_commits_race_procs()
+            for proc_attr in ('_ping_proc', '_gh_proc'):
+                proc = getattr(self, proc_attr, None)
+                if proc:
+                    try:
+                        proc.finished.disconnect()
+                    except Exception:
+                        pass
+                    try:
+                        proc.errorOccurred.disconnect()
+                    except Exception:
+                        pass
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+                    proc.deleteLater()
+                    setattr(self, proc_attr, None)
+            # 关闭时保留前后端服务进程，只停止其他子进程
+            self._stop_non_service_procs()
             try:
-                self._debug_log_file.close()
+                self.monitor.stop()
             except Exception:
                 pass
-            self._debug_log_file = None
-        _cleanup_single_instance()
-        event.accept()
-        self._quit_app()
+            if hasattr(self, '_probe_timer') and self._probe_timer.isActive():
+                self._probe_timer.stop()
+            if _DBG:
+                _DBG.shutdown()
+            if self._debug_log_file:
+                try:
+                    self._debug_log_file.close()
+                except Exception:
+                    pass
+                self._debug_log_file = None
+            _cleanup_single_instance()
+            event.accept()
+            self._quit_app()
+            return
+
+        # 默认行为:拦截关闭事件,隐藏到托盘
+        if hasattr(self, 'tray') and self.tray is not None and self.tray.isSystemTrayAvailable():
+            event.ignore()
+            self.hide()
+            # 首次隐藏时给个气泡提示
+            if not self.config.get("_tray_first_hint_shown", False):
+                self.tray.showMessage(
+                    "云集智能视频创意站",
+                    "已最小化到系统托盘,服务在后台继续运行\n右键托盘图标可随时唤回",
+                    QSystemTrayIcon.MessageIcon.Information,
+                    3000,
+                )
+                self.config.set("_tray_first_hint_shown", True)
+        else:
+            # 没有托盘可用(系统不支持),按原行为退出
+            event.accept()
+            self._truly_quit = True
+            self._quit_app()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:

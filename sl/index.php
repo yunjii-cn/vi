@@ -129,7 +129,16 @@ header('Content-Type: text/html; charset=UTF-8');
                 <img class="user-avatar" src="<?php echo htmlspecialchars($_SESSION['user']['faceimg']); ?>" alt="头像">
                 <div class="user-nickname"><?php echo htmlspecialchars($_SESSION['user']['nickname']); ?></div>
                 <div class="user-id">ID: <?php echo htmlspecialchars($_SESSION['user']['social_uid']); ?></div>
-                <a href="/" class="btn-back">返回首页</a>
+                <?php
+                    // ★ 2026-06-07 启动器门控:已登录后跳转本地前端,带用户信息
+                    $yunji_user_payload = [
+                        'nickname' => $_SESSION['user']['nickname'] ?? '',
+                        'avatar'   => $_SESSION['user']['faceimg'] ?? '',
+                        'openid'   => $_SESSION['user']['openid'] ?? ($_SESSION['user']['social_uid'] ?? ''),
+                    ];
+                    $yunji_user_b64 = base64_encode(json_encode($yunji_user_payload, JSON_UNESCAPED_UNICODE));
+                ?>
+                <a href="http://127.0.0.1:4000?yunji_user=<?php echo urlencode($yunji_user_b64); ?>" class="btn-back" style="background:#16a34a;margin-top:4px;">🚀 启动应用</a>
                 <br>
                 <a href="./logout.php" class="btn-logout" style="margin-top:12px;">退出登录</a>
             </div>

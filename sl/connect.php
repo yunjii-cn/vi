@@ -27,9 +27,14 @@ if ($use_api) {
 }
 
 $type = isset($_GET['type']) ? $_GET['type'] : 'wx';
+$from = isset($_GET['from']) ? $_GET['from'] : ''; // ★ 2026-06-07:EXE 唤起标记(from=client → 跳 client.php)
 
 if (isset($_GET['code'])) {
     // 回调处理
+    // ★ 2026-06-07:微信回调时 ?from= 不存在,从 session 读出发起登录时的 from
+    if (isset($_SESSION['Oauth_from']) && empty($from)) {
+        $from = $_SESSION['Oauth_from'];
+    }
     $redirect_url = isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : './index.php';
     if (!isset($_SESSION['Oauth_state']) || $_GET['state'] != $_SESSION['Oauth_state']) {
         header('Location: ' . $redirect_url);
@@ -92,7 +97,9 @@ if (isset($_GET['code'])) {
             }
         }
 
-        exit("<script language='javascript'>window.location.href='./index.php';</script>");
+        // ★ 2026-06-07:根据发起登录时的 from 参数,跳到 client.php(EXE 模式)或 index.php(网页模式)
+        $from_page = ($from === 'client') ? 'client.php' : 'index.php';
+        exit("<script language='javascript'>window.location.href='./{$from_page}';</script>");
     } elseif (isset($arr['code'])) {
         exit('登录失败：' . $arr['msg']);
     } else {
@@ -100,6 +107,8 @@ if (isset($_GET['code'])) {
     }
 } else {
     // 发起登录请求
+    // ★ 2026-06-07:把 from 存到 session,微信回调时会读出来决定跳哪个页面
+    $_SESSION['Oauth_from'] = $from;
     $Oauth = new Oauth($Oauth_config);
     $arr = $Oauth->login($type);
     if (isset($arr['code']) && $arr['code'] == 0) {

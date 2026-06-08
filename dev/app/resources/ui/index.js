@@ -1,3 +1,53 @@
+// ═══ 微信登录门控 (2026-06-07) ═══
+// 逻辑:前端自己判断登录态
+//   - 有 ?yunji_user= 参数 → 已登录,显示用户信息 + 正常使用
+//   - 没有 → 自动跳转 sl/client.php?from=client(扫码后自动回来)
+(function() {
+    'use strict';
+    const params = new URLSearchParams(location.search);
+    const userB64 = params.get('yunji_user');
+    let yunjiUser = null;
+
+    if (userB64) {
+        try {
+            yunjiUser = JSON.parse(atob(decodeURIComponent(userB64)));
+            if (!yunjiUser || typeof yunjiUser !== 'object') yunjiUser = null;
+        } catch (e) {
+            console.warn('[yunji] yunji_user 参数解析失败:', e);
+            yunjiUser = null;
+        }
+    }
+
+    if (yunjiUser) {
+        // ── 已登录:暴露全局变量 + 注入用户信息徽章 ──
+        window.__yunjiUser = yunjiUser;
+        // 清理 URL(避免泄漏到 history / share)
+        try { history.replaceState(null, '', location.pathname); } catch (_) {}
+        // 等 DOM ready 后注入徽章
+        const inject = () => {
+            const brand = document.getElementById('app-brand');
+            if (!brand) return;
+            if (document.getElementById('yunji-user-badge')) return;
+            const badge = document.createElement('div');
+            badge.id = 'yunji-user-badge';
+            badge.style.cssText = 'display:inline-flex;align-items:center;gap:6px;margin-left:8px;padding:3px 8px 3px 3px;background:rgba(22,163,74,0.18);border:1px solid rgba(22,163,74,0.45);border-radius:999px;font-size:11px;color:#16a34a;font-weight:600;line-height:1;';
+            const av = yunjiUser.avatar || '';
+            badge.innerHTML =
+                (av ? `<img src="${av.replace(/"/g, '&quot;')}" style="width:18px;height:18px;border-radius:50%;object-fit:cover;" onerror="this.outerHTML='<span style=\\'font-size:14px\\'>👤</span>'">` : '<span style="font-size:14px">👤</span>') +
+                `<span>${(yunjiUser.nickname || '已登录').replace(/</g, '&lt;')}</span>`;
+            brand.appendChild(badge);
+        };
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', inject);
+        } else {
+            inject();
+        }
+    } else {
+        // ── 未登录:自动跳转到登录页(扫码后自动回来) ──
+        location.href = 'https://vi.yunjii.cn/sl/client.php?from=client';
+    }
+})();
+
 // ─── Resizable panel drag logic ───────────────────────────────────────────────
 (function() {
     const handle = document.getElementById('resize-handle');
