@@ -6,8 +6,37 @@
     <title>LTX-2 | Multi-GPU Cinematic Studio</title>
     <link rel="stylesheet" href="index.css?v=fix-replay-progress">
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/plyr/3.7.8/plyr.css" media="print" onload="this.media='all'" />
+    <!-- ★ 2026-06-08: 登录门控遮罩(在 index.js 执行前就显示,避免闪屏) -->
+    <style>
+        #yunji-login-veil {
+            position: fixed; inset: 0; z-index: 999999;
+            background: rgba(8, 12, 20, 0.96);
+            backdrop-filter: blur(8px);
+            display: flex; align-items: center; justify-content: center; flex-direction: column;
+            gap: 18px; color: #e5e7eb; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+            transition: opacity .4s ease;
+        }
+        #yunji-login-veil .spinner {
+            width: 38px; height: 38px;
+            border: 3px solid rgba(255, 255, 255, .08);
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: yunji-veil-spin 0.9s linear infinite;
+        }
+        #yunji-login-veil .veil-title { font-size: 14px; font-weight: 600; letter-spacing: .5px; }
+        #yunji-login-veil .veil-sub { font-size: 12px; opacity: .55; }
+        @keyframes yunji-veil-spin { to { transform: rotate(360deg); } }
+        #yunji-login-veil.hide { opacity: 0; pointer-events: none; }
+    </style>
 </head>
 <body>
+
+<!-- ★ 2026-06-08: 登录遮罩层(DOM 同步插入,保证页面加载瞬间就显示) -->
+<div id="yunji-login-veil" aria-hidden="true">
+    <div class="spinner"></div>
+    <div class="veil-title">云集智能视频创意站</div>
+    <div class="veil-sub">正在准备登录…</div>
+</div>
 
 <datalist id="fps-options">
     <option value="8">
@@ -36,9 +65,10 @@
             </button>
         </div>
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <div id="sys-indicator" class="indicator-ready" style="width: 12px; height: 12px; border-radius: 50%;"></div>
-                <span style="font-weight: 800; font-size: 18px;">LTX-2 STUDIO</span>
+            <!-- ★ 2026-06-08: 用户信息框(已登录显示头像+昵称+退出;未登录显示提示) -->
+            <div id="user-info-box" style="display:flex; align-items:center; gap:8px; min-height:30px;">
+                <div id="sys-indicator" class="indicator-ready" style="width:10px;height:10px;border-radius:50%;flex-shrink:0;"></div>
+                <span id="user-info-placeholder" style="font-size:12px; color: var(--text-dim);">未登录</span>
             </div>
             <div style="display: flex; gap: 8px; align-items: center;">
                 <button id="feDebugBtn" onclick="toggleFeDebug()" class="btn-outline" style="font-size:11px;padding:4px 10px;opacity:0.7;" data-i18n="feDebugOff">调试:关</button>

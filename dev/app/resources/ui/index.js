@@ -58,29 +58,81 @@
         }
     }
 
-    // 注入已登录用户徽章
-    function injectUserBadge(user) {
-        const brand = document.getElementById('app-brand');
-        if (!brand) return;
-        if (document.getElementById('yunji-user-badge')) return;
-        const badge = document.createElement('div');
-        badge.id = 'yunji-user-badge';
-        badge.style.cssText = 'display:inline-flex;align-items:center;gap:6px;margin-left:8px;padding:3px 8px 3px 3px;background:rgba(22,163,74,0.18);border:1px solid rgba(22,163,74,0.45);border-radius:999px;font-size:11px;color:#16a34a;font-weight:600;line-height:1;';
+    // 注入已登录用户信息框(替换 LTX-2 STUDIO 区)
+    function injectUserInfoBox(user) {
+        const box = document.getElementById('user-info-box');
+        if (!box) return;
+        if (box.dataset.injected === '1') return;  // 防止重复注入
+        box.dataset.injected = '1';
+
+        const nick = (user.nickname || user.username || '已登录').replace(/</g, '&lt;');
         const av = user.avatar || '';
-        badge.innerHTML =
-            (av ? `<img src="${av.replace(/"/g, '&quot;')}" style="width:18px;height:18px;border-radius:50%;object-fit:cover;" onerror="this.outerHTML='<span style=\\'font-size:14px\\'>👤</span>'">` : '<span style="font-size:14px">👤</span>') +
-            `<span>${(user.nickname || '已登录').replace(/</g, '&lt;')}</span>`;
-        brand.appendChild(badge);
+        const initial = (nick[0] || '?').toUpperCase();
+        const avHtml = av
+            ? `<img src="${av.replace(/"/g, '&quot;')}" style="width:26px;height:26px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,.15);" onerror="this.outerHTML='<div style=&quot;width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff&quot;>${initial}</div>'">`
+            : `<div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0;">${initial}</div>`;
+
+        // 保留 sys-indicator(系统状态小圆点),加头像+昵称+退出按钮
+        const indicator = box.querySelector('#sys-indicator');
+        box.innerHTML = '';
+        if (indicator) box.appendChild(indicator);
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'display:flex; align-items:center; gap:6px; flex-shrink:0;';
+        wrap.innerHTML =
+            avHtml +
+            `<span style="font-weight:600;font-size:13px;color:var(--text-main);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${nick}">${nick}</span>`;
+        box.appendChild(wrap);
+
+        const logoutBtn = document.createElement('button');
+        logoutBtn.type = 'button';
+        logoutBtn.title = '退出登录';
+        logoutBtn.style.cssText = 'font-size:10px;padding:2px 7px;border-radius:5px;background:rgba(239,68,68,.12);color:#f87171;border:1px solid rgba(239,68,68,.3);cursor:pointer;line-height:1.4;font-weight:600;';
+        logoutBtn.textContent = '退出';
+        logoutBtn.onclick = window.yunjiLogout;
+        box.appendChild(logoutBtn);
     }
 
-    // 已登录:暴露全局变量 + 注入徽章
+    // 退出登录(给 injectUserInfoBox 暴露成 window.yunjiLogout)
+    window.yunjiLogout = function() {
+        if (!confirm('确定要退出登录吗?退出后需要重新扫码。')) return;
+        const next = `${location.origin}${location.pathname}`;
+        // 用 vi 的 logout.php 清 cookie,带 next 跳回登录页
+        location.href = `https://vi.yunjii.cn/sl/logout.php?next=${encodeURIComponent(next)}`;
+    };
+
+    // 隐藏登录遮罩(已登录时调用)
+    function hideVeil() {
+        const veil = document.getElementById('yunji-login-veil');
+        if (!veil) return;
+        veil.classList.add('hide');
+        // 淡出后从 DOM 移除(避免遮挡其他弹窗)
+        setTimeout(() => { try { veil.remove(); } catch (_) {} }, 500);
+    }
+
+    // 跳到 vi 官方登录页(带遮罩保持显示,让跳转更顺滑)
+    function redirectToLogin() {
+        const next = `${location.origin}${location.pathname}`;
+        // 遮罩文案改为"正在跳转登录页…"
+        const veil = document.getElementById('yunji-login-veil');
+        if (veil) {
+            const sub = veil.querySelector('.veil-sub');
+            if (sub) sub.textContent = '正在跳转登录页…';
+        }
+        // 短延迟让用户看到文案变化
+        setTimeout(() => {
+            location.href = `https://vi.yunjii.cn/sl/login.php?next=${encodeURIComponent(next)}`;
+        }, 150);
+    }
+
+    // 已登录:暴露全局变量 + 注入用户信息框 + 移除遮罩
     function onLoggedIn(user) {
         window.__yunjiUser = user;
         try { history.replaceState(null, '', location.pathname); } catch (_) {}
+        hideVeil();  // 已登录:立即淡出遮罩
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => injectUserBadge(user));
+            document.addEventListener('DOMContentLoaded', () => injectUserInfoBox(user));
         } else {
-            injectUserBadge(user);
+            injectUserInfoBox(user);
         }
     }
 
