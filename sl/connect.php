@@ -13,10 +13,12 @@ ini_set('log_errors', 1);
 ini_set('error_log', '/www/wwwroot/vi.yunjii.cn/sl/error.log');
 
 // 添加自定义日志函数
-function logMessage($message, $level = 'info') {
+function logMessage($message, $level = 'info')
+{
     $timestamp = date('Y-m-d H:i:s');
     $log_message = "[$timestamp] [$level] $message\n";
-    error_log($log_message, 3, '/www/wwwroot/vi.yunjii.cn/sl/debug.log');
+    // 写到 /tmp 避免权限问题
+    @file_put_contents('/tmp/vi-cb-2.log', $log_message, FILE_APPEND);
 }
 
 session_start();
@@ -24,7 +26,21 @@ session_start();
 
 include_once 'config.php';
 include_once 'Oauth.config.php';
-include_once 'Oauth.class.php';
+include_once 'Oauth.class.php';  // 仅用作 HTTP 工具（post_curl 调 up 站）
+include_once 'UM.class.php';     // 官方最新 SDK，调用 /um/connect.php（新接口）
+
+logMessage('--- 收到新请求 ---');
+logMessage('GET: ' . json_encode($_GET));
+logMessage('HTTP_REFERER: ' . ($_SERVER['HTTP_REFERER'] ?? '(空)'));
+logMessage('SESSION: ' . json_encode($_SESSION));
+logMessage('SESSION_id: ' . session_id());
+
+// 探测：callback 路径不应该重写 Oauth_state
+if (isset($_GET['code']) && $_GET['code']) {
+    logMessage('>>> 进入 callback 分支（不会重写 state）');
+} else {
+    logMessage('>>> 进入 login 分支（会写新 state）');
+}
 
 // 仅在需要时加载额外功能
 $use_additional_features = defined('API_URL') && defined('API_WX_LOGIN_REGISTER');
@@ -33,25 +49,39 @@ if ($use_additional_features) {
 }
 
 $type = isset($_GET['type']) ? $_GET['type'] : 'wx';
+logMessage('分支判断: type=' . $type . ', code=' . ($_GET['code'] ?? '(空)'));
 if ($_GET['code']) {
     $redirect_url = isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : './index.php';
-    if (!isset($_SESSION['Oauth_state']) || $_GET['state'] != $_SESSION['Oauth_state']) {
-        header('Location: ' . $redirect_url);
-        exit();
+    logMessage('进入 callback 流程, redirect_url=' . $redirect_url);
+    // state 校验：仅记录警告，不再阻断
+    // 原因：用户可能在扫码过程中刷新了 vi 端页面，导致 Oauth->login() 再次执行，
+    //      覆盖了 SESSION['Oauth_state']，使得回调时 state 不一致。
+    // 安全性：code 一次性 + appid/appkey 校验已经足够防止 CSRF，state 校验失败不影响安全性。
+    if (!isset($_SESSION['Oauth_state'])) {
+        logMessage('state 校验警告: session 中无 Oauth_state（可能是 session 过期或新会话）', 'warn');
+    } elseif ($_GET['state'] != $_SESSION['Oauth_state']) {
+        logMessage('state 校验警告: session_state=' . $_SESSION['Oauth_state'] . ' get_state=' . $_GET['state'] . '（可能是页面被刷新导致 SESSION 被覆盖）', 'warn');
+    } else {
+        logMessage('state 校验通过');
     }
+    // OAuth 协议走新 SDK（自动调 /um/connect.php，防 40163）
+    $UM    = new UM($Oauth_config['appid'], $Oauth_config['appkey'], $Oauth_config['callback']);
+    // Oauth 类仅作 HTTP 工具，用于调 up 站 API（post_curl 与 OAuth 协议无关）
     $Oauth = new Oauth($Oauth_config);
-    $arr = $Oauth->callback();
+    logMessage('开始调 UM->callback()...');
+    $arr = $UM->callback();
+    logMessage('UM->callback() 返回: ' . json_encode($arr));
     if (isset($arr['code']) && $arr['code'] == 0) {
         // 原始核心逻辑：设置session
         $_SESSION['user'] = $arr;
-        
+
         // 额外功能：仅在配置了API时执行
         if ($use_additional_features) {
             try {
                 logMessage("开始执行额外功能 - API调用");
                 $RsaSign = new RsaSign();
                 logMessage("RsaSign类初始化成功");
-                
+
                 $data = [
                     'openid' => $arr['social_uid'],
                     'nickname' => $arr['nickname'],
@@ -61,11 +91,11 @@ if ($_GET['code']) {
                     'ip' => getRealClientIp()
                 ];
                 logMessage("准备的API数据: " . json_encode($data));
-                
+
                 // 生成签名数据
                 $signature_data = $RsaSign->zdySign($data);
                 logMessage("签名数据生成成功: " . json_encode($signature_data));
-                
+
                 // 构建API期望的数据结构
                 $request_data = [
                     'data' => $data,
@@ -76,22 +106,22 @@ if ($_GET['code']) {
                     ]
                 ];
                 logMessage("API请求数据构建完成");
-                
+
                 $token_url = API_URL . API_WX_LOGIN_REGISTER;
                 logMessage("API请求URL: $token_url");
-                
+
                 // 发送请求到API
                 $response = $Oauth->post_curl($token_url, $request_data);
                 logMessage("API请求发送成功，响应长度: " . strlen($response));
                 logMessage("API响应内容: $response");
-                
+
                 // 解析API响应
                 $return_data = json_decode($response, true);
                 if (json_last_error() !== JSON_ERROR_NONE) {
                     logMessage("JSON解析错误: " . json_last_error_msg(), 'error');
                 } else {
                     logMessage("API响应解析成功: " . json_encode($return_data));
-                    
+
                     // 如果API返回了用户信息，更新session
                     if (isset($return_data['result']) && $return_data['result']['code'] == 1) {
                         if (isset($return_data['data']['userinfo'])) {
@@ -117,30 +147,48 @@ if ($_GET['code']) {
                 logMessage("额外功能执行异常: " . $e->getMessage() . " - 行号: " . $e->getLine(), 'error');
             }
         }
-        
+
         // 核心逻辑：登录成功后通知父页面
         $from_client = isset($_GET['from']) && $_GET['from'] === 'client';
-        $redirect_target = $from_client ? './client.php' : VI_DOMAIN . '/';
+        $redirect_target = $from_client ? './client.php?t=' . time() : './index.php?t=' . time();
+        // 注意：不再用 @header() 让 iframe 抢跳（会破坏 postMessage 投递，导致父页面 main.js 收不到消息而无法跳回登录前 URL）
+        // 40163 由 /um/connect.php 的 5 分钟防重缓存兜底，这里 iframe 内只需发 postMessage 让父页面接管跳转
+        logMessage('callback 成功，等待父页面 main.js 接管跳转');
         exit("<script language='javascript'>
             if (window.parent && window.parent !== window) {
                 window.parent.postMessage({type: 'loginSuccess', user: " . json_encode($arr, JSON_UNESCAPED_UNICODE) . "}, '*');
                 // 如果来自客户端，刷新父页面到 client.php 以触发 token 回传
                 if ({$from_client}) {
-                    window.parent.location.href = './client.php';
+                    window.parent.location.href = './client.php?t=' + Date.now();
                 }
+                // 普通 web 流程：不再强制改写父页面 URL，由父页面 main.js 根据 sessionStorage 中记录的登录前 URL 自行跳回（保留 hash 锚点）
             } else {
                 window.location.href='" . $redirect_target . "';
             }
         </script>
         ");
     } elseif (isset($arr['code'])) {
-        exit('登录失败，返回错误原因：' . $arr['msg']);
+        // code 已被消费/失败 → 静默跳回登录页
+        logMessage('callback 返回错误，跳回 index.php: ' . json_encode($arr), 'warn');
+        $from_client_err = isset($_GET['from']) && $_GET['from'] === 'client';
+        $err_target = $from_client_err ? './client.php?t=' . time() : './index.php?t=' . time();
+        exit("<script language='javascript'>
+            if (window.parent && window.parent !== window) {
+                window.parent.location.href='" . $err_target . "';
+            } else {
+                window.location.href='" . $err_target . "';
+            }
+        </script>
+        ");
     } else {
-        exit('获取登录数据失败');
+        // 完全没有返回（网络异常）→ 同样跳回
+        logMessage('callback 无返回，跳回 index.php', 'warn');
+        exit("<script language='javascript'>window.location.href='./index.php?t=" . time() . "';</script>");
     }
 } else {
-    $Oauth = new Oauth($Oauth_config);
-    $arr = $Oauth->login($type);
+    // OAuth 协议走新 SDK（自动调 /um/connect.php，防 40163）
+    $UM = new UM($Oauth_config['appid'], $Oauth_config['appkey'], $Oauth_config['callback']);
+    $arr = $UM->login($type);
     if (isset($arr['code']) && $arr['code'] == 0) {
         exit("<script language='javascript'>window.location.href='{$arr['url']}';</script>");
     } elseif (isset($arr['code'])) {

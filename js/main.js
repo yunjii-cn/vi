@@ -78,7 +78,21 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('message', (e) => {
         if (e.data && e.data.type === 'loginSuccess') {
             closeLoginModal();
-            // 刷新页面以更新登录状态
+            // 跳回登录前的 URL（保留 hash 锚点等），同源校验
+            let redirect = null;
+            try { redirect = sessionStorage.getItem('loginRedirect'); } catch (err) {}
+            if (redirect) {
+                try {
+                    const u = new URL(redirect, window.location.origin);
+                    if (u.origin === window.location.origin) {
+                        sessionStorage.removeItem('loginRedirect');
+                        window.location.href = redirect;
+                        return;
+                    }
+                } catch (err) {}
+                sessionStorage.removeItem('loginRedirect');
+            }
+            // 兜底：reload 当前页
             window.location.reload();
         }
     });
@@ -217,6 +231,9 @@ function openLoginModal() {
     const iframe = document.getElementById('loginIframe');
     const qrcodeImg = document.getElementById('loginQrcodeImg');
     if (!modal) return;
+
+    // 记录登录前的 URL（含 hash），登录成功后跳回
+    try { sessionStorage.setItem('loginRedirect', window.location.href); } catch (e) {}
 
     // 直接使用 iframe 加载二维码页面
     if (iframe) {
