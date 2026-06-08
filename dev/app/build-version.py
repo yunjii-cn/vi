@@ -413,6 +413,21 @@ def build_exe():
 
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
 
+    # ★ 2026-06-08: 写入 _build_info.py(让 EXE 内部直接读取封装时间,不依赖 EXE 文件名)
+    # PyInstaller 会自动把 dev/app/_build_info.py 打进 EXE 内,运行时 import 即可拿到
+    build_info_path = ROOT_DIR / "_build_info.py"
+    build_info_content = f'''# -*- coding: utf-8 -*-
+"""
+★ 自动生成 — 封装时间戳(由 build-version.py 在打包时写入)
+打包时由 build-version.py 生成,运行时由 main.py 读取。
+不要手动编辑本文件,也不要把本文件提交到 git(已在 .gitignore 排除)。
+"""
+BUILD_VERSION = "{VERSION}"
+BUILD_TIMESTAMP = {int(time.time())}
+'''
+    build_info_path.write_text(build_info_content, encoding="utf-8")
+    print(f"  已写入构建信息: {build_info_path.name} (BUILD_VERSION={VERSION})")
+
     # 生成 Windows 版本信息文件
     ver_parts = VERSION.split(".")
     ver_tuple = ", ".join(str(int(p)) for p in ver_parts)

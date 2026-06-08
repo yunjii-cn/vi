@@ -783,6 +783,23 @@ from PyQt6.QtSvg import QSvgRenderer
 
 
 def get_version_from_filename():
+    """
+    ★ 2026-06-08(重构):版本号 = 封装时间(嵌入到 EXE 内),而不是用户打开 EXE 的时间
+    优先级:
+      1. _build_info.BUILD_VERSION  ← build-version.py 写入并由 PyInstaller 嵌入,固定不变
+      2. EXE 文件名里的 vYYYY.MM.DD.HHMM  ← 兼容旧 EXE
+      3. "dev"  ← 开发模式 / 异常情况,绝不使用 datetime.now()
+    """
+    # ★ 优先级 1:从嵌入的构建信息文件读取(固定存在,封装时间)
+    try:
+        import _build_info
+        ver = getattr(_build_info, 'BUILD_VERSION', None)
+        if ver and isinstance(ver, str) and ver.strip():
+            return ver.strip()
+    except Exception:
+        pass
+
+    # ★ 优先级 2:从 EXE 文件名读取(兼容)
     try:
         if hasattr(sys, 'frozen'):
             exe_path = sys.executable
@@ -790,9 +807,11 @@ def get_version_from_filename():
             match = re.search(r'v(\d+\.\d+\.\d+\.\d+)', exe_name)
             if match:
                 return match.group(1)
-        return datetime.now().strftime("%Y.%m.%d.%H%M")
-    except:
-        return datetime.now().strftime("%Y.%m.%d.%H%M")
+    except Exception:
+        pass
+
+    # ★ 优先级 3:开发模式兜底 — 用固定标识,不再用 datetime.now()
+    return "dev"
 
 
 VERSION = get_version_from_filename()

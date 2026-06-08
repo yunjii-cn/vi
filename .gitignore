@@ -19,6 +19,7 @@
 build/
 dev/dist/
 dev/app/gitlog.json
+dev/app/_build_info.py
 
 # ── EXE文件（通过GitHub/Gitee Release分发）──
 *.exe
