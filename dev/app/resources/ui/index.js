@@ -100,12 +100,12 @@
             'font-size:12px',
             'line-height:1.2',
             'transition:background .15s,border-color .15s',
-            'max-width:240px',     // ★ 2026-06-08: 加宽,理论上可容纳微信最长昵称(16个汉字)
+            'max-width:200px',     // ★ 2026-06-08: 算到极致 — 460(侧栏) - 48(左右内边距) - 188(调试按钮组) - 20(间距) ≈ 204px,留 4px 缓冲
             'flex-shrink:0'
         ].join(';');
         trigger.innerHTML =
             avMini +
-            `<span style="font-weight:600;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(nick)}">${escapeHtml(nick)}</span>` +
+            `<span style="font-weight:600;max-width:108px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(nick)}">${escapeHtml(nick)}</span>` +
             `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:999px;background:rgba(34,197,94,.14);color:#4ade80;font-size:9px;font-weight:600;line-height:1.3;flex-shrink:0;">` +
                 `<span style="width:5px;height:5px;border-radius:50%;background:#22c55e;box-shadow:0 0 4px #22c55e;"></span>在线` +
             `</span>` +

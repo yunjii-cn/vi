@@ -10,32 +10,169 @@
     <style>
         #yunji-login-veil {
             position: fixed; inset: 0; z-index: 999999;
-            background: rgba(8, 12, 20, 0.96);
-            backdrop-filter: blur(8px);
+            background: rgba(8, 12, 20, 0.55);                 /* 半透明,主界面隐约可见 */
+            backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
             display: flex; align-items: center; justify-content: center; flex-direction: column;
-            gap: 18px; color: #e5e7eb; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-            transition: opacity .4s ease;
+            overflow: hidden;
+            color: #e5e7eb; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+            transition: opacity .5s ease;
         }
-        #yunji-login-veil .spinner {
-            width: 38px; height: 38px;
-            border: 3px solid rgba(255, 255, 255, .08);
-            border-top-color: #3b82f6;
+        /* 全屏旋转粒子背景(暗红 + 暗蓝 渐变轨道) */
+        #yunji-login-veil::before {
+            content: ''; position: absolute; inset: -50%;
+            background: conic-gradient(from 0deg,
+                transparent 0deg,
+                rgba(220,38,38,.22) 40deg, transparent 90deg,
+                rgba(59,130,246,.16) 160deg, transparent 220deg,
+                rgba(220,38,38,.18) 280deg, transparent 340deg);
+            animation: yunji-veil-bg 14s linear infinite;
+            pointer-events: none;
+        }
+        /* 副层粒子(反向旋转) */
+        #yunji-login-veil::after {
+            content: ''; position: absolute; inset: -50%;
+            background: conic-gradient(from 180deg,
+                transparent 0deg,
+                rgba(239,68,68,.12) 60deg, transparent 130deg,
+                rgba(99,102,241,.10) 220deg, transparent 300deg);
+            animation: yunji-veil-bg 22s linear infinite reverse;
+            pointer-events: none;
+        }
+        @keyframes yunji-veil-bg { to { transform: rotate(360deg); } }
+
+        #yunji-login-veil .veil-content {
+            position: relative; z-index: 1;
+            display: flex; flex-direction: column; align-items: center; gap: 14px;
+            text-align: center; padding: 20px;
+        }
+
+        /* LOGO + 项目名称(和启动器进度条同款) */
+        #yunji-login-veil .veil-brand {
+            display: flex; align-items: center; gap: 12px; margin-bottom: 6px;
+        }
+        #yunji-login-veil .veil-logo {
+            width: 40px; height: 40px; border-radius: 9px;
+            box-shadow: 0 0 18px rgba(220,38,38,.5);
+            animation: yunji-veil-pulse 2.4s ease-in-out infinite;
+            object-fit: cover;
+        }
+        #yunji-login-veil .veil-logo-fallback {
+            width: 40px; height: 40px; border-radius: 9px;
+            background: linear-gradient(135deg, #DC2626 0%, #7F1D1D 100%);
+            color: #fff; font-weight: 900; font-size: 20px;
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 0 18px rgba(220,38,38,.55);
+            animation: yunji-veil-pulse 2.4s ease-in-out infinite;
+        }
+        #yunji-login-veil .veil-name {
+            font-size: 19px; font-weight: 800; letter-spacing: 2px;
+            background: linear-gradient(90deg, #ffffff 0%, #FCA5A5 45%, #DC2626 95%);
+            background-size: 220% 100%;
+            -webkit-background-clip: text; background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: yunji-veil-text 4s linear infinite;
+            filter: drop-shadow(0 0 14px rgba(220,38,38,.35));
+        }
+        @keyframes yunji-veil-pulse {
+            0%, 100% { box-shadow: 0 0 18px rgba(220,38,38,.45); transform: scale(1); }
+            50%      { box-shadow: 0 0 36px rgba(220,38,38,.85), 0 0 56px rgba(220,38,38,.3); transform: scale(1.05); }
+        }
+        @keyframes yunji-veil-text {
+            0%   { background-position:   0% 50%; }
+            100% { background-position: 220% 50%; }
+        }
+
+        /* 三环旋转粒子加载器 */
+        #yunji-login-veil .veil-loader {
+            position: relative; width: 78px; height: 78px;
+            margin: 4px 0 2px;
+        }
+        #yunji-login-veil .veil-loader-ring {
+            position: absolute; inset: 0; border-radius: 50%;
+            border: 2px solid transparent; pointer-events: none;
+        }
+        #yunji-login-veil .veil-loader-ring-1 {
+            border-top-color: #DC2626;
+            border-right-color: rgba(220,38,38,.4);
+            animation: yunji-veil-spin 1.1s linear infinite;
+            filter: drop-shadow(0 0 6px rgba(220,38,38,.7));
+        }
+        #yunji-login-veil .veil-loader-ring-2 {
+            inset: 9px;
+            border-bottom-color: #EF4444;
+            border-left-color: rgba(239,68,68,.4);
+            animation: yunji-veil-spin 1.6s linear infinite reverse;
+            filter: drop-shadow(0 0 6px rgba(239,68,68,.6));
+        }
+        #yunji-login-veil .veil-loader-ring-3 {
+            inset: 18px;
+            border-top-color: rgba(255,255,255,.7);
+            border-bottom-color: rgba(255,255,255,.15);
+            animation: yunji-veil-spin 2.4s linear infinite;
+        }
+        /* 中心小圆点(粒子汇聚感) */
+        #yunji-login-veil .veil-loader-dot {
+            position: absolute; top: 50%; left: 50%;
+            width: 8px; height: 8px; margin: -4px;
             border-radius: 50%;
-            animation: yunji-veil-spin 0.9s linear infinite;
+            background: #DC2626;
+            box-shadow: 0 0 10px #DC2626, 0 0 18px rgba(220,38,38,.6);
+            animation: yunji-veil-pulse 1.6s ease-in-out infinite;
         }
-        #yunji-login-veil .veil-title { font-size: 14px; font-weight: 600; letter-spacing: .5px; }
-        #yunji-login-veil .veil-sub { font-size: 12px; opacity: .55; }
         @keyframes yunji-veil-spin { to { transform: rotate(360deg); } }
+
+        /* 标题 / 副标题 / 欢迎语 */
+        #yunji-login-veil .veil-title {
+            font-size: 13px; font-weight: 700; letter-spacing: 3px;
+            color: #f1f5f9; text-transform: uppercase;
+            animation: yunji-veil-blink 2.2s ease-in-out infinite;
+        }
+        #yunji-login-veil .veil-sub {
+            font-size: 12px; opacity: .65; letter-spacing: .5px;
+            min-height: 18px;
+        }
+        #yunji-login-veil .veil-welcome {
+            margin-top: 6px;
+            font-size: 11px; letter-spacing: 4px;
+            color: rgba(252,165,165,.85);
+            text-transform: uppercase; font-weight: 600;
+            position: relative; padding: 0 24px;
+        }
+        #yunji-login-veil .veil-welcome::before,
+        #yunji-login-veil .veil-welcome::after {
+            content: ''; position: absolute; top: 50%;
+            width: 16px; height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(220,38,38,.7));
+        }
+        #yunji-login-veil .veil-welcome::before { left: 0; }
+        #yunji-login-veil .veil-welcome::after  { right: 0; transform: scaleX(-1); }
+        @keyframes yunji-veil-blink {
+            0%, 100% { opacity: 1; }
+            50%      { opacity: .5; }
+        }
+
         #yunji-login-veil.hide { opacity: 0; pointer-events: none; }
     </style>
 </head>
 <body>
 
-<!-- ★ 2026-06-08: 登录遮罩层(DOM 同步插入,保证页面加载瞬间就显示) -->
+<!-- ★ 2026-06-08: 登录遮罩层(暗黑红+粒子轨道,主界面隐约可见) -->
 <div id="yunji-login-veil" aria-hidden="true">
-    <div class="spinner"></div>
-    <div class="veil-title">云集智能视频创意站</div>
-    <div class="veil-sub">正在准备登录…</div>
+    <div class="veil-content">
+        <div class="veil-brand">
+            <img src="/app-icon.png" class="veil-logo" alt="logo" onerror="this.outerHTML='<div class=&quot;veil-logo-fallback&quot;>云</div>'">
+            <div class="veil-name">云集智能视频创意站</div>
+        </div>
+        <div class="veil-loader">
+            <div class="veil-loader-ring veil-loader-ring-1"></div>
+            <div class="veil-loader-ring veil-loader-ring-2"></div>
+            <div class="veil-loader-ring veil-loader-ring-3"></div>
+            <div class="veil-loader-dot"></div>
+        </div>
+        <div class="veil-title">PREPARING&nbsp;LOGIN</div>
+        <div class="veil-sub">正在准备登录环境…</div>
+        <div class="veil-welcome">欢迎使用 云集智能视频创意站</div>
+    </div>
 </div>
 
 <datalist id="fps-options">
@@ -64,13 +201,13 @@
                 <span style="font-size:11px;" data-i18n="settingsBtnText">系统设置</span>
             </button>
         </div>
-        <div style="display: flex; align-items: center; justify-content: flex-start; margin-bottom: 12px; margin-top: 10px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; margin-top: 10px;">
             <!-- ★ 2026-06-08: 用户信息下拉按钮(已登录显示头像+昵称+在线;未登录显示提示) -->
-            <div id="user-info-box" style="display:flex; align-items:center; gap:8px; min-height:30px;">
+            <div id="user-info-box" style="display:flex; align-items:center; gap:8px; min-height:30px; flex:0 1 auto; min-width:0;">
                 <div id="sys-indicator" class="indicator-ready" style="width:10px;height:10px;border-radius:50%;flex-shrink:0;"></div>
                 <span id="user-info-placeholder" style="font-size:12px; color: var(--text-dim);">未登录</span>
             </div>
-            <div style="display: flex; gap: 8px; align-items: center; margin-left: 20px;">
+            <div style="display: flex; gap: 8px; align-items: center; flex-shrink:0;">
                 <button id="feDebugBtn" onclick="toggleFeDebug()" class="btn-outline" style="font-size:11px;padding:4px 10px;opacity:0.7;" data-i18n="feDebugOff">调试:关</button>
                 <button id="clearGpuBtn" onclick="clearGpu()" class="btn-outline" data-i18n="clearVram">释放显存</button>
                 <button type="button" id="lang-toggle-btn" class="lang-toggle">EN</button>
