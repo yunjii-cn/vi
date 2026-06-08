@@ -9,10 +9,10 @@
 $Oauth_config['apiurl'] = 'https://sl.yunjii.cn/';
 
 // APPID（需在 sl.yunjii.cn 后台为 vi 项目创建应用获取）
-$Oauth_config['appid'] = '1011';
+$Oauth_config['appid'] = '1012';
 
 // APPKEY
-$Oauth_config['appkey'] = '942f7907a867d1bb91ad552b2dc76af0';
+$Oauth_config['appkey'] = '195c18b283ca395d2a4e6b453d23889e';
 
 // 登录成功返回地址
 $Oauth_config['callback'] = VI_CALLBACK;

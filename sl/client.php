@@ -1,57 +1,23 @@
 <?php
 /**
- * 云集智能视频创意站 - EXE 专用登录页(client.php)
- *
- * 与 index.php 的区别:
- * - index.php:网页端登录页,扫码成功后留在 sl/ 显示用户卡片
- * - client.php:EXE 专用登录页,扫码成功后自动跳转回本地前端(127.0.0.1:4000)
- *              带 ?yunji_user=base64({nickname, avatar, ...}) 参数
- *
- * 触发方式:
- * - 启动器 webbrowser.open('https://vi.yunjii.cn/sl/client.php?from=client')
- * - 用户点"扫码登录"按钮(主窗口)
- *
- * 流程:
- * 1. 启动器 webbrowser.open 打开 client.php?from=client
- * 2. 用户在浏览器扫码
- * 3. connect.php 处理(支持 from=client)→ 跳回 client.php
- * 4. client.php 检测到已登录 + from=client → 显示倒计时 → 自动跳本地前端
- *
- * 本地前端地址(必须与启动器配置一致):
- * - 127.0.0.1:4000 是 _ui_server.py 代理端口(同源,可接收 URL 参数)
+ * 云集智能视频创意站 - 客户端登录页面
+ * 供桌面软件 WebView 调用，界面与网站登录页完全一致
+ * 登录成功后通过自定义协议 vi:// 回传 token 给客户端
  */
-
-error_reporting(E_ALL);
-ini_set('display_errors', 0);
-ini_set('log_errors', 1);
-ini_set('error_log', '/www/wwwroot/vi.yunjii.cn/sl/error.log');
-
-function logMessage($message, $level = 'info') {
-    $timestamp = date('Y-m-d H:i:s');
-    $log_message = "[$timestamp] [$level] $message\n";
-    @error_log($log_message, 3, '/www/wwwroot/vi.yunjii.cn/sl/debug.log');
-}
-
 session_start();
-@header('Content-Type: text/html; charset=UTF-8');
+header('Content-Type: text/html; charset=UTF-8');
 
-// 是否 EXE 唤起模式:启动器打开时带 ?from=client
-$is_client = isset($_GET['from']) && $_GET['from'] === 'client';
+// 检查是否已登录
+$is_logged_in = isset($_SESSION['user']);
+$user = $is_logged_in ? $_SESSION['user'] : null;
+$userinfo = isset($_SESSION['userinfo']) ? $_SESSION['userinfo'] : null;
 
-// 本地前端地址(与启动器 _ui_server.py 端口一致)
-$local_frontend_url = 'http://127.0.0.1:4000';
-
-// 已登录时构造跳转 URL
-$launch_url = '';
-if (isset($_SESSION['user'])) {
-    $yunji_user_payload = [
-        'nickname' => $_SESSION['user']['nickname'] ?? '',
-        'avatar'   => $_SESSION['user']['faceimg'] ?? '',
-        'openid'   => $_SESSION['user']['openid'] ?? ($_SESSION['user']['social_uid'] ?? ''),
-        'token'    => $_SESSION['user']['token'] ?? '',
-    ];
-    $yunji_user_b64 = base64_encode(json_encode($yunji_user_payload, JSON_UNESCAPED_UNICODE));
-    $launch_url = $local_frontend_url . '?yunji_user=' . urlencode($yunji_user_b64);
+// 合并 token 信息
+$token = '';
+if ($userinfo && isset($userinfo['token'])) {
+    $token = $userinfo['token'];
+} elseif ($user && isset($user['token'])) {
+    $token = $user['token'];
 }
 ?>
 <!DOCTYPE html>
@@ -59,260 +25,196 @@ if (isset($_SESSION['user'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo $is_client ? '云集智能视频创意站 - 扫码登录' : '登录'; ?></title>
+    <title>登录 - 云集智能视频创意站</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
-            min-height: 100vh;
+            background: #0a0a0a;
+            color: #fff;
+            font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif;
             display: flex;
-            align-items: center;
             justify-content: center;
-            padding: 20px;
-            color: #e2e8f0;
+            align-items: center;
+            min-height: 100vh;
         }
-        .container {
-            max-width: 480px;
-            width: 100%;
-            background: rgba(30, 41, 59, 0.6);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(148, 163, 184, 0.15);
-            border-radius: 20px;
+        .login-card {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 16px;
             padding: 40px 32px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
-        }
-        .logo {
+            width: 360px;
             text-align: center;
-            margin-bottom: 24px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
         }
-        .logo-icon {
-            font-size: 56px;
-            line-height: 1;
-            margin-bottom: 12px;
+        .login-logo {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            margin: 0 auto 16px auto;
+            display: block;
         }
-        .logo-title {
-            font-size: 22px;
-            font-weight: 700;
-            background: linear-gradient(135deg, #60a5fa, #a78bfa);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        .logo-subtitle {
-            font-size: 12px;
-            color: #94a3b8;
-            margin-top: 6px;
-        }
-        .mode-badge {
-            display: inline-block;
-            padding: 4px 10px;
-            background: rgba(34, 197, 94, 0.15);
-            border: 1px solid rgba(34, 197, 94, 0.3);
-            border-radius: 999px;
-            font-size: 11px;
-            color: #4ade80;
+        .login-title {
+            font-size: 20px;
             font-weight: 600;
-            margin-top: 12px;
+            margin-bottom: 8px;
+            color: #fff;
         }
-        .mode-badge.web { background: rgba(96, 165, 250, 0.15); border-color: rgba(96, 165, 250, 0.3); color: #60a5fa; }
+        .login-subtitle {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 28px;
+        }
+        .qrcode-wrap {
+            background: #222222;
+            border: 2px solid #cc0000;
+            border-radius: 12px;
+            padding: 12px;
+            display: inline-block;
+            margin-bottom: 20px;
+        }
+        .qrcode-wrap iframe {
+            border: none;
+            display: block;
+        }
+        .login-hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 16px;
+        }
+        /* 已登录状态 */
         .user-card {
             text-align: center;
-            padding: 24px 0;
         }
         .user-avatar {
-            width: 88px;
-            height: 88px;
+            width: 64px;
+            height: 64px;
             border-radius: 50%;
+            border: 2px solid #dc2626;
             object-fit: cover;
-            border: 3px solid rgba(96, 165, 250, 0.4);
-            margin-bottom: 14px;
+            margin-bottom: 12px;
         }
         .user-nickname {
-            font-size: 20px;
-            font-weight: 700;
-            color: #f1f5f9;
+            font-size: 18px;
+            font-weight: 600;
             margin-bottom: 4px;
         }
         .user-id {
             font-size: 12px;
-            color: #94a3b8;
+            color: #666;
             margin-bottom: 20px;
-            font-family: ui-monospace, "Cascadia Code", monospace;
         }
-        .btn-launch {
-            display: inline-block;
-            padding: 12px 32px;
-            background: linear-gradient(135deg, #16a34a, #22c55e);
-            color: #fff;
-            text-decoration: none;
-            border-radius: 10px;
-            font-size: 15px;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            box-shadow: 0 6px 20px rgba(22, 163, 74, 0.3);
-            transition: all 0.2s;
-            cursor: pointer;
-            border: none;
-        }
-        .btn-launch:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 8px 24px rgba(22, 163, 74, 0.4);
-        }
-        .btn-launch:active { transform: translateY(0); }
         .btn-logout {
             display: inline-block;
-            margin-top: 14px;
-            padding: 6px 16px;
-            color: #94a3b8;
+            padding: 8px 24px;
+            background: transparent;
+            border: 1px solid #dc2626;
+            color: #dc2626;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
             text-decoration: none;
-            font-size: 12px;
-            border-radius: 6px;
-            transition: color 0.2s;
         }
-        .btn-logout:hover { color: #f87171; }
-        .countdown {
-            margin-top: 16px;
-            font-size: 13px;
-            color: #94a3b8;
+        .btn-logout:hover {
+            background: #dc2626;
+            color: #fff;
         }
-        .countdown strong {
-            color: #4ade80;
-            font-weight: 700;
+        /* 登录成功过渡动画 */
+        .success-icon {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: #dc2626;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 16px auto;
+            animation: scaleIn 0.3s ease;
+        }
+        .success-icon svg {
+            width: 28px;
+            height: 28px;
+            stroke: #fff;
+            fill: none;
+            stroke-width: 3;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        @keyframes scaleIn {
+            from { transform: scale(0); }
+            to { transform: scale(1); }
+        }
+        .success-text {
             font-size: 16px;
+            color: #fff;
+            margin-bottom: 8px;
         }
-        .countdown-tip {
-            font-size: 11px;
-            color: #64748b;
-            margin-top: 6px;
-        }
-        .qrcode-box {
-            text-align: center;
-            padding: 20px 0;
-        }
-        .qrcode-iframe {
-            width: 240px;
-            height: 240px;
-            border: 1px solid rgba(148, 163, 184, 0.2);
-            border-radius: 12px;
-            background: #fff;
-        }
-        .qrcode-tip {
-            font-size: 13px;
-            color: #cbd5e1;
-            margin-top: 16px;
-            line-height: 1.6;
-        }
-        .qrcode-tip strong { color: #4ade80; }
-        .qrcode-mode {
-            display: inline-block;
-            margin-top: 10px;
-            padding: 3px 10px;
-            background: rgba(34, 197, 94, 0.1);
-            border: 1px solid rgba(34, 197, 94, 0.25);
-            border-radius: 6px;
-            font-size: 11px;
-            color: #4ade80;
-        }
-        .footer {
-            text-align: center;
-            margin-top: 24px;
-            font-size: 11px;
-            color: #64748b;
+        .success-hint {
+            font-size: 12px;
+            color: #666;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="logo">
-            <div class="logo-icon">🎬</div>
-            <div class="logo-title">云集智能视频创意站</div>
-            <div class="logo-subtitle">AI 视频生成 · 一站式工作台</div>
-            <?php if ($is_client): ?>
-                <div class="mode-badge">📱 EXE 扫码登录</div>
-            <?php else: ?>
-                <div class="mode-badge web">🌐 网页登录</div>
-            <?php endif; ?>
-        </div>
-
-        <?php if (isset($_SESSION['user']) && $is_client): ?>
-            <!-- ═══ EXE 模式:已登录 → 倒计时跳本地前端 ═══ -->
+    <div class="login-card">
+        <?php if ($is_logged_in): ?>
+            <!-- 已登录 - 显示成功状态并通知客户端 -->
             <div class="user-card">
-                <img class="user-avatar" src="<?php echo htmlspecialchars($_SESSION['user']['faceimg']); ?>" alt="头像">
-                <div class="user-nickname"><?php echo htmlspecialchars($_SESSION['user']['nickname']); ?></div>
-                <div class="user-id">ID: <?php echo htmlspecialchars($_SESSION['user']['social_uid']); ?></div>
-
-                <a id="launchBtn" href="<?php echo htmlspecialchars($launch_url); ?>" class="btn-launch">
-                    🚀 启动应用
-                </a>
-
-                <div class="countdown">
-                    <span id="cdText"><strong id="cdSec">3</strong> 秒后自动启动</span>
+                <div class="success-icon">
+                    <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
                 </div>
-                <div class="countdown-tip">如未自动跳转,请点击上方按钮</div>
-
-                <a href="./logout.php" class="btn-logout">退出登录</a>
+                <div class="success-text">登录成功</div>
+                <img class="user-avatar" src="<?php echo htmlspecialchars($user['faceimg']); ?>" alt="头像">
+                <div class="user-nickname"><?php echo htmlspecialchars($user['nickname']); ?></div>
+                <div class="user-id">ID: <?php echo htmlspecialchars($user['social_uid']); ?></div>
+                <div class="success-hint">正在返回客户端...</div>
+                <br>
+                <a href="./logout.php?from=client" class="btn-logout">退出登录</a>
             </div>
-
             <script>
-            (function() {
-                var sec = 3;
-                var secEl = document.getElementById('cdSec');
-                var cdTextEl = document.getElementById('cdText');
-                var launchUrl = <?php echo json_encode($launch_url); ?>;
+                // 构建回传数据
+                var loginData = {
+                    token: <?php echo json_encode($token); ?>,
+                    nickname: <?php echo json_encode($user['nickname'] ?? ''); ?>,
+                    avatar: <?php echo json_encode($user['faceimg'] ?? ''); ?>,
+                    openid: <?php echo json_encode($user['social_uid'] ?? ''); ?>,
+                    username: <?php echo json_encode($user['username'] ?? ''); ?>,
+                    site: <?php echo json_encode($user['site'] ?? ''); ?>
+                };
 
-                var timer = setInterval(function() {
-                    sec--;
-                    if (sec > 0) {
-                        secEl.textContent = sec;
-                    } else {
-                        clearInterval(timer);
-                        // window.location.href 是用户当前页面跳转,不会被弹窗拦截
-                        window.location.href = launchUrl;
-                    }
+                // 方式1: 通过自定义协议 vi:// 回传（推荐）
+                var params = Object.keys(loginData).map(function(k) {
+                    return k + '=' + encodeURIComponent(loginData[k]);
+                }).join('&');
+                var viUrl = 'vi://login?' + params;
+
+                // 延迟1秒后跳转，让用户看到成功状态
+                setTimeout(function() {
+                    // 尝试通过自定义协议通知客户端
+                    window.location.href = viUrl;
                 }, 1000);
 
-                // 如果用户立即点按钮,取消倒计时
-                document.getElementById('launchBtn').addEventListener('click', function() {
-                    clearInterval(timer);
-                });
-            })();
+                // 方式2: 通过 postMessage 通知父窗口（WebView2 可监听）
+                if (window.chrome && window.chrome.webview) {
+                    window.chrome.webview.postMessage({
+                        type: 'loginSuccess',
+                        data: loginData
+                    });
+                }
+
+                // 方式3: 将数据写入页面供 WebView 读取
+                window.__LOGIN_DATA__ = loginData;
             </script>
-
-        <?php elseif (isset($_SESSION['user'])): ?>
-            <!-- ═══ 网页模式:已登录 → 显示用户卡片(无跳转) ═══ -->
-            <div class="user-card">
-                <img class="user-avatar" src="<?php echo htmlspecialchars($_SESSION['user']['faceimg']); ?>" alt="头像">
-                <div class="user-nickname"><?php echo htmlspecialchars($_SESSION['user']['nickname']); ?></div>
-                <div class="user-id">ID: <?php echo htmlspecialchars($_SESSION['user']['social_uid']); ?></div>
-                <a href="/" class="btn-launch" style="background: linear-gradient(135deg, #2563eb, #3b82f6); box-shadow: 0 6px 20px rgba(37, 99, 235, 0.3);">
-                    返回首页
-                </a>
-                <br>
-                <a href="./logout.php" class="btn-logout" style="margin-top:14px;">退出登录</a>
-            </div>
-
         <?php else: ?>
-            <!-- ═══ 未登录 → 显示二维码 ═══ -->
-            <div class="qrcode-box">
-                <iframe class="qrcode-iframe" src="./connect.php?type=wx<?php echo $is_client ? '&from=client' : ''; ?>" frameborder="0"></iframe>
-                <div class="qrcode-tip">
-                    <?php if ($is_client): ?>
-                        📱 <strong>用微信扫一扫</strong><br>
-                        登录成功后会自动启动应用
-                    <?php else: ?>
-                        📱 <strong>用微信扫一扫</strong> 完成登录
-                    <?php endif; ?>
-                </div>
-                <?php if ($is_client): ?>
-                    <div class="qrcode-mode">EXE 专用 · 扫码后自动启动本地应用</div>
-                <?php endif; ?>
+            <!-- 未登录 - 显示二维码 -->
+            <img src="/image/ico.png" alt="云集" class="login-logo">
+            <div class="login-title">微信扫码登录</div>
+            <div class="login-subtitle">打开微信扫一扫，快速登录</div>
+            <div class="qrcode-wrap">
+                <iframe src="./connect.php?type=wx&from=client" width="150" height="150" frameborder="0" scrolling="no"></iframe>
             </div>
+            <div class="login-hint">扫码即代表同意用户协议和隐私政策</div>
         <?php endif; ?>
-
-        <div class="footer">
-            云集智能视频创意站 · vi.yunjii.cn
-        </div>
     </div>
 </body>
 </html>
