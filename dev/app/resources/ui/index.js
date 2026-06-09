@@ -5547,7 +5547,31 @@
         });
     }
 
+    // ========== 历史预览代次 + per-file 稳定 cache buster ==========
+    // 1) _previewReqId 单调递增,每次 displayOutput 自增,过期回调直接短路,
+    //    避免用户快速点击 A → B → C 时,A/B 的旧 setTimeout / loadeddata / error
+    //    覆盖到 C 的最终态(导致"显示的不是选中的那张")
+    // 2) _fileBusterMap 同文件重复点击复用同一个 v=,浏览器命中缓存秒开;
+    //    fetchHistory 列表刷新时调用 __invalidateAllFileBusters() 清除全部,
+    //    新生成的文件能立即拿到新 URL(不被旧缓存挡掉)
+    let _previewReqId = 0;
+    const _fileBusterMap = new Map();
+    function _isPreviewStale(myReqId) { return myReqId !== _previewReqId; }
+    function _getFileBuster(fileKey) {
+        let b = _fileBusterMap.get(fileKey);
+        if (!b) { b = String(Date.now()); _fileBusterMap.set(fileKey, b); }
+        return b;
+    }
+    window.__invalidateFileBuster = function(fileKey) {
+        if (fileKey) _fileBusterMap.delete(fileKey);
+    };
+    window.__invalidateAllFileBusters = function() {
+        _fileBusterMap.clear();
+    };
+
     function displayOutput(fileOrPath, outputType = null, options = {}) {
+        // ★ 抢占代次,本次调用从此刻起就是"最新"
+        const myReqId = ++_previewReqId;
         const img = document.getElementById('res-img');
         const vid = document.getElementById('res-video');
         const audio = document.getElementById('res-audio');
@@ -5572,44 +5596,47 @@
         if (img) img.style.display = "none";
         if (videoWrapper) videoWrapper.style.display = "none";
         if (audioWrapper) audioWrapper.style.display = "none";
-        
+
         if (player) {
             try { player.pause(); } catch(_) {}
         }
         if (vid) {
             vid.pause();
+            // 清 src 触发浏览器中止上一个请求(避免 A/B 抢带宽)
             vid.removeAttribute('src');
-            vid.load();
+            try { vid.load(); } catch(_) {}
         }
         if (audio) {
             audio.pause();
             audio.removeAttribute('src');
-            audio.load();
+            try { audio.load(); } catch(_) {}
         }
         if (audioPlayer) {
             try { audioPlayer.stop(); } catch(_) {}
         }
-        
+
+        // ★ per-file 稳定 cache buster:同文件复用,新生成时才换
+        const fileKey = `${effectiveType}::${fileOrPath}`;
+        const buster = _getFileBuster(fileKey);
+
         let url = "";
         let fileName = fileOrPath;
         if (fileOrPath.indexOf('\\') !== -1 || fileOrPath.indexOf('/') !== -1) {
-            url = `${BASE}/api/system/file?path=${encodeURIComponent(fileOrPath)}&t=${Date.now()}`;
+            url = `${BASE}/api/system/file?path=${encodeURIComponent(fileOrPath)}&v=${buster}`;
             fileName = fileOrPath.split(/[\\/]/).pop();
         } else {
             const outInput = document.getElementById('global-out-dir');
             const globalDir = outInput ? outInput.value.replace(/\\/g, '/').replace(/\/$/, '') : "";
             if (globalDir && globalDir !== "") {
-                url = `${BASE}/api/system/file?path=${encodeURIComponent(globalDir + '/' + fileOrPath)}&t=${Date.now()}`;
+                url = `${BASE}/api/system/file?path=${encodeURIComponent(globalDir + '/' + fileOrPath)}&v=${buster}`;
             } else {
-                url = `${BASE}/outputs/${fileOrPath}?t=${Date.now()}`;
+                url = `${BASE}/outputs/${fileOrPath}?v=${buster}`;
             }
         }
 
-        console.log("[DEBUG][displayOutput] fileOrPath:", fileOrPath);
+        console.log("[DEBUG][displayOutput] reqId:", myReqId, "fileOrPath:", fileOrPath);
         console.log("[DEBUG][displayOutput] effectiveType:", effectiveType);
         console.log("[DEBUG][displayOutput] Constructed URL:", url);
-        console.log("[DEBUG][displayOutput] BASE:", BASE);
-        console.log("[DEBUG][displayOutput] Has player:", !!player);
 
         if (loader) loader.style.display = "none";
         if (effectiveType === 'audio') {
@@ -5629,7 +5656,7 @@
                 }
             } else if (audio) {
                 audio.src = url;
-                audio.load();
+                try { audio.load(); } catch(_) {}
                 const playPromise = audio.play();
                 if (playPromise && typeof playPromise.catch === 'function') {
                     playPromise.catch(() => {});
@@ -5642,8 +5669,18 @@
             if (previewDownloadBtn) previewDownloadBtn.style.display = 'inline-flex';
             if (previewReplayActions) previewReplayActions.style.display = 'inline-flex';
             refreshPreviewReplayFromFile(fileOrPath, fileName);
+            // ★ 旧 onload/onerror 清理,避免上一张图的回调在切到新图后触发
+            img.onload = null;
+            img.onerror = null;
+            img.onload = () => {
+                if (_isPreviewStale(myReqId)) return;
+                img.style.display = "block";
+            };
+            img.onerror = () => {
+                if (_isPreviewStale(myReqId)) return;
+                console.warn('[IMG] failed to load:', url);
+            };
             img.src = url;
-            img.style.display = "block";
             if (!silentLog) addLog(`✅ 图像渲染成功: ${fileName}`);
         } else {
             if (videoWrapper) videoWrapper.style.display = "flex";
@@ -5652,29 +5689,31 @@
             if (previewDownloadBtn) previewDownloadBtn.style.display = 'inline-flex';
             if (previewReplayActions) previewReplayActions.style.display = 'inline-flex';
             refreshPreviewReplayFromFile(fileOrPath, fileName);
-            
+
             let _videoRetryCount = 0;
             const _videoMaxRetries = 2;
             const _altUrls = [];
+            // alt url 也用同一个 buster(同文件不同表达路径)
             if (url.includes('/api/system/file')) {
-                _altUrls.push(url.replace('/api/system/file?path=', '/outputs/').split('&t=')[0].replace(/%2F/g, '/').replace(/%5C/g, '/'));
+                _altUrls.push(url.replace('/api/system/file?path=', '/outputs/').split('&v=')[0].replace(/%2F/g, '/').replace(/%5C/g, '/') + '?v=' + buster);
             } else if (url.includes('/outputs/')) {
                 const outInput2 = document.getElementById('global-out-dir');
                 const globalDir2 = outInput2 ? outInput2.value.replace(/\\/g, '/').replace(/\/$/, '') : "";
                 if (globalDir2) {
                     const fname2 = url.split('/outputs/')[1].split('?')[0];
-                    _altUrls.push(`${BASE}/api/system/file?path=${encodeURIComponent(globalDir2 + '/' + fname2)}&t=${Date.now()}`);
+                    _altUrls.push(`${BASE}/api/system/file?path=${encodeURIComponent(globalDir2 + '/' + fname2)}&v=${buster}`);
                 }
             }
 
             function _onVideoError(err) {
+                if (_isPreviewStale(myReqId)) return;   // ★ 过期短路
                 console.error("[VIDEO-PROTECT] Video error:", err);
                 if (vid && vid.error) {
                     console.error("[VIDEO-PROTECT] Error code:", vid.error.code, "message:", vid.error.message);
                 }
                 if (_videoRetryCount < _videoMaxRetries && _altUrls.length > 0) {
                     _videoRetryCount++;
-                    const retryUrl = _altUrls[0] + (_altUrls[0].includes('?') ? '&' : '?') + 'retry=' + _videoRetryCount + '&t=' + Date.now();
+                    const retryUrl = _altUrls[0] + (_altUrls[0].includes('?') ? '&' : '?') + 'retry=' + _videoRetryCount + '&v=' + buster;
                     console.log("[VIDEO-PROTECT] Retrying with alt URL, attempt:", _videoRetryCount);
                     if (!silentLog) addLog(`⚠️ 视频加载失败，尝试备用路径 (${_videoRetryCount}/${_videoMaxRetries})...`);
                     _tryPlayVideo(retryUrl);
@@ -5686,18 +5725,16 @@
                     _tryPlayVideoNative(url);
                 } else {
                     if (!silentLog) addLog(`❌ 视频无法播放，请尝试下载后本地查看`);
-                    if (vid) {
-                        vid.removeEventListener('error', _onVideoError);
-                    }
                 }
             }
 
             function _tryPlayVideoNative(videoUrl) {
                 if (!vid) return;
+                if (_isPreviewStale(myReqId)) return;  // ★ 过期短路
                 vid.removeEventListener('error', _onVideoError);
                 vid.addEventListener('error', _onVideoError);
                 vid.src = videoUrl;
-                vid.load();
+                try { vid.load(); } catch(_) {}
                 try {
                     const p = vid.play();
                     if (p && typeof p.catch === 'function') p.catch(() => {});
@@ -5706,6 +5743,7 @@
 
             function _tryPlayVideo(videoUrl) {
                 if (!vid) return;
+                if (_isPreviewStale(myReqId)) return;  // ★ 过期短路
                 vid.removeEventListener('error', _onVideoError);
                 vid.addEventListener('error', _onVideoError);
                 if (player) {
@@ -5722,6 +5760,11 @@
                         return;
                     }
                     const _onLoaded = () => {
+                        if (_isPreviewStale(myReqId)) {  // ★ 过期短路
+                            vid.removeEventListener('loadeddata', _onLoaded);
+                            vid.removeEventListener('error', _onLoadError);
+                            return;
+                        }
                         vid.removeEventListener('loadeddata', _onLoaded);
                         vid.removeEventListener('error', _onLoadError);
                         try {
@@ -5730,12 +5773,18 @@
                         } catch(_) {}
                     };
                     const _onLoadError = () => {
+                        if (_isPreviewStale(myReqId)) return;  // ★
                         vid.removeEventListener('loadeddata', _onLoaded);
                         vid.removeEventListener('error', _onLoadError);
                     };
                     vid.addEventListener('loadeddata', _onLoaded);
                     vid.addEventListener('error', _onLoadError);
                     setTimeout(() => {
+                        if (_isPreviewStale(myReqId)) {  // ★ 3000ms 兜底也检查代次
+                            vid.removeEventListener('loadeddata', _onLoaded);
+                            vid.removeEventListener('error', _onLoadError);
+                            return;
+                        }
                         vid.removeEventListener('loadeddata', _onLoaded);
                         vid.removeEventListener('error', _onLoadError);
                         if (vid.readyState >= 2) {
@@ -5787,6 +5836,7 @@
         switchMode('video');
         refreshRandomSeedValue();
         updateSeedModeUI();
+        initPresetChips();
         } catch(e) { console.error('[INIT] _onDomReady error:', e); }
         fetch(`${BASE}/api/app-info`)
             .then(r => r.json())
@@ -5801,6 +5851,43 @@
         document.addEventListener('DOMContentLoaded', _onDomReady);
     } else {
         _onDomReady();
+    }
+
+    /**
+     * 预设芯片(用于帧率/时长等参数)点击与高亮同步
+     * - 点击芯片 → 写入 input.value + 触发 change 事件(让监听者感知)
+     * - 监听 input 的 input 事件 → 反向同步高亮(用户手输时自动清掉芯片高亮)
+     */
+    function initPresetChips() {
+        document.querySelectorAll('.preset-chip-row').forEach(row => {
+            const targetId = row.dataset.target;
+            const input = document.getElementById(targetId);
+            if (!input) return;
+            // 初始高亮同步
+            syncChipsActive(row, input);
+            // 用户手输时反向同步
+            input.addEventListener('input', () => syncChipsActive(row, input));
+            // 芯片点击 → 写入值
+            row.querySelectorAll('.preset-chip').forEach(chip => {
+                chip.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const v = chip.dataset.value;
+                    if (v == null) return;
+                    if (String(input.value) !== v) {
+                        input.value = v;
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    syncChipsActive(row, input);
+                });
+            });
+        });
+    }
+    function syncChipsActive(row, input) {
+        const cur = String(input.value);
+        row.querySelectorAll('.preset-chip').forEach(chip => {
+            chip.classList.toggle('is-active', chip.dataset.value === cur);
+        });
     }
 
 
@@ -6175,7 +6262,7 @@
     async function fetchHistory(isFirstLoad = false, silent = false) {
         if (isLoadingHistory) return;
         isLoadingHistory = true;
-        
+
         try {
             // 只加载最近一批历史，避免输出目录视频过多时拖慢缩略图初始化
             const res = await fetch(`${BASE}/api/system/history?page=1&limit=${HISTORY_PAGE_LIMIT}`);
@@ -6184,6 +6271,11 @@
                 return;
             }
             const data = await res.json();
+            // ★ 列表刷新 = 文件可能新增/覆盖,清掉所有 per-file cache buster,
+            //   下次点击历史卡会拿到新 v= 拿到最新文件(防止浏览器拿旧缓存挡掉)
+            if (typeof window.__invalidateAllFileBusters === 'function') {
+                window.__invalidateAllFileBusters();
+            }
 
             const validHistory = (data.history || []).filter(item => {
                 if (!item || !item.filename) return false;

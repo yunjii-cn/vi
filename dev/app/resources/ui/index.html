@@ -417,11 +417,31 @@
             <div class="flex-row">
                 <div class="flex-1">
                     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;"><label data-i18n="fpsLabel" style="margin-bottom:0;">帧率 (FPS)</label><span id="vid-fps-rec" style="display:none;font-size:10px;color:var(--accent);font-weight:600;"></span></div>
-                    <input type="number" id="vid-fps" value="24" min="1" max="120" step="1" list="fps-options">
+                    <input type="number" id="vid-fps" value="24" min="1" max="120" step="1">
+                    <div class="preset-chip-row" data-target="vid-fps" role="group" aria-label="帧率预设">
+                        <button type="button" class="preset-chip" data-value="8">8</button>
+                        <button type="button" class="preset-chip" data-value="12">12</button>
+                        <button type="button" class="preset-chip" data-value="16">16</button>
+                        <button type="button" class="preset-chip is-active" data-value="24">24</button>
+                        <button type="button" class="preset-chip" data-value="25">25</button>
+                        <button type="button" class="preset-chip" data-value="30">30</button>
+                        <button type="button" class="preset-chip" data-value="48">48</button>
+                        <button type="button" class="preset-chip" data-value="60">60</button>
+                    </div>
                 </div>
                 <div class="flex-1">
                     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;"><label data-i18n="durationLabel" style="margin-bottom:0;">时长 (秒)</label><span id="vid-duration-rec" style="display:none;font-size:10px;color:var(--accent);font-weight:600;"></span></div>
                     <input type="number" id="vid-duration" value="5" min="1" step="1">
+                    <div class="preset-chip-row" data-target="vid-duration" role="group" aria-label="时长预设">
+                        <button type="button" class="preset-chip" data-value="2">2s</button>
+                        <button type="button" class="preset-chip" data-value="3">3s</button>
+                        <button type="button" class="preset-chip is-active" data-value="5">5s</button>
+                        <button type="button" class="preset-chip" data-value="8">8s</button>
+                        <button type="button" class="preset-chip" data-value="10">10s</button>
+                        <button type="button" class="preset-chip" data-value="15">15s</button>
+                        <button type="button" class="preset-chip" data-value="20">20s</button>
+                        <button type="button" class="preset-chip" data-value="30">30s</button>
+                    </div>
                     <div id="vid-duration-warn" style="font-size:10px; margin-top:2px; line-height:1.3; color:var(--text-dim);"></div>
                 </div>
             </div>
@@ -538,11 +558,29 @@
             <div class="flex-row" style="margin-top: 12px;">
                 <div class="flex-1">
                     <label data-i18n="fpsLabel" style="margin-bottom:0;">帧率 (FPS)</label>
-                    <input type="number" id="motion-fps" value="24" min="1" max="120" step="1" list="fps-options">
+                    <input type="number" id="motion-fps" value="24" min="1" max="120" step="1">
+                    <div class="preset-chip-row" data-target="motion-fps" role="group" aria-label="帧率预设">
+                        <button type="button" class="preset-chip" data-value="8">8</button>
+                        <button type="button" class="preset-chip" data-value="12">12</button>
+                        <button type="button" class="preset-chip" data-value="16">16</button>
+                        <button type="button" class="preset-chip is-active" data-value="24">24</button>
+                        <button type="button" class="preset-chip" data-value="25">25</button>
+                        <button type="button" class="preset-chip" data-value="30">30</button>
+                        <button type="button" class="preset-chip" data-value="48">48</button>
+                        <button type="button" class="preset-chip" data-value="60">60</button>
+                    </div>
                 </div>
                 <div class="flex-1">
                     <label data-i18n="durationLabel" style="margin-bottom:0;">时长 (秒)</label>
                     <input type="number" id="motion-duration" value="5" min="1" step="1">
+                    <div class="preset-chip-row" data-target="motion-duration" role="group" aria-label="时长预设">
+                        <button type="button" class="preset-chip" data-value="2">2s</button>
+                        <button type="button" class="preset-chip" data-value="3">3s</button>
+                        <button type="button" class="preset-chip is-active" data-value="5">5s</button>
+                        <button type="button" class="preset-chip" data-value="8">8s</button>
+                        <button type="button" class="preset-chip" data-value="10">10s</button>
+                        <button type="button" class="preset-chip" data-value="15">15s</button>
+                    </div>
                 </div>
             </div>
 
