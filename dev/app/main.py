@@ -53,6 +53,17 @@ try:
 except ImportError:
     _DBG = None
 
+# ★ 2026-06-09:从 launcher 复用单实例杀进程逻辑
+# - dev 模式 (python dev/app/main.py) 下,launcher.py 不会被自动执行
+#   所以在 main.py 入口处主动调用 _kill_old_instances(),杀掉旧的同名进程
+# - EXE 模式 (PyInstaller 打包后) 下,launcher.py 是入口点,会在它自己的 __main__ 块里调用
+try:
+    from launcher import _kill_old_instances
+except Exception:
+    # launcher 不在路径中(例如被其他脚本间接启动),静默忽略
+    def _kill_old_instances():
+        return None
+
 _IS_FROZEN = sys.platform == 'win32' and getattr(sys, 'frozen', False)
 _EXE_DIR = os.path.dirname(sys.executable) if _IS_FROZEN else os.path.dirname(os.path.abspath(__file__))
 
@@ -778,7 +789,7 @@ from PyQt6.QtWidgets import (
     QButtonGroup, QAbstractButton, QHeaderView,
 )
 from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal, QTimer, QRectF, pyqtProperty, QProcess, QPropertyAnimation, QUrl
-from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QLinearGradient, QPen, QPalette, QDesktopServices
+from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QLinearGradient, QPen, QPalette, QDesktopServices, QCursor
 from PyQt6.QtSvg import QSvgRenderer
 
 
@@ -964,8 +975,8 @@ QMenu::item:disabled {
     color: #888888;
     background: transparent;
 }
-QMenu::item:hover {
-    background-color: #CC0000;     /* 鼠标经过:深红高亮 */
+QMenu::item:selected {
+    background-color: #CC0000;     /* 鼠标经过:深红高亮(Qt用:selected而非:hover) */
     color: #FFFFFF;
 }
 QMenu::item:pressed {
@@ -10685,8 +10696,8 @@ class MainWindow(QMainWindow):
                     color: #888888;
                     background: transparent;
                 }
-                QMenu::item:hover {
-                    background-color: #CC0000;     /* 鼠标经过:深红高亮 */
+                QMenu::item:selected {
+                    background-color: #CC0000;     /* 鼠标经过:深红高亮(Qt用:selected而非:hover) */
                     color: #FFFFFF;
                 }
                 QMenu::item:pressed {
@@ -10725,8 +10736,10 @@ class MainWindow(QMainWindow):
             quit_action = tray_menu.addAction("❌ 退出")
             quit_action.triggered.connect(self._quit_app)
 
-            self.tray.setContextMenu(tray_menu)
             self.tray.activated.connect(self._on_tray_activated)
+            self._tray_menu = tray_menu   # ★ 保存引用,供 _on_tray_activated 手动弹出
+            # ★ 不使用 setContextMenu()! Windows 原生菜单不支持 QSS 样式
+            #    改为在 activated 信号中手动 popup(), 让 Qt 渲染菜单,QSS 才能生效
             self.tray.show()
 
             # ★ 2026-06-08:服务状态变化时刷新托盘提示
@@ -10743,9 +10756,15 @@ class MainWindow(QMainWindow):
             pass
 
     def _on_tray_activated(self, reason):
-        """★ 2026-06-08:托盘点击行为 - 双击显示窗口,单击也显示(更友好)"""
+        """★ 2026-06-08:托盘点击行为 - 右键弹出自定义菜单,双击/单击显示窗口"""
         try:
-            if reason in (QSystemTrayIcon.ActivationReason.DoubleClick,
+            if reason == QSystemTrayIcon.ActivationReason.Context:
+                # ★ 右键:手动 popup Qt 菜单,QSS 样式才能生效(setContextMenu 用的是原生菜单,不支持QSS)
+                menu = getattr(self, '_tray_menu', None)
+                if menu:
+                    # 在鼠标位置弹出菜单
+                    menu.exec(QCursor.pos())
+            elif reason in (QSystemTrayIcon.ActivationReason.DoubleClick,
                           QSystemTrayIcon.ActivationReason.Trigger):
                 self._tray_show_window()
         except Exception:
@@ -15181,6 +15200,17 @@ def main():
 
 
 if __name__ == "__main__":
+    # ★ 2026-06-09:dev 模式下,杀掉所有旧的 main.py / EXE 同名实例
+    # EXE 模式下 launcher.py 已经处理过,这里再调一次是幂等的(空操作)
+    try:
+        _kill_old_instances()
+    except Exception as _e:
+        try:
+            if _DEBUG_MODE:
+                print(f"[MAIN] _kill_old_instances 失败: {_e}")
+        except Exception:
+            pass
+
     _seh_crash_code = -1073741819
     _max_retries = 2
     for _attempt in range(_max_retries + 1):
