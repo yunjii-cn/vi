@@ -169,7 +169,7 @@ async def video_thumbnail(path: str):
         return StarletteResponse(
             content=encoded.tobytes(),
             media_type="image/jpeg",
-            headers={"Cache-Control": "no-cache"},
+            headers={"Cache-Control": "public, max-age=86400", "ETag": f'"{hash(str(video_path) + str(selected.shape))}"'},
         )
     except HTTPException:
         raise

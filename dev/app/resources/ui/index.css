@@ -506,6 +506,9 @@
             overflow-y: auto;
             min-height: 110px;   /* always show at least one row */
             padding-right: 4px;
+            /* ★ 惯性滚动 + GPU加速,240张卡片滚动更流畅 */
+            -webkit-overflow-scrolling: touch;
+            will-change: scroll-position;
         }
         #history-container {
             display: grid;
@@ -527,13 +530,15 @@
             width: 100%; max-width: 240px;
             background: #1A1A1E; border-radius: 7px;
             overflow: hidden; border: 1px solid var(--border);
-            cursor: pointer; position: relative; transition: border-color 0.15s, transform 0.15s;
+            cursor: pointer; position: relative; transition: border-color 0.15s;
             display: flex; flex-direction: column;
-            /* ★ 2026-06-09: 离屏卡片不参与渲染/绘制,240 张卡不再压垮 GPU */
+            /* ★ 离屏卡片不参与渲染/绘制,240 张卡不再压垮 GPU */
             content-visibility: auto;
             contain-intrinsic-size: 0 220px;
+            /* ★ GPU层提升,hover动画不触发重排 */
+            will-change: border-color;
         }
-        .history-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+        .history-card:hover { border-color: var(--accent); }
         .history-card.is-active { border-color: var(--accent); background: rgba(63,81,181,0.12); }
         .history-card .grid-thumb-wrap {
             width: 100%; aspect-ratio: 1 / 1; position: relative; overflow: hidden;
@@ -846,12 +851,13 @@
             width: 100%; display: flex; flex-direction: row; align-items: flex-start;
             background: #1A1A1E; border-radius: 7px;
             border: 1px solid var(--border); cursor: pointer; position: relative;
-            transition: border-color 0.15s, transform 0.15s; gap: 0;
-            /* ★ 2026-06-09: 列表模式离屏卡片跳过渲染 */
+            transition: border-color 0.15s; gap: 0;
+            /* ★ 列表模式离屏卡片跳过渲染 */
             content-visibility: auto;
             contain-intrinsic-size: 0 120px;
+            will-change: border-color;
         }
-        .history-card-list:hover { border-color: var(--accent); transform: translateY(-1px); }
+        .history-card-list:hover { border-color: var(--accent); }
         .history-card-list.is-active { border-color: var(--accent); background: rgba(63,81,181,0.12); }
         .history-card-list .list-thumb {
             width: 120px; min-width: 120px; height: 120px;

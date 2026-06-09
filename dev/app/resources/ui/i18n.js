@@ -246,7 +246,7 @@
             mainResume: '恢复',
             mainCancel: '取消',
             waitingTask: '等待分配渲染任务...',
-            libHistory: '历史资产 / ASSETS',
+            libHistory: '我的作品 / MY WORKS',
             libLog: '系统日志 / LOGS',
             refresh: '刷新',
             logReady: '> LTX-2 Studio Ready. Expecting commands...',

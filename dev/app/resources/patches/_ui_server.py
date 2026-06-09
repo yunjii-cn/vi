@@ -4,7 +4,7 @@ from fastapi.responses import Response, StreamingResponse
 import uvicorn
 
 APP_NAME = '云集智能视频创意站'
-VERSION = '2026.06.09.0855'
+VERSION = '2026.06.09.1545'
 
 _ui_log_path = 'E:\\软件开发\\云集智能视频创意站\\dev\\temp\\logs\\ui_server.log'
 os.makedirs(os.path.dirname(_ui_log_path), exist_ok=True)
@@ -24,9 +24,11 @@ ui_dir = 'E:\\软件开发\\云集智能视频创意站\\dev\\app\\resources\\ui
 BACKEND_PORT = 6000
 FRONTEND_PORT = 7000
 BACKEND_BASE = f"http://127.0.0.1:{BACKEND_PORT}"
+outputs_dir = 'E:\\软件开发\\云集智能视频创意站\\dev\\data\\outputs'
 app = FastAPI()
 NC = {"Cache-Control": "no-store, max-age=0"}
 _ui_log(f"Routes configured, ui_dir={ui_dir}")
+_ui_log(f"outputs_dir={outputs_dir}")
 
 @app.get("/")
 async def index():
@@ -76,8 +78,10 @@ async def app_icon():
 @app.api_route("/outputs/{path:path}", methods=["GET", "HEAD"])
 async def proxy_outputs(request: Request, path: str):
     outputs_dir = 'E:\\软件开发\\云集智能视频创意站\\dev\\data\\outputs'
+    _ui_log(f"outputs_dir={outputs_dir}")
     file_path = os.path.join(outputs_dir, path)
     if not os.path.exists(file_path) or os.path.isdir(file_path):
+        _ui_log(f"OUTPUT 404: outputs_dir={outputs_dir} path={path}")
         return Response(content=b"Not found", status_code=404)
     import mimetypes as _mt
     import re as _re
@@ -243,6 +247,23 @@ async def proxy_health():
             return Response(content=resp.content, status_code=resp.status_code, media_type="application/json")
     except (httpx.ConnectError, httpx.TimeoutException):
         return Response(content=b'{"status":"offline","models_loaded":false}', status_code=503, media_type="application/json")
+
+# ★ 2026-06-09: ui_dir 下"有扩展名"的静态文件兜底(asset-manager.js 等拆分文件)
+#   - 必须放在所有 @app.api_route 之后,FastAPI 按声明顺序优先匹配
+#   - 不带扩展名的路径视为非法(动态 API 已被上面路由处理,落到这里是 404)
+#   - 这样未来新增 ui/ 下 .js/.css/.png/.svg 文件都不用改 main.py 模板
+@app.get("/{file_path:path}", include_in_schema=False)
+async def ui_static_catchall(file_path: str):
+    if not os.path.splitext(file_path)[1]:                       # 无扩展名 → 不归我管
+        return Response(b"Not found", status_code=404, media_type="text/plain")
+    full = os.path.join(ui_dir, file_path.replace("/", os.sep))
+    if not os.path.isfile(full):                                  # 路径穿越防护 + 404
+        return Response(b"Not found", status_code=404, media_type="text/plain")
+    import mimetypes as _mt
+    mt, _ = _mt.guess_type(full)
+    if mt is None:
+        mt = "application/octet-stream"
+    return _safe_file(full, mt, NC)
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)

@@ -2958,7 +2958,7 @@
         return '';
     }
 
-    window.saveSelectedModelCheckpoint = function() {
+    function saveSelectedModelCheckpoint() {                                  // 2026-06-09: 改 function 声明 + window 暴露,修复 hoisting(同 IIFE 内更早位置 onVidModelChange 内调用)
         const select = document.getElementById('model-checkpoint-select');
         const status = document.getElementById('model-checkpoint-status');
         const value = (select?.value || '').trim();
@@ -2975,7 +2975,8 @@
                 status.style.color = 'var(--text-dim)';
             }, 2500);
         }
-    };
+    }
+    window.saveSelectedModelCheckpoint = saveSelectedModelCheckpoint;
 
     window.loadModelCheckpoints = async function() {
         const select = document.getElementById('model-checkpoint-select');
@@ -3846,7 +3847,7 @@
         }
     }
 
-    window.onUpscaleRatioChange = function() {
+    function onUpscaleRatioChange() {                                          // 2026-06-09: 改 function 声明 + window 暴露,修复 hoisting
         const ratio = document.getElementById('upscale-ratio')?.value || 'original';
         const qualitySec = document.getElementById('upscale-quality-section');
         const scaleSec = document.getElementById('upscale-scale-section');
@@ -3871,9 +3872,10 @@
             if (resizeModeSec) resizeModeSec.style.display = 'block';
             onUpscaleResizeModeChange();
         }
-    };
+    }
+    window.onUpscaleRatioChange = onUpscaleRatioChange;
 
-    window.onUpscaleQualityChange = function() {
+    function onUpscaleQualityChange() {                                        // 同上
         const ratio = document.getElementById('upscale-ratio')?.value || 'original';
         const quality = document.getElementById('upscale-quality')?.value || '1080p';
         const preview = document.getElementById('upscale-resolution-preview');
@@ -3888,9 +3890,10 @@
                 preview.textContent = '';
             }
         }
-    };
+    }
+    window.onUpscaleQualityChange = onUpscaleQualityChange;
 
-    window.onUpscaleResizeModeChange = function() {
+    function onUpscaleResizeModeChange() {                                     // 同上
         const preview = document.getElementById('upscale-resize-preview');
         if (!preview) return;
         const mode = document.getElementById('upscale-resize-mode')?.value || 'fit';
@@ -3900,7 +3903,8 @@
             'stretch': '↔️ 拉伸：不保持比例，直接拉伸到目标宽高',
         };
         preview.textContent = modeDesc[mode] || '';
-    };
+    }
+    window.onUpscaleResizeModeChange = onUpscaleResizeModeChange;
 
     async function handleUpscaleVideoUpload(file) {
         if (!file) return;
@@ -4487,7 +4491,7 @@
         return true;
     }
 
-    window.updateSeedModeUI = function() {
+    function updateSeedModeUI() {                                              // 2026-06-09: 改 function 声明 + window 暴露,修复 hoisting
         const input = document.getElementById('seed-value');
         const fixed = getSeedMode() === 'fixed';
         const shell = input ? input.closest('.seed-input-shell') : null;
@@ -4501,7 +4505,8 @@
             input.title = fixed ? _t('seedFixed') : _t('seedRandom');
         }
         if (shell) shell.classList.toggle('is-random', !fixed);
-    };
+    }
+    window.updateSeedModeUI = updateSeedModeUI;
 
     const replayStore = new Map();
     let replayStoreSeq = 0;
@@ -5666,7 +5671,8 @@
             if (globalDir && globalDir !== "") {
                 url = `${BASE}/api/system/file?path=${encodeURIComponent(globalDir + '/' + fileOrPath)}&v=${buster}`;
             } else {
-                url = `${BASE}/outputs/${fileOrPath}?v=${buster}`;
+                // ★ 对 filename 做 URL 编码,避免含空格/中文等特殊字符的文件名导致 404
+                url = `${BASE}/outputs/${encodeURIComponent(fileOrPath)}?v=${buster}`;
             }
         }
 
@@ -5769,12 +5775,23 @@
                 if (_isPreviewStale(myReqId)) return;  // ★ 过期短路
                 vid.removeEventListener('error', _onVideoError);
                 vid.addEventListener('error', _onVideoError);
+                vid.preload = 'auto';
                 vid.src = videoUrl;
                 try { vid.load(); } catch(_) {}
-                try {
-                    const p = vid.play();
-                    if (p && typeof p.catch === 'function') p.catch(() => {});
-                } catch(_) {}
+                // ★ 等 canplay 事件再 play,避免 readyState 不足导致播放失败
+                const _onCanPlay = () => {
+                    vid.removeEventListener('canplay', _onCanPlay);
+                    if (_isPreviewStale(myReqId)) return;
+                    try {
+                        const p = vid.play();
+                        if (p && typeof p.catch === 'function') p.catch(() => {});
+                    } catch(_) {}
+                };
+                if (vid.readyState >= 3) {
+                    _onCanPlay();
+                } else {
+                    vid.addEventListener('canplay', _onCanPlay);
+                }
             }
 
             function _tryPlayVideo(videoUrl) {
@@ -5960,7 +5977,7 @@
     let currentHistoryPage = 1;
     let isLoadingHistory = false;
     const HISTORY_PAGE_LIMIT = 240;
-    const HISTORY_THUMB_CONCURRENCY = 5;  // ★ 2026-06-09: 10 → 5,用户明确要求"每次只加载5个"
+    const HISTORY_THUMB_CONCURRENCY = 8;  // ★ 图片缩略图并发度,后端API返回图片无需前端解码
     let _historyListFingerprint = '';
     let _historyHasRendered = false;
     const _historyRenderedKeys = new Set();
@@ -6113,9 +6130,14 @@
     function renderHistoryCardHtml(item, globalDir) {
         const url = historyMediaUrl(item, globalDir);
         const thumbUrl = historyThumbUrl(item, globalDir);
+        // safeFilename: JS字符串转义,仅用于 onclick 内的 JS 字符串字面量
         const safeFilename = item.filename.replace(/'/g, "\\'").replace(/"/g, '\\"');
-        const key = escapeHtmlAttr(historyItemKey(item));
         const safeGlobalDir = (globalDir || '').replace(/'/g, "\\'").replace(/"/g, '\\"');
+        // htmlFilename/htmlFullpath/htmlGlobalDir: HTML属性转义,用于 data-* 属性
+        const htmlFilename = escapeHtmlAttr(item.filename);
+        const htmlFullpath = escapeHtmlAttr(item.fullpath || '');
+        const htmlGlobalDir = escapeHtmlAttr(globalDir || '');
+        const key = escapeHtmlAttr(historyItemKey(item));
         const replayId = item.replay_available && item.replay ? storeReplayRecord(item.replay) : '';
         const typeBadge = item.type === 'video' ? '🎬 VID' : item.type === 'audio' ? '♪ AUD' : '🎨 IMG';
         const info = extractReplayInfo(item);
@@ -6238,7 +6260,7 @@
                     <span class="lpl-key">文件名</span><span class="lpl-val lpl-filename">${escapeHtmlAttr(item.filename)}</span>
                 </div>`}`;
 
-            return `<div class="history-card-list" data-history-key="${key}" data-filename="${safeFilename}" data-type="${item.type}" data-replayid="${replayId}" data-globaldir="${safeGlobalDir}" data-mtime="${escapeHtmlAttr(String(item.mtime || ''))}" data-size="${escapeHtmlAttr(String(item.size || ''))}">
+            return `<div class="history-card-list" data-history-key="${key}" data-filename="${htmlFilename}" data-fullpath="${htmlFullpath}" data-type="${item.type}" data-replayid="${replayId}" data-globaldir="${htmlGlobalDir}" data-mtime="${escapeHtmlAttr(String(item.mtime || ''))}" data-size="${escapeHtmlAttr(String(item.size || ''))}">
                         <div class="list-thumb">
                             <div class="history-type-badge">${typeBadge}</div>
                             <button class="history-delete-btn" onclick="event.stopPropagation(); deleteHistoryItem('${safeFilename}', '${item.type}', this)">✕</button>
@@ -6293,7 +6315,7 @@
                 <div class="param-row">${gridTags.join('')}</div>
            </div>`;
 
-        return `<div class="history-card" data-history-key="${key}" data-filename="${safeFilename}" data-type="${item.type}" data-replayid="${replayId}" data-globaldir="${safeGlobalDir}">
+        return `<div class="history-card" data-history-key="${key}" data-filename="${htmlFilename}" data-fullpath="${htmlFullpath}" data-type="${item.type}" data-replayid="${replayId}" data-globaldir="${htmlGlobalDir}">
                     <div class="grid-thumb-wrap">
                         <div class="history-type-badge">${typeBadge}</div>
                         <button class="history-delete-btn" onclick="event.stopPropagation(); deleteHistoryItem('${safeFilename}', '${item.type}', this)">✕</button>
@@ -6523,7 +6545,7 @@
         if (globalDir) {
             url = `${BASE}/api/system/file?path=${encodeURIComponent(globalDir + '/' + filename)}`;
         } else {
-            url = `${BASE}/outputs/${filename}`;
+            url = `${BASE}/outputs/${encodeURIComponent(filename)}`;
         }
         const a = document.createElement('a');
         a.href = url;
@@ -6734,7 +6756,7 @@
 
                 if (!medias.length) break;
                 await Promise.all(medias.map((media) => loadOneHistoryThumb(media, token)));
-                await new Promise((resolve) => setTimeout(resolve, 120));
+                await new Promise((resolve) => setTimeout(resolve, 50));
             }
         } finally {
             historyThumbLoaderBusy = false;
@@ -6852,9 +6874,11 @@
         if (!withPrefetch) return;
         const fname = card.dataset.filename;
         const type = card.dataset.type;
+        const fullpath = card.dataset.fullpath || '';
         const globalDir = card.dataset.globaldir || '';
         if (type === 'video' && fname) {
-            _preloadVideoFile({ filename: fname, type: 'video', fullpath: '' }, globalDir);
+            // ★ 传入 fullpath,确保预下载 URL 与 displayOutput 构建的 URL 一致,缓存才能命中
+            _preloadVideoFile({ filename: fname, type: 'video', fullpath: fullpath }, globalDir);
         }
     }
 
@@ -6914,10 +6938,19 @@
         console.log("[DEBUG][displayHistoryOutput] file:", file, "type:", type, "replayId:", replayId);
         const resImg = document.getElementById('res-img');
         const videoWrapper = document.getElementById('video-wrapper');
+        const audioWrapper = document.getElementById('audio-wrapper');
+        const loader = document.getElementById('loading-txt');
         if (resImg) resImg.style.display = 'none';
         if (videoWrapper) videoWrapper.style.display = 'none';
-        const audioWrapper = document.getElementById('audio-wrapper');
         if (audioWrapper) audioWrapper.style.display = 'none';
+        // ★ 立即显示加载提示,避免用户看到空白
+        if (loader) {
+            loader.style.display = 'flex';
+            loader.style.alignItems = 'center';
+            loader.style.justifyContent = 'center';
+            loader.style.gap = '8px';
+            loader.innerHTML = '<span style="color:var(--text-dim);font-size:12px;">⏳ 加载中...</span>';
+        }
         displayOutput(file, type, { replayId });
     }
     
@@ -6930,8 +6963,12 @@
         document.querySelectorAll('.history-card.is-active, .history-card-list.is-active').forEach(c => c.classList.remove('is-active'));
         card.classList.add('is-active');
         const filename = card.dataset.filename;
+        const fullpath = card.dataset.fullpath || '';
         const type = card.dataset.type;
         const replayId = card.dataset.replayid || '';
+        // ★ 优先使用 fullpath(完整绝对路径),避免依赖 global-out-dir 元素
+        //   fullpath 不存在时回退到 filename,由 displayOutput 自行拼接路径
+        const fileToDisplay = fullpath || filename;
         // ★ 2026-06-09: 用户开始做选择,立刻让所有后台"还在飞的"工作退出,
         //              腾出带宽/线程给新点击,避免 A→B→C 时旧加载还占着资源导致卡顿
         //              1) 缩略图懒加载的 token 自增,旧的 loadVisibleImages 循环会退出
@@ -6940,8 +6977,8 @@
         if (typeof window.__cancelAllVideoPrefetch === 'function') {
             window.__cancelAllVideoPrefetch();
         }
-        console.log("[DEBUG][card-click] Click on history card:", filename, type, replayId);
-        displayHistoryOutput(filename, type, replayId);
+        console.log("[DEBUG][card-click] Click on history card:", fileToDisplay, type, replayId);
+        displayHistoryOutput(fileToDisplay, type, replayId);
     });
     
     function _onDomReady2() {

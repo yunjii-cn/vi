@@ -10,8 +10,7 @@
     <style>
         #yunji-login-veil {
             position: fixed; inset: 0; z-index: 999999;
-            background: rgba(13, 13, 13, 0.94);                 /* 同 splash #0D0D0D */
-            backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+            background: #0D0D0D;                                   /* 不透明纯色,上下灰度 100% 一致 */
             display: flex; align-items: center; justify-content: center; flex-direction: column;
             overflow: hidden;
             color: #e5e7eb;
@@ -81,18 +80,23 @@
             animation: yunji-veil-logo 3.2s ease-in-out infinite;
         }
 
-        /* 等待转圈(替代 splash 的进度条) — 40px 细环 + 红渐变,慢速正转 */
+        /* 等待转圈 — 8 粒子绕圈(每 45° 一颗,opacity 渐变,整体旋转) */
         #yunji-login-veil .veil-progress-ring,
         #yunji-login-veil .veil-spinner {
-            width: 40px; height: 40px;
-            border: 2px solid transparent;
-            border-top-color: #FF0000;
-            border-right-color: rgba(255, 112, 67, 0.7);
-            border-radius: 50%;
-            animation: yunji-veil-spin 1.4s linear infinite;
-            filter: drop-shadow(0 0 4px rgba(255, 0, 0, 0.35));
+            width: 48px; height: 48px;
+            overflow: visible;
+        }
+        #yunji-login-veil .veil-progress-ring .particle,
+        #yunji-login-veil .veil-spinner .particle {
+            fill: #ffffff;
         }
         @keyframes yunji-veil-spin { to { transform: rotate(360deg); } }
+        /* 旋转挂在 g.veil-ring 上(整组粒子一起转) */
+        #yunji-login-veil .veil-progress-ring .veil-ring,
+        #yunji-login-veil .veil-spinner .veil-ring {
+            transform-origin: 24px 24px;
+            animation: yunji-veil-spin 1.2s linear infinite;
+        }
 
         #yunji-login-veil.hide { opacity: 0; pointer-events: none; }
     </style>
@@ -105,7 +109,25 @@
         <img src="/app-icon.png" class="veil-logo" alt="logo" onerror="this.outerHTML='<div class=&quot;veil-logo-fallback&quot;>云</div>'">
         <div class="veil-name">云集智能视频创意站</div>
         <div class="veil-en">LTX-2.3 Cinematic Workstation</div>
-        <div class="veil-progress-ring"></div>
+        <!-- ★ 2026-06-09: 8 粒子绕圈 SVG spinner(粒子带荧光,整组旋转) -->
+        <svg class="veil-progress-ring" viewBox="0 0 48 48" width="48" height="48" aria-hidden="true">
+            <defs>
+                <filter id="veil-glow" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur stdDeviation="1.2" result="b"/>
+                    <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+            </defs>
+            <g class="veil-ring" filter="url(#veil-glow)">
+                <circle class="particle" cx="24" cy="6"  r="2.4" opacity="1"/>
+                <circle class="particle" cx="24" cy="6"  r="2.4" opacity="0.875" transform="rotate(45 24 24)"/>
+                <circle class="particle" cx="24" cy="6"  r="2.4" opacity="0.75"  transform="rotate(90 24 24)"/>
+                <circle class="particle" cx="24" cy="6"  r="2.4" opacity="0.625" transform="rotate(135 24 24)"/>
+                <circle class="particle" cx="24" cy="6"  r="2.4" opacity="0.5"   transform="rotate(180 24 24)"/>
+                <circle class="particle" cx="24" cy="6"  r="2.4" opacity="0.375" transform="rotate(225 24 24)"/>
+                <circle class="particle" cx="24" cy="6"  r="2.4" opacity="0.25"  transform="rotate(270 24 24)"/>
+                <circle class="particle" cx="24" cy="6"  r="2.4" opacity="0.125" transform="rotate(315 24 24)"/>
+            </g>
+        </svg>
         <div class="veil-sub">正在准备登录环境…</div>
     </div>
 </div>
@@ -917,6 +939,7 @@
             </div>
             <input type="file" id="upscale-image-input" accept="image/*" style="display:none" onchange="handleUpscaleImageUpload(this.files[0])">
             <input type="hidden" id="upscale-image-path">
+            <input type="hidden" id="global-out-dir">
         </div>
 
         <div class="setting-group" style="margin-top:12px;">
@@ -1085,7 +1108,7 @@
             <div id="loading-txt" data-i18n="waitingTask">等待分配渲染任务...</div>
             <img id="res-img" src="">
             <div id="video-wrapper" style="width:100%; height:100%; display:none; max-height:100%; align-items:center; justify-content:center;">
-                <video id="res-video" controls autoplay loop playsinline></video>
+                <video id="res-video" controls autoplay loop playsinline preload="auto"></video>
             </div>
             <div id="audio-wrapper">
                 <div class="audio-preview-art" id="audio-preview-art" role="button" tabindex="0">
@@ -1109,7 +1132,7 @@
     <section class="library" id="library-section">
         <div style="display: flex; justify-content: space-between; margin-bottom: 15px; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 10px;">
             <div style="display: flex; gap: 20px;">
-                <span id="tab-history" style="font-size: 11px; font-weight: 800; color: var(--accent); cursor: pointer; border-bottom: 2px solid var(--accent); padding-bottom: 11px; margin-bottom: -11px;" onclick="switchLibTab('history')" data-i18n="libHistory">历史资产 / ASSETS</span>
+                <span id="tab-history" style="font-size: 11px; font-weight: 800; color: var(--accent); cursor: pointer; border-bottom: 2px solid var(--accent); padding-bottom: 11px; margin-bottom: -11px;" onclick="switchLibTab('history')" data-i18n="libHistory">我的作品 / MY WORKS</span>
                 <span id="tab-log" style="font-size: 11px; font-weight: 800; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; padding-bottom: 11px; margin-bottom: -11px;" onclick="switchLibTab('log')" data-i18n="libLog">系统日志 / LOGS</span>
             </div>
             <div style="display: flex; gap: 6px; align-items: center;">
