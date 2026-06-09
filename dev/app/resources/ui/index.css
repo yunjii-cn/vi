@@ -725,45 +725,25 @@
             background: rgba(255,255,255,0.04);
         }
 
-        /* 预设芯片行(用于帧率/时长等参数) */
-        .preset-chip-row {
+        /* 预设下拉(与 vid-quality/vid-ratio 同款) + 旁挂数字输入 */
+        .preset-select-row {
             display: flex;
-            flex-wrap: wrap;
-            gap: 3px;
-            margin-top: 5px;
+            gap: 4px;
+            align-items: stretch;
         }
-        .preset-chip {
-            flex: 1 1 auto;
-            min-width: 26px;
-            height: 22px;
-            padding: 0 5px;
-            background: rgba(255,255,255,0.04);
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            color: var(--text-dim);
-            font-size: 10.5px;
-            font-weight: 700;
-            font-family: inherit;
-            cursor: pointer;
-            transition: background 0.12s, color 0.12s, border-color 0.12s;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            -webkit-tap-highlight-color: transparent;
+        .preset-select-row select {
+            flex: 1.1;
+            height: 28px;
+            font-size: 12px;
+            padding: 0 6px;
+            box-sizing: border-box;
         }
-        .preset-chip:hover {
-            background: rgba(255,255,255,0.08);
-            color: var(--text-sub);
-            border-color: rgba(255,255,255,0.18);
-        }
-        .preset-chip.is-active {
-            background: var(--accent);
-            color: #fff;
-            border-color: var(--accent);
-        }
-        .preset-chip:focus-visible {
-            outline: 2px solid var(--accent);
-            outline-offset: 1px;
+        .preset-select-row input[type="number"] {
+            flex: 1;
+            height: 28px;
+            font-size: 12px;
+            padding: 0 6px;
+            box-sizing: border-box;
         }
         .seed-mode-option {
             margin: 0;

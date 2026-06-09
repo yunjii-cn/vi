@@ -307,7 +307,43 @@
         } else {
             injectUserInfoBox(user);
         }
+        // ★ 2026-06-09: 登录成功就开始在后台静默拉取历史资产列表,
+        //              等用户切到"历史"标签时,数据已经准备好,瞬间渲染不卡。
+        //              这里只做轻量预热(fetchHistory silent=true),不直接渲染 DOM,
+        //              把主动权留给用户,避免登录一进来就弹一堆图。
+        if (typeof window.__preloadHistoryDuringLogin === 'function') {
+            try { window.__preloadHistoryDuringLogin(); } catch (e) { console.warn('[login-preload] failed:', e); }
+        }
     }
+
+    // 登录后预热:拉取历史列表(后端会做缓存)+ 让前 5 个视频卡片进入预下载队列
+    // 用户后续切到"历史"标签时,首屏可见的视频文件大概率已经在 HTTP 缓存里,秒开
+    function __preloadHistoryDuringLogin() {
+        const run = async () => {
+            try {
+                const res = await fetch(`${BASE}/api/system/history?page=1&limit=${HISTORY_PAGE_LIMIT || 240}`, { credentials: 'same-origin' });
+                if (!res.ok) return;
+                const data = await res.json();
+                const items = (data && data.history) ? data.history : [];
+                // 取前 5 个视频,后台静默预下载完整文件
+                items.slice(0, 5).forEach((item) => {
+                    if (item && item.type === 'video') {
+                        const fileKey = `video::${item.fullpath || item.filename}`;
+                        const buster = (typeof _getFileBuster === 'function') ? _getFileBuster(fileKey) : String(Date.now());
+                        const rawPath = item.fullpath || item.filename;
+                        const url = `${BASE}/api/system/file?path=${encodeURIComponent(rawPath)}&v=${buster}`;
+                        // 静默后台下载,失败不报错
+                        fetch(url, { method: 'GET', cache: 'force-cache', credentials: 'same-origin' })
+                            .then((r) => { try { r.body && r.body.cancel && r.body.cancel(); } catch (_) {} })
+                            .catch(() => {});
+                    }
+                });
+            } catch (_) { /* 静默失败 */ }
+        };
+        // 给主流程一点缓冲再开始,避免和登录跳转抢带宽
+        setTimeout(run, 800);
+    }
+    window.__preloadHistoryDuringLogin = __preloadHistoryDuringLogin;
 
     // 异步门控主流程
     (async function gate() {
@@ -5854,40 +5890,60 @@
     }
 
     /**
-     * 预设芯片(用于帧率/时长等参数)点击与高亮同步
-     * - 点击芯片 → 写入 input.value + 触发 change 事件(让监听者感知)
-     * - 监听 input 的 input 事件 → 反向同步高亮(用户手输时自动清掉芯片高亮)
+     * 预设下拉(帧率/时长)与数字输入双向联动
+     * - select 有预设值 + "自定义" 选项
+     * - input 是数字输入,始终可见,代表"真实值"
+     * - 联动规则:
+     *   ① select 选预设 → 写入 input.value
+     *   ② select 选"自定义" → 聚焦 input 不改值
+     *   ③ input 改值 → 如果新值在预设列表里,select 跟着切到对应项;否则切到"自定义"
+     * - 初始化:input.value 已是推荐值,select 同步;不在预设里则 select 显示"自定义"
+     * - 持久化:沿用现有 PERSIST_INPUTS 机制(已包含 vid-fps / vid-duration),无需额外改动
+     *   select 的值由 input 推导,不需要单独存
      */
     function initPresetChips() {
-        document.querySelectorAll('.preset-chip-row').forEach(row => {
-            const targetId = row.dataset.target;
-            const input = document.getElementById(targetId);
-            if (!input) return;
-            // 初始高亮同步
-            syncChipsActive(row, input);
-            // 用户手输时反向同步
-            input.addEventListener('input', () => syncChipsActive(row, input));
-            // 芯片点击 → 写入值
-            row.querySelectorAll('.preset-chip').forEach(chip => {
-                chip.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    const v = chip.dataset.value;
-                    if (v == null) return;
-                    if (String(input.value) !== v) {
-                        input.value = v;
-                        input.dispatchEvent(new Event('input', { bubbles: true }));
-                        input.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                    syncChipsActive(row, input);
-                });
+        // 一组配置: [inputId, selectId, presetValues]
+        const groups = [
+            { input: 'vid-fps',         select: 'vid-fps-select',         presets: ['8','12','16','24','25','30','48','60'] },
+            { input: 'vid-duration',    select: 'vid-duration-select',    presets: ['3','5','8','10','12','15','20','30'] },
+            { input: 'motion-fps',      select: 'motion-fps-select',      presets: ['8','12','16','24','25','30','48','60'] },
+            { input: 'motion-duration', select: 'motion-duration-select', presets: ['3','5','8','10','12','15','20','30'] },
+        ];
+        groups.forEach(({ input, select, presets }) => {
+            const inputEl = document.getElementById(input);
+            const selectEl = document.getElementById(select);
+            if (!inputEl || !selectEl) return;
+
+            // 1) 初始同步 select ↔ input
+            syncPresetSelect(inputEl, selectEl, presets);
+
+            // 2) select 改变 → 更新 input(选"自定义"则不更,聚焦 input)
+            selectEl.addEventListener('change', () => {
+                const v = selectEl.value;
+                if (v === '__custom__') {
+                    inputEl.focus();
+                    inputEl.select();
+                    return;
+                }
+                if (String(inputEl.value) !== v) {
+                    inputEl.value = v;
+                    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+                    inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+                }
             });
+
+            // 3) input 改变 → 反向同步 select(匹配预设或切到"自定义")
+            inputEl.addEventListener('input', () => syncPresetSelect(inputEl, selectEl, presets));
         });
     }
-    function syncChipsActive(row, input) {
-        const cur = String(input.value);
-        row.querySelectorAll('.preset-chip').forEach(chip => {
-            chip.classList.toggle('is-active', chip.dataset.value === cur);
-        });
+    function syncPresetSelect(inputEl, selectEl, presets) {
+        const cur = String(inputEl.value);
+        // 预设列表里能匹配上 → 选中那一项;否则切到"自定义"
+        if (presets.indexOf(cur) >= 0) {
+            selectEl.value = cur;
+        } else {
+            selectEl.value = '__custom__';
+        }
     }
 
 
@@ -5904,7 +5960,7 @@
     let currentHistoryPage = 1;
     let isLoadingHistory = false;
     const HISTORY_PAGE_LIMIT = 240;
-    const HISTORY_THUMB_CONCURRENCY = 10;
+    const HISTORY_THUMB_CONCURRENCY = 5;  // ★ 2026-06-09: 10 → 5,用户明确要求"每次只加载5个"
     let _historyListFingerprint = '';
     let _historyHasRendered = false;
     const _historyRenderedKeys = new Set();
@@ -6276,6 +6332,11 @@
             if (typeof window.__invalidateAllFileBusters === 'function') {
                 window.__invalidateAllFileBusters();
             }
+            // ★ 同步清空视频预下载缓存:旧预下载的 URL 带的是旧 buster,
+            //   不清的话下次 prefetch 会跳过本应重新预拉的文件
+            if (typeof window.__resetVideoPrefetchCache === 'function') {
+                window.__resetVideoPrefetchCache();
+            }
 
             const validHistory = (data.history || []).filter(item => {
                 if (!item || !item.filename) return false;
@@ -6349,6 +6410,16 @@
                     }
                     newItems.forEach((item) => _historyRenderedKeys.add(historyItemKey(item)));
                 }
+            }
+
+            // ★ 2026-06-09: 把新挂载的历史卡片挂到 IntersectionObserver 上,
+            //              进入视口才会触发缩略图懒加载 + 视频文件预下载
+            if (typeof window.__observeHistoryCard === 'function') {
+                Array.from(container.querySelectorAll('.history-card:not([data-observed]), .history-card-list:not([data-observed])'))
+                    .forEach((card) => {
+                        card.dataset.observed = '1';
+                        window.__observeHistoryCard(card);
+                    });
             }
 
             // 重新绑定loading card点击事件
@@ -6637,18 +6708,116 @@
         }
     }
 
-    // 监听history-wrapper的滚动事件来懒加载
+    // ★ 2026-06-09: 用 IntersectionObserver 替换原来的 scroll 节流监听
+    // 视频文件较大(5-50MB),点击后 <video> 还要走一遍网络才能开始播放。
+    // 这里在卡片进入视口(rootMargin 提前 300px)时,就后台 fetch 把完整视频文件
+    // 灌进 HTTP 缓存;用户真去点时,<video>.src=url 命中本地磁盘秒开。
+    // 同时仅触发进入视口的卡片缩略图,避免一上来 240 张全抢带宽。
+    const _videoPrefetchCtrlMap = new Map();   // filename -> AbortController
+    const _videoPrefetchedSet = new Set();     // 已经预下载过的 filename
+    function _cancelAllVideoPrefetch() {
+        for (const ctrl of _videoPrefetchCtrlMap.values()) {
+            try { ctrl.abort(); } catch (_) {}
+        }
+        _videoPrefetchCtrlMap.clear();
+    }
+    window.__cancelAllVideoPrefetch = _cancelAllVideoPrefetch;
+
+    // 清空"已预下载"记录:文件 buster 变更后,旧的预下载 URL 失效,
+    // 下次进入视口会重新预下载(用新的 buster)
+    function _resetVideoPrefetchCache() {
+        _cancelAllVideoPrefetch();
+        _videoPrefetchedSet.clear();
+    }
+    window.__resetVideoPrefetchCache = _resetVideoPrefetchCache;
+
+    function _preloadVideoFile(item, globalDir) {
+        if (!item || item.type !== 'video') return;
+        const fname = item.filename;
+        if (!fname || _videoPrefetchedSet.has(fname)) return;
+        // 已经有正在跑的就不再开新的
+        if (_videoPrefetchCtrlMap.has(fname)) return;
+
+        // 构造与 displayOutput 完全一致的 URL,确保缓存命中
+        const fileKey = `video::${globalDir ? globalDir + '/' + fname : fname}`;
+        const buster = (typeof _getFileBuster === 'function') ? _getFileBuster(fileKey) : String(Date.now());
+        const rawPath = item.fullpath || (globalDir ? globalDir + '/' + fname : fname);
+        const url = `${BASE}/api/system/file?path=${encodeURIComponent(rawPath)}&v=${buster}`;
+
+        const ctrl = new AbortController();
+        _videoPrefetchCtrlMap.set(fname, ctrl);
+        // 静默后台 fetch,不读 body、只让浏览器把文件存进 HTTP 缓存
+        fetch(url, { method: 'GET', signal: ctrl.signal, cache: 'force-cache', credentials: 'same-origin' })
+            .then((res) => {
+                if (res && res.body && typeof res.body.cancel === 'function') {
+                    // 拿到响应头就立刻取消流读取,只留缓存
+                    try { res.body.cancel(); } catch (_) {}
+                }
+            })
+            .catch(() => { /* 静默失败,点击时仍会正常下载 */ })
+            .finally(() => {
+                _videoPrefetchCtrlMap.delete(fname);
+                _videoPrefetchedSet.add(fname);
+            });
+    }
+
+    function _onHistoryCardEnter(card) {
+        if (!card) return;
+        // 1) 缩略图懒加载:有 .lazy-load 子元素就走正常流程
+        const lazyImg = card.querySelector('img.lazy-load');
+        if (lazyImg) requestHistoryThumbLoad(0);
+        // 2) 视频文件预下载(只对视口内的视频卡片做一次)
+        const fname = card.dataset.filename;
+        const type = card.dataset.type;
+        const globalDir = card.dataset.globaldir || '';
+        if (type === 'video' && fname) {
+            // 需要从 DOM 拼出 history item,只取预下载需要的字段
+            _preloadVideoFile({ filename: fname, type: 'video', fullpath: '' }, globalDir);
+        }
+    }
+
     function initHistoryScrollListener() {
         const hw = document.getElementById('history-wrapper');
         if (!hw) return;
-        
-        let scrollTimeout;
-        hw.addEventListener('scroll', () => {
-            if (scrollTimeout) clearTimeout(scrollTimeout);
-            scrollTimeout = setTimeout(() => {
-                requestHistoryThumbLoad();
-            }, 100);
-        });
+        if (hw.dataset.ioInited === '1') return;
+        hw.dataset.ioInited = '1';
+
+        if (!('IntersectionObserver' in window)) {
+            // 兜底:老浏览器退化到 scroll 节流
+            let scrollTimeout;
+            hw.addEventListener('scroll', () => {
+                if (scrollTimeout) clearTimeout(scrollTimeout);
+                scrollTimeout = setTimeout(() => requestHistoryThumbLoad(), 100);
+            });
+            return;
+        }
+
+        // 容器在视口里出现变化时,扫描可见卡片并触发加载
+        const containerObs = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                if (entry.isIntersecting) {
+                    _onHistoryCardEnter(entry.target);
+                    containerObs.unobserve(entry.target);
+                }
+            }
+        }, { root: hw, rootMargin: '300px 0px', threshold: 0.01 });
+
+        // 也观察外层滚动的窗口(防止容器是 window 滚动)
+        const winObs = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                if (entry.isIntersecting) {
+                    _onHistoryCardEnter(entry.target);
+                    winObs.unobserve(entry.target);
+                }
+            }
+        }, { root: null, rootMargin: '300px 0px', threshold: 0.01 });
+
+        // 暴露给 renderHistoryList 用,新生成的卡片挂上观察者
+        window.__observeHistoryCard = function(card) {
+            if (!card) return;
+            try { containerObs.observe(card); } catch (_) {}
+            try { winObs.observe(card); } catch (_) {}
+        };
     }
 
     // 页面加载时初始化滚动监听
@@ -6680,6 +6849,14 @@
         const filename = card.dataset.filename;
         const type = card.dataset.type;
         const replayId = card.dataset.replayid || '';
+        // ★ 2026-06-09: 用户开始做选择,立刻让所有后台"还在飞的"工作退出,
+        //              腾出带宽/线程给新点击,避免 A→B→C 时旧加载还占着资源导致卡顿
+        //              1) 缩略图懒加载的 token 自增,旧的 loadVisibleImages 循环会退出
+        //              2) 视频预下载全部 abort,不再浪费带宽(用户已经明确选了一个)
+        historyThumbLoaderToken++;
+        if (typeof window.__cancelAllVideoPrefetch === 'function') {
+            window.__cancelAllVideoPrefetch();
+        }
         console.log("[DEBUG][card-click] Click on history card:", filename, type, replayId);
         displayHistoryOutput(filename, type, replayId);
     });
@@ -7067,6 +7244,8 @@ function applyRecommendation(r) {
     const fps = document.getElementById('vid-fps');
     if (r.recommended_fps && r.recommended_fps.length > 0) {
         fps.value = String(r.recommended_fps[0]);
+        // 触发 input 事件,让 initPresetChips 里挂的监听把 select 同步过来
+        fps.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
     // 设置时长 (动态计算: duration = recommended_total_frames / fps)
@@ -7074,6 +7253,8 @@ function applyRecommendation(r) {
     const recDuration = Math.max(1, Math.floor(r.recommended_total_frames / currentFps));
     const dur = document.getElementById('vid-duration');
     dur.value = String(recDuration);
+    // 同步 select
+    dur.dispatchEvent(new Event('input', { bubbles: true }));
 
     // 触发动态推荐更新
     updateDynamicRecommendation();
