@@ -529,6 +529,9 @@
             overflow: hidden; border: 1px solid var(--border);
             cursor: pointer; position: relative; transition: border-color 0.15s, transform 0.15s;
             display: flex; flex-direction: column;
+            /* ★ 2026-06-09: 离屏卡片不参与渲染/绘制,240 张卡不再压垮 GPU */
+            content-visibility: auto;
+            contain-intrinsic-size: 0 220px;
         }
         .history-card:hover { border-color: var(--accent); transform: translateY(-1px); }
         .history-card.is-active { border-color: var(--accent); background: rgba(63,81,181,0.12); }
@@ -844,6 +847,9 @@
             background: #1A1A1E; border-radius: 7px;
             border: 1px solid var(--border); cursor: pointer; position: relative;
             transition: border-color 0.15s, transform 0.15s; gap: 0;
+            /* ★ 2026-06-09: 列表模式离屏卡片跳过渲染 */
+            content-visibility: auto;
+            contain-intrinsic-size: 0 120px;
         }
         .history-card-list:hover { border-color: var(--accent); transform: translateY(-1px); }
         .history-card-list.is-active { border-color: var(--accent); background: rgba(63,81,181,0.12); }

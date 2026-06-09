@@ -6238,7 +6238,7 @@
                     <span class="lpl-key">文件名</span><span class="lpl-val lpl-filename">${escapeHtmlAttr(item.filename)}</span>
                 </div>`}`;
 
-            return `<div class="history-card-list" data-history-key="${key}" data-filename="${safeFilename}" data-type="${item.type}" data-replayid="${replayId}" data-globaldir="${safeGlobalDir}">
+            return `<div class="history-card-list" data-history-key="${key}" data-filename="${safeFilename}" data-type="${item.type}" data-replayid="${replayId}" data-globaldir="${safeGlobalDir}" data-mtime="${escapeHtmlAttr(String(item.mtime || ''))}" data-size="${escapeHtmlAttr(String(item.size || ''))}">
                         <div class="list-thumb">
                             <div class="history-type-badge">${typeBadge}</div>
                             <button class="history-delete-btn" onclick="event.stopPropagation(); deleteHistoryItem('${safeFilename}', '${item.type}', this)">✕</button>
@@ -6388,18 +6388,41 @@
                 const existingCards = new Map(
                     Array.from(container.querySelectorAll('.history-card[data-history-key], .history-card-list[data-history-key]')).map((card) => [card.dataset.historyKey, card])
                 );
+                // ★ 2026-06-09 修复: 把"已渲染但 _historyRenderedKeys 漏掉"的卡补登记,
+                //   并保存每张卡的 mtime/size,后续判断文件是否被覆盖重生成
+                const existingMeta = new Map();
                 existingCards.forEach((card, key) => {
                     if (!_historyRenderedKeys.has(key)) _historyRenderedKeys.add(key);
+                    existingMeta.set(key, {
+                        mtime: card.dataset.mtime || '',
+                        size: card.dataset.size || '',
+                    });
                 });
                 const freshKeys = new Set(validHistory.map((item) => historyItemKey(item)));
                 existingCards.forEach((card, key) => {
                     if (!freshKeys.has(key)) {
                         card.remove();
                         _historyRenderedKeys.delete(key);
+                        existingMeta.delete(key);
                     }
                 });
 
-                const newItems = validHistory.filter((item) => !_historyRenderedKeys.has(historyItemKey(item)));
+                // ★ 找出"同 key 但 mtime/size 变了"的项 —— 文件被覆盖重生成
+                //   旧卡上展示的是旧文件缩略图,不重新渲染就会"图不对版"错乱
+                const staleUpdatable = [];
+                const newItems = [];
+                validHistory.forEach((item) => {
+                    const key = historyItemKey(item);
+                    if (!_historyRenderedKeys.has(key)) {
+                        newItems.push(item);
+                        return;
+                    }
+                    const old = existingMeta.get(key);
+                    if (old && (old.mtime !== String(item.mtime || '') || old.size !== String(item.size || ''))) {
+                        staleUpdatable.push(item);
+                    }
+                });
+
                 if (newItems.length > 0) {
                     const cardsHtml = newItems.map((item) => renderHistoryCardHtml(item, globalDir)).join('');
                     const loadingCard = document.getElementById('current-loading-card');
@@ -6410,6 +6433,35 @@
                     }
                     newItems.forEach((item) => _historyRenderedKeys.add(historyItemKey(item)));
                 }
+
+                // ★ 把"被覆盖重生成"的卡原地替换成新内容(mtime 写进 data 属性,
+                //   缩略图走 lazy-load 流程重新请求,buster 已被清掉所以拿到新文件)
+                staleUpdatable.forEach((item) => {
+                    const key = historyItemKey(item);
+                    const card = existingCards.get(key);
+                    if (!card) return;
+                    const tmp = document.createElement('div');
+                    tmp.innerHTML = renderHistoryCardHtml(item, globalDir).trim();
+                    const fresh = tmp.firstElementChild;
+                    if (!fresh) return;
+                    fresh.dataset.mtime = String(item.mtime || '');
+                    fresh.dataset.size = String(item.size || '');
+                    // 取消可能正在飞的旧缩略图,避免新旧并存
+                    try {
+                        const oldImg = card.querySelector('img.history-thumb-media');
+                        if (oldImg) {
+                            oldImg.classList.remove('history-thumb-ready', 'history-thumb-loading');
+                            oldImg.classList.add('lazy-load');
+                            try { oldImg.removeAttribute('src'); } catch (_) {}
+                        }
+                        const oldVid = card.querySelector('video.history-thumb-media');
+                        if (oldVid) {
+                            try { oldVid.pause(); oldVid.removeAttribute('src'); oldVid.load(); } catch (_) {}
+                        }
+                    } catch (_) {}
+                    card.replaceWith(fresh);
+                    existingCards.set(key, fresh);
+                });
             }
 
             // ★ 2026-06-09: 把新挂载的历史卡片挂到 IntersectionObserver 上,
@@ -6713,13 +6765,16 @@
     // 这里在卡片进入视口(rootMargin 提前 300px)时,就后台 fetch 把完整视频文件
     // 灌进 HTTP 缓存;用户真去点时,<video>.src=url 命中本地磁盘秒开。
     // 同时仅触发进入视口的卡片缩略图,避免一上来 240 张全抢带宽。
-    const _videoPrefetchCtrlMap = new Map();   // filename -> AbortController
     const _videoPrefetchedSet = new Set();     // 已经预下载过的 filename
+    const _videoPrefetchActiveMap = new Map();  // 正在下载的 filename -> AbortController
+    const _videoPrefetchQueue = [];            // 等候中的预下载任务
+    const VIDEO_PREFETCH_MAX_CONCURRENT = 2;   // 最多同时 2 个,避免和用户点击抢带宽
     function _cancelAllVideoPrefetch() {
-        for (const ctrl of _videoPrefetchCtrlMap.values()) {
+        for (const ctrl of _videoPrefetchActiveMap.values()) {
             try { ctrl.abort(); } catch (_) {}
         }
-        _videoPrefetchCtrlMap.clear();
+        _videoPrefetchActiveMap.clear();
+        _videoPrefetchQueue.length = 0;
     }
     window.__cancelAllVideoPrefetch = _cancelAllVideoPrefetch;
 
@@ -6731,12 +6786,45 @@
     }
     window.__resetVideoPrefetchCache = _resetVideoPrefetchCache;
 
+    function _doStartPrefetch(task) {
+        const { fname, url, fileKey } = task;
+        if (_videoPrefetchedSet.has(fname) || _videoPrefetchActiveMap.has(fname)) return;
+        const ctrl = new AbortController();
+        _videoPrefetchActiveMap.set(fname, ctrl);
+        // 静默后台 fetch,不读 body、只让浏览器把文件存进 HTTP 缓存
+        // priority: 'low' 让浏览器在带宽紧张时优先让给用户点击的真实请求
+        let fetchOpts = {
+            method: 'GET',
+            signal: ctrl.signal,
+            cache: 'force-cache',
+            credentials: 'same-origin',
+        };
+        try { fetchOpts.priority = 'low'; } catch (_) {}
+        fetch(url, fetchOpts)
+            .then((res) => {
+                if (res && res.body && typeof res.body.cancel === 'function') {
+                    try { res.body.cancel(); } catch (_) {}
+                }
+            })
+            .catch(() => { /* 静默失败,点击时仍会正常下载 */ })
+            .finally(() => {
+                _videoPrefetchActiveMap.delete(fname);
+                _videoPrefetchedSet.add(fname);
+                // 队列里还有等候的任务,继续
+                _drainPrefetchQueue();
+            });
+    }
+    function _drainPrefetchQueue() {
+        while (_videoPrefetchActiveMap.size < VIDEO_PREFETCH_MAX_CONCURRENT && _videoPrefetchQueue.length > 0) {
+            const task = _videoPrefetchQueue.shift();
+            _doStartPrefetch(task);
+        }
+    }
     function _preloadVideoFile(item, globalDir) {
         if (!item || item.type !== 'video') return;
         const fname = item.filename;
-        if (!fname || _videoPrefetchedSet.has(fname)) return;
-        // 已经有正在跑的就不再开新的
-        if (_videoPrefetchCtrlMap.has(fname)) return;
+        if (!fname) return;
+        if (_videoPrefetchedSet.has(fname) || _videoPrefetchActiveMap.has(fname)) return;
 
         // 构造与 displayOutput 完全一致的 URL,确保缓存命中
         const fileKey = `video::${globalDir ? globalDir + '/' + fname : fname}`;
@@ -6744,34 +6832,28 @@
         const rawPath = item.fullpath || (globalDir ? globalDir + '/' + fname : fname);
         const url = `${BASE}/api/system/file?path=${encodeURIComponent(rawPath)}&v=${buster}`;
 
-        const ctrl = new AbortController();
-        _videoPrefetchCtrlMap.set(fname, ctrl);
-        // 静默后台 fetch,不读 body、只让浏览器把文件存进 HTTP 缓存
-        fetch(url, { method: 'GET', signal: ctrl.signal, cache: 'force-cache', credentials: 'same-origin' })
-            .then((res) => {
-                if (res && res.body && typeof res.body.cancel === 'function') {
-                    // 拿到响应头就立刻取消流读取,只留缓存
-                    try { res.body.cancel(); } catch (_) {}
-                }
-            })
-            .catch(() => { /* 静默失败,点击时仍会正常下载 */ })
-            .finally(() => {
-                _videoPrefetchCtrlMap.delete(fname);
-                _videoPrefetchedSet.add(fname);
-            });
+        const task = { fname, url, fileKey };
+        // 还有空位就直接起,满了就排队
+        if (_videoPrefetchActiveMap.size < VIDEO_PREFETCH_MAX_CONCURRENT) {
+            _doStartPrefetch(task);
+        } else {
+            // 队列里同名任务去重,避免重复排队
+            if (!_videoPrefetchQueue.some((t) => t.fname === fname)) {
+                _videoPrefetchQueue.push(task);
+            }
+        }
     }
 
-    function _onHistoryCardEnter(card) {
+    function _onHistoryCardEnter(card, withPrefetch) {
         if (!card) return;
         // 1) 缩略图懒加载:有 .lazy-load 子元素就走正常流程
-        const lazyImg = card.querySelector('img.lazy-load');
-        if (lazyImg) requestHistoryThumbLoad(0);
-        // 2) 视频文件预下载(只对视口内的视频卡片做一次)
+        if (card.querySelector('img.lazy-load')) requestHistoryThumbLoad(0);
+        // 2) 视频文件预下载:仅"容器内可见"才预下载,避免窗口级 IO 把视口外的也卷进来
+        if (!withPrefetch) return;
         const fname = card.dataset.filename;
         const type = card.dataset.type;
         const globalDir = card.dataset.globaldir || '';
         if (type === 'video' && fname) {
-            // 需要从 DOM 拼出 history item,只取预下载需要的字段
             _preloadVideoFile({ filename: fname, type: 'video', fullpath: '' }, globalDir);
         }
     }
@@ -6783,7 +6865,7 @@
         hw.dataset.ioInited = '1';
 
         if (!('IntersectionObserver' in window)) {
-            // 兜底:老浏览器退化到 scroll 节流
+            // 兜底:老浏览器退化到 scroll 节流(不预下载,只看缩略图)
             let scrollTimeout;
             hw.addEventListener('scroll', () => {
                 if (scrollTimeout) clearTimeout(scrollTimeout);
@@ -6792,21 +6874,22 @@
             return;
         }
 
-        // 容器在视口里出现变化时,扫描可见卡片并触发加载
+        // 容器级 IO: 缩略图 + 视频预下载 都做(用户能看到的才值得预下载)
         const containerObs = new IntersectionObserver((entries) => {
             for (const entry of entries) {
                 if (entry.isIntersecting) {
-                    _onHistoryCardEnter(entry.target);
+                    _onHistoryCardEnter(entry.target, true);
                     containerObs.unobserve(entry.target);
                 }
             }
         }, { root: hw, rootMargin: '300px 0px', threshold: 0.01 });
 
-        // 也观察外层滚动的窗口(防止容器是 window 滚动)
+        // 窗口级 IO: 只做缩略图(便宜,反正 5 并发,不影响用户点击)
+        //   用于"卡片虽然不在容器可视区但已经在窗口可视区"的情况
         const winObs = new IntersectionObserver((entries) => {
             for (const entry of entries) {
                 if (entry.isIntersecting) {
-                    _onHistoryCardEnter(entry.target);
+                    _onHistoryCardEnter(entry.target, false);
                     winObs.unobserve(entry.target);
                 }
             }
@@ -6966,7 +7049,11 @@
             historyRefreshInterval = setInterval(() => {
                 const hc = document.getElementById('history-container');
                 if (hc && hc.offsetParent !== null && !_isGeneratingFlag) {
-                    fetchHistory(1, true);
+                    // ★ 2026-06-09 修复: 原来误传 isFirstLoad=1,导致每次都强制走
+                    //   loadVisibleImages() 跟用户操作抢缩略图带宽。
+                    //   改用 isFirstLoad=false:无变化走 fingerprint 短路,有变化走
+                    //   IO 触发新卡懒加载,不再"主动全量扫一遍"
+                    fetchHistory(false, true);
                 }
             }, 15000);
         }
