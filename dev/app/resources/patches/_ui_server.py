@@ -4,7 +4,7 @@ from fastapi.responses import Response, StreamingResponse
 import uvicorn
 
 APP_NAME = '云集智能视频创意站'
-VERSION = '2026.06.09.0523'
+VERSION = '2026.06.09.0758'
 
 _ui_log_path = 'E:\\软件开发\\云集智能视频创意站\\dev\\temp\\logs\\ui_server.log'
 os.makedirs(os.path.dirname(_ui_log_path), exist_ok=True)
