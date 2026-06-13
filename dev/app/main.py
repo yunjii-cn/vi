@@ -7866,8 +7866,7 @@ class MainWindow(QMainWindow):
                     tip_lines.append(f"预览图: {preview_url}")
                 name_item.setToolTip("\n".join(tip_lines))
                 name_item.setForeground(QColor("#FFD54F"))  # 金黄色突出
-            # 模型名称列: 当列宽不足时省略溢出文本(显示省略号),而不是挤压到只剩几个字母
-            name_item.setTextElideMode(Qt.TextElideMode.ElideRight)
+            # 模型名称列: 设置最小列宽,避免列被过度压缩
             self._model_table.setItem(row, 1, name_item)
 
             # 描述中融入触发词信息

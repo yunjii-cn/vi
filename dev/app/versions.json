@@ -1,5 +1,15 @@
 [
   {
+    "version": "2026.06.14.0515",
+    "date": "2026-06-14 05:15",
+    "message": "修复setTextElideMode兼容性问题",
+    "changes": [
+      "修复setTextElideMode兼容性问题"
+    ],
+    "name": "云集智能视频创意站-v2026.06.14.0515.exe",
+    "download_url": ""
+  },
+  {
     "version": "2026.06.14.0500",
     "date": "2026-06-14 05:02",
     "message": "修复Z-Image描述获取、过滤非标准模型格式、模型名称列文本省略",
