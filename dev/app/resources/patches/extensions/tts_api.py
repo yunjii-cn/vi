@@ -146,6 +146,11 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
             return ".flac"
         if raw[:4] == b"OggS":
             return ".ogg"
+        # 2026-06-10 修复: 补全浏览器录制常见格式(否则 ffmpeg 拿到 .bin 后只能靠内容嗅探,失败率高)
+        if len(raw) >= 4 and raw[:4] == b"\x1a\x45\xdf\xa3":
+            return ".webm"
+        if len(raw) >= 12 and raw[4:8] == b"ftyp":
+            return ".m4a"
         return ".bin"
 
     def _decode_audio_b64_to_temp(b64_data: str, tmp_files: list[str]) -> str:
@@ -369,8 +374,16 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
             audio_b64 = data.get("audio")
             if not audio_b64:
                 return JSONResponse(status_code=400, content={"error": "audio 不能为空"})
-            clean = audio_b64.split(",", 1)[1] if "," in audio_b64 else audio_b64
-            raw = base64.b64decode(clean, validate=True)
+            # 2026-06-10 修复: 兼容 data URL 头(data:audio/...;base64,XXXX),先剥离
+            if "," in audio_b64 and audio_b64.lstrip().lower().startswith("data:"):
+                audio_b64 = audio_b64.split(",", 1)[1]
+            try:
+                raw = base64.b64decode(audio_b64, validate=True)
+            except Exception as de:
+                return JSONResponse(status_code=400, content={"error": f"audio base64 解码失败: {de}"})
+            # 2026-06-10 修复: 加上大小校验,避免空文件 / 过小文件导致 faster-whisper 误报
+            if len(raw) < 256:
+                return JSONResponse(status_code=400, content={"error": f"audio 数据过小({len(raw)} 字节),请确认已正确上传音频文件"})
             suffix = _guess_audio_suffix(raw)
             fd = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
             fd.write(raw)
@@ -378,7 +391,22 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
             tmp_path = fd.name
 
             model = _get_asr_model()
-            segments, info = model.transcribe(tmp_path, beam_size=3, vad_filter=True)
+            # 2026-06-10 修复: 显式传 file 参数 + 接受 numpy array 而不是依赖 ffmpeg 子进程
+            # 优先尝试用本地文件,失败则回退到 numpy 数组
+            try:
+                segments, info = model.transcribe(tmp_path, beam_size=3, vad_filter=True)
+            except Exception as e1:
+                # 回退: 直接解码到 numpy
+                try:
+                    import numpy as np
+                    import soundfile as sf
+                    audio_data, sample_rate = sf.read(tmp_path)
+                    if audio_data.ndim > 1:
+                        audio_data = audio_data.mean(axis=1)
+                    audio_data = audio_data.astype(np.float32)
+                    segments, info = model.transcribe(audio_data, beam_size=3, vad_filter=True, language=None)
+                except ImportError:
+                    raise e1
             text_parts = []
             for seg in segments:
                 text_parts.append(seg.text.strip())
@@ -389,7 +417,8 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
         except Exception as e:
             import traceback
             traceback.print_exc()
-            return JSONResponse(status_code=500, content={"error": str(e)})
+            # 2026-06-10 修复: 错误信息带上类型,方便排查(faster-whisper 模型加载失败 vs 转写失败 vs ffmpeg 不可用)
+            return JSONResponse(status_code=500, content={"error": f"{type(e).__name__}: {e}"})
         finally:
             if tmp_path:
                 try:

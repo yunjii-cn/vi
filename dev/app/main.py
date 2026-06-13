@@ -1423,7 +1423,7 @@ LTX_MODELS = {
         "file": "ltx-2.3-22b-distilled-fp8.safetensors",
         "size_bytes": 29531884062,
         "required": True,
-        "desc": "LTX-2.3 蒸馏版 FP8 (推荐，显存友好)",
+        "desc": "LTX-Video 2.3 蒸馏版 FP8（220亿参数DiT架构，FP8量化显存约29GB，8步极速推理CFG=1，支持视频+音频同步生成）",
         "category": "视频模型",
         "modelscope_id": "Lightricks/LTX-2.3-fp8",
     },
@@ -1432,7 +1432,7 @@ LTX_MODELS = {
         "file": "ltx-2.3-22b-distilled.safetensors",
         "size_bytes": 46149345038,
         "required": False,
-        "desc": "LTX-2.3 蒸馏版完整精度",
+        "desc": "LTX-Video 2.3 蒸馏版 BF16全精度（220亿参数，保留完整BF16精度权重，画质与细节优于FP8，显存约46GB，8步推理）",
         "category": "视频模型",
         "modelscope_id": "Lightricks/LTX-2.3",
     },
@@ -1442,7 +1442,7 @@ LTX_MODELS = {
         "size_bytes": 46149345038,
         "required": False,
         "recommended": True,
-        "desc": "LTX-2.3 蒸馏版 v1.1 BF16 (更新版本，质量提升)",
+        "desc": "LTX-Video 2.3 蒸馏版 v1.1 BF16（220亿参数，v1.1迭代版，生成稳定性与画面一致性改进，8步快速推理）",
         "category": "视频模型",
         "modelscope_id": "Lightricks/LTX-2.3",
     },
@@ -1451,7 +1451,7 @@ LTX_MODELS = {
         "file": "ltx-2.3-22b-dev-fp8.safetensors",
         "size_bytes": 29145431166,
         "required": False,
-        "desc": "LTX-2.3 开发版 FP8 (高质量，需更多显存)",
+        "desc": "LTX-Video 2.3 开发版 FP8（220亿参数，支持完整CFG引导3.0-3.5，20-40+步推理，提示词遵循度与画面可控性更强，适合精细控制创作）",
         "category": "视频模型",
         "modelscope_id": "Lightricks/LTX-2.3-fp8",
     },
@@ -1478,7 +1478,7 @@ LTX_MODELS = {
         "file": "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors",
         "size_bytes": 654465352,
         "required": False,
-        "desc": "IC-LoRA 联合控制 (动作迁移/深度/边缘)",
+        "desc": "LTX-Video 2.3 IC-LoRA联合控制模型（融合深度图/Canny边缘/姿态多条件控制，ref=0.5，实现构图与场景布局细粒度引导）",
         "category": "控制模型",
         "modelscope_id": "Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control",
     },
@@ -1487,7 +1487,7 @@ LTX_MODELS = {
         "file": "ltx-2-19b-distilled-lora-384.safetensors",
         "size_bytes": 400000000,
         "required": False,
-        "desc": "Pro模式LoRA (视频生成Pro高质量模式必需，384步推理)",
+        "desc": "LTX-2 19B蒸馏版专用LoRA（Rank=384，Pro模式高质量视频生成必需，支持深度引导与姿态驱动等高级控制）",
         "category": "视频LoRA",
         "modelscope_id": "Lightricks/LTX-2",
     },
@@ -1496,7 +1496,7 @@ LTX_MODELS = {
         "file": "LTX2.3-22B_IC-LoRA-Cameraman_v1_10500.safetensors",
         "size_bytes": 300000000,
         "required": False,
-        "desc": "摄影师运镜LoRA (视频迁移-摄像机运镜控制)",
+        "desc": "LTX-Video 2.3 摄像师运镜IC-LoRA（77组视频对训练，15种镜头运动类型，可从参考视频提取运镜轨迹并复刻，专业级运镜控制）",
         "category": "视频LoRA",
         "modelscope_id": "Lightricks/LTX-2.3-22B_IC-LoRA-Cameraman",
     },
@@ -1587,7 +1587,7 @@ LTX_MODELS = {
         "file": "LTX2.3_Crisp_Enhance.safetensors",
         "size_bytes": 124800000,
         "required": False,
-        "desc": "清晰增强 (提升画面锐度和细节)",
+        "desc": "LTX-Video 2.3 锐利增强LoRA（提升视频细节锐度与边缘清晰度，增强纹理/发丝/衣物等高频信息，适合写实风格）",
         "category": "视频LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
@@ -1596,7 +1596,7 @@ LTX_MODELS = {
         "file": "LTX2.3_Soft_Enhance.safetensors",
         "size_bytes": 124800000,
         "required": False,
-        "desc": "柔和增强 (柔光滤镜，梦幻氛围)",
+        "desc": "LTX-Video 2.3 柔和增强LoRA（柔化画面边缘与光影过渡，营造梦幻柔焦视觉效果，适合人像与浪漫场景）",
         "category": "视频LoRA",
         "modelscope_id": "ByteDance/Z-Image-Loras",
     },
@@ -1878,10 +1878,95 @@ _LORA_DESCRIPTIONS: dict[str, str] = {
     "z-image_小情绪_v1.1.safetensors": "小情绪风格V1.1（捕捉细腻微妙情绪表达）",
 }
 
-def _get_lora_description(filename: str, is_lora: bool) -> str:
+_IMAGE_MODEL_DESCRIPTIONS: dict[str, str] = {
+    # ── Z-Image 系列 ──
+    "Z-Image-Turbo-BF16.safetensors": "Z-Image Turbo BF16（6B参数国产AI绘图大模型，16GB显存即可8步快速出图，质量优秀）",
+    "ZIT-2602NSW byStableYogi.safetensors": "ZIT-2602NSW（基于Z-Image Turbo微调的写实风格大模型，擅长人像摄影和写实风格图像）",
+    # ── SDXL 大模型 ──
+    "sd_xl_base_1.0.safetensors": "Stable Diffusion XL 1.0 基础模型（Stability AI官方发布，100亿+参数，原生1024×1024分辨率，SDXL生态官方基座）",
+    "counterfeitXL_v10.safetensors": "CounterfeitXL v10（经典二次元模型Counterfeit的SDXL版本，色彩柔和，人物表情生动，擅长细节丰富的动漫风格图像）",
+    "juggernautXL_v9Rdphoto2Lightning.safetensors": "Juggernaut XL v9 RDPhoto2 Lightning（Civitai下载量最高的SDXL大模型，4步快速出图，全能写实风格，细节丰富）",
+    "AnythingXL_xl.safetensors": "Anything XL 万象熔炉（Civitai Top5二次元SDXL大模型，人物结构准确，线条干净，色彩通透，经典动漫插画基座）",
+    "animagineXLV31_v31.safetensors": "Animagine XL V3.1（基于SDXL的开源动漫主题模型，87万张标注动漫图像训练，支持美学标签与年份标签）",
+    "noobaiXLNAIXL_epsilonPred11Version.safetensors": "NoobAI XL Epsilon预测版（基于Illustrious-XL微调的新一代动漫模型，1300万+动漫作品训练，兼容性广）",
+    "noobaiXLNAIXL_sigmaPred11Version.safetensors": "NoobAI XL Sigma预测版（基于Illustrious-XL微调的新一代动漫模型，1300万+动漫作品训练，生成质量更高）",
+    "ponyDiffusionV6XL.safetensors": "Pony Diffusion V6 XL（Civitai极受欢迎的SDXL动漫全能大模型，260万+图像训练，衍生LoRA生态丰富）",
+    "sdxlUnstableDiffusers_v11.safetensors": "SDXL Unstable Diffusers v11（基于SDXL的创意艺术风格模型，以不可预测的出图效果著称，擅长富有想象力的艺术创作）",
+    "dynavisionXLAllInOneStylized_v041.safetensors": "DynaVision XL AllInOne Stylized v0.4.1（SDXL 3D风格化一体化模型，可生成皮克斯/梦工厂/迪士尼风格3D卡通图像）",
+    "realvisxlV40_v40.safetensors": "RealVisXL V4.0（基于SDXL的照片级写实模型，人物和场景质感细腻逼真，写实风格热门选择）",
+    "icbinpGalacticGODZILLA241K-Lightning.safetensors": "ICBINP Galactic GODZILLA 241K Lightning（科幻怪兽主题SDXL大模型，Lightning版支持4步快速出图，擅长科幻与宇宙题材）",
+    "waiNSFWIllustrious_v10.safetensors": "WAI NSFW Illustrious v10（基于Illustrious架构的二次元大模型，高质量Danbooru标签训练，擅长精细动漫插画）",
+    # ── SD 1.5 大模型 ──
+    "realisticVisionV51_v51VAE.safetensors": "Realistic Vision V5.1（SD1.5最受欢迎的写实风格大模型，内置VAE，擅长照片级写实人像和摄影风格图像）",
+    "dreamshaper_8.safetensors": "DreamShaper v8（SD1.5通用多风格大模型，定位MidJourney开源替代，兼具写实与艺术风格，整体质感接近Midjourney）",
+    "MeinaMixV11.safetensors": "MeinaMix V11（SD1.5热门二次元动漫大模型，色彩明快，人物Q版感强，适合日系动漫风格插画）",
+    "perfectWorld_v7Baked.safetensors": "Perfect World v7 Baked（SD1.5多风格融合大模型，内置VAE，擅长唯美精致的混合风格图像）",
+    "epicrealism_naturalSinRC1VAE.safetensors": "EpicRealism Natural Sin RC1 VAE（SD1.5写实风格大模型，内置VAE，皮肤质感自然细腻，写实人像优选）",
+    "aZovyaRPGArtistTools_v3.safetensors": "A-Zovya RPG Artist Tools v3（SD1.5 RPG角色扮演风格大模型，适合生成魔兽世界/龙与地下城等奇幻角色肖像）",
+    "darkBeastZDBZUpdatedDEC21_dbzAIOV10.safetensors": "Dark Beast ZDBZ AIO v10（SD1.5暗黑奇幻风格大模型，融合龙珠等动漫元素，适合暗黑系战斗风格二次元角色与场景）",
+    "waiANIMIX_v60.safetensors": "WAI ANIMIX v60（基于SDXL的动漫风格混合模型，融合多种动漫画风，色彩鲜明、风格多样）",
+    "cyberrealisticPony_v65.safetensors": "CyberRealistic Pony v6.5（基于Pony Diffusion架构的写实风格模型，融合CyberRealistic逼真渲染与Pony底模，擅长高写实摄影风格）",
+    # ── FLUX 系列 ──
+    "flux1-dev-fp8.safetensors": "FLUX.1-dev FP8（Black Forest Labs开发，120亿参数流匹配框架，FP8量化显存降低约40%，非商业用途）",
+    "flux1-schnell-fp8.safetensors": "FLUX.1-schnell FP8（Black Forest Labs开发，快速生成优化版，Apache 2.0开源可商用，适合对速度有要求的场景）",
+}
+
+
+_VIDEO_MODEL_DESCRIPTIONS: dict[str, str] = {
+    # ── LTX-Video 2.3 基础模型 ──
+    "ltx-2.3-22b-distilled-fp8.safetensors": "LTX-Video 2.3 蒸馏版 FP8（220亿参数DiT架构，FP8量化显存约29GB，8步极速推理CFG=1，支持视频+音频同步生成）",
+    "ltx-2.3-22b-distilled.safetensors": "LTX-Video 2.3 蒸馏版 BF16全精度（220亿参数，保留完整BF16精度权重，画质与细节优于FP8，显存约46GB，8步推理）",
+    "ltx-2.3-22b-distilled-1.1.safetensors": "LTX-Video 2.3 蒸馏版 v1.1 BF16（220亿参数，v1.1迭代版，生成稳定性与画面一致性改进，8步快速推理）",
+    "ltx-2.3-22b-dev-fp8.safetensors": "LTX-Video 2.3 开发版 FP8（220亿参数，支持完整CFG引导3.0-3.5，20-40+步推理，提示词遵循度与画面可控性更强，适合精细控制创作）",
+    # ── LTX-Video LoRA ──
+    "ltx-2-19b-distilled-lora-384.safetensors": "LTX-2 19B蒸馏版专用LoRA（Rank=384，Pro模式高质量视频生成必需，支持深度引导与姿态驱动等高级控制）",
+    "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors": "LTX-Video 2.3 IC-LoRA联合控制模型（融合深度图/Canny边缘/姿态多条件控制，ref=0.5，实现构图与场景布局细粒度引导）",
+    "LTX2.3-22B_IC-LoRA-Cameraman_v1_10500.safetensors": "LTX-Video 2.3 摄像师运镜IC-LoRA（77组视频对训练，15种镜头运动类型，可从参考视频提取运镜轨迹并复刻，专业级运镜控制）",
+    "LTX2.3_Crisp_Enhance.safetensors": "LTX-Video 2.3 锐利增强LoRA（提升视频细节锐度与边缘清晰度，增强纹理/发丝/衣物等高频信息，适合写实风格）",
+    "LTX2.3_Soft_Enhance.safetensors": "LTX-Video 2.3 柔和增强LoRA（柔化画面边缘与光影过渡，营造梦幻柔焦视觉效果，适合人像与浪漫场景）",
+}
+
+
+def _lookup_model_desc(filename: str, desc_dict: dict[str, str]) -> str | None:
+    """精确匹配 → 大小写不敏感匹配 → 关键词前缀模糊匹配"""
+    # 1) 精确匹配
+    desc = desc_dict.get(filename)
+    if desc:
+        return desc
+    # 2) 大小写不敏感匹配
+    fn_lower = filename.lower()
+    for key, val in desc_dict.items():
+        if key.lower() == fn_lower:
+            return val
+    # 3) 关键词前缀模糊匹配（去掉版本号后缀后匹配）
+    import re
+    stem = Path(filename).stem
+    # 去掉常见版本号后缀: _V10, _v9, _V51VAE, _v3, _8 等
+    stem_base = re.sub(r'_[Vv]\d[\d.]*(?:[Vv][Aa][Ee])?$', '', stem)
+    stem_base = re.sub(r'_\d+$', '', stem_base)
+    for key, val in desc_dict.items():
+        key_stem = Path(key).stem
+        key_base = re.sub(r'_[Vv]\d[\d.]*(?:[Vv][Aa][Ee])?$', '', key_stem)
+        key_base = re.sub(r'_\d+$', '', key_base)
+        if key_base.lower() == stem_base.lower():
+            return val
+    return None
+
+
+def _get_lora_description(filename: str, is_lora: bool, category: str = "") -> str:
     desc = _LORA_DESCRIPTIONS.get(filename)
     if desc:
         return desc
+    if category == "图像模型":
+        img_desc = _lookup_model_desc(filename, _IMAGE_MODEL_DESCRIPTIONS)
+        if img_desc:
+            return img_desc
+        return "图像生成模型"
+    if category == "视频模型":
+        vid_desc = _lookup_model_desc(filename, _VIDEO_MODEL_DESCRIPTIONS)
+        if vid_desc:
+            return vid_desc
+        return "视频生成模型"
     return "LoRA风格模型" if is_lora else "本地模型文件"
 
 _LORA_TRIGGER_WORDS: dict[str, list[str]] = {
@@ -5011,6 +5096,13 @@ class SplashScreen(QSplashScreen):
             self._message = message
         old_progress = self._progress
         self._progress = value
+        # ★ 先停止旧动画,防止 C++ 层悬挂指针
+        old_anim = getattr(self, '_anim', None)
+        if old_anim is not None:
+            try:
+                old_anim.stop()
+            except Exception:
+                pass
         anim = QPropertyAnimation(self, b"progress")
         anim.setDuration(300)
         anim.setStartValue(old_progress)
@@ -6529,6 +6621,18 @@ class MainWindow(QMainWindow):
         self._remove_dir_btn.clicked.connect(self._remove_selected_model_dir)
         dir_row.addWidget(self._remove_dir_btn)
 
+        self._edit_cat_btn = QPushButton("修改分类")
+        self._edit_cat_btn.setFixedWidth(60)
+        self._edit_cat_btn.setStyleSheet("""
+            QPushButton { background-color: transparent; border: 1px solid #555555; border-radius: 4px;
+                color: #AAAAAA; font-size: 10px; padding: 4px 6px; }
+            QPushButton:hover { background-color: #CC0000; border-color: #FF0000; color: #FFFFFF; }
+            QPushButton:disabled { color: #444444; border-color: #333333; }
+        """)
+        self._edit_cat_btn.setToolTip("修改当前目录的分类")
+        self._edit_cat_btn.clicked.connect(self._edit_model_dir_category)
+        dir_row.addWidget(self._edit_cat_btn)
+
         add_dir_btn = QPushButton(" 添加目录")
         add_icon_svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>'
         pm_add = QPixmap(12, 12)
@@ -6564,11 +6668,11 @@ class MainWindow(QMainWindow):
         # 启动时同步junction映射
         self._sync_model_junctions()
 
-        # ── 主内容区：上方分类筛选 + 下方表格 ──
+        # ── 主内容区 ──
         content_layout = QVBoxLayout()
         content_layout.setSpacing(6)
 
-        # 上方分类筛选栏（横向）
+        # ── 分类筛选栏（横向，统一过滤本地+在线模型）──
         self._model_category_list = QListWidget()
         self._model_category_list.setFlow(QListWidget.Flow.LeftToRight)
         self._model_category_list.setWrapping(False)
@@ -6612,7 +6716,135 @@ class MainWindow(QMainWindow):
         self._model_category_list.currentItemChanged.connect(self._on_model_category_changed)
         content_layout.addWidget(self._model_category_list)
 
-        # 表格
+        # ── 工具栏：搜索 + 显示模式 + 同步 + 状态 ──
+        toolbar = QWidget()
+        toolbar_layout = QHBoxLayout()
+        toolbar_layout.setContentsMargins(0, 0, 0, 0)
+        toolbar_layout.setSpacing(8)
+
+        # 搜索框
+        self._lib_search_edit = QLineEdit()
+        self._lib_search_edit.setPlaceholderText("🔍 搜索模型名称/描述/触发词...")
+        self._lib_search_edit.setFixedHeight(26)
+        self._lib_search_edit.setStyleSheet("""
+            QLineEdit { background-color: #121212; color: #F0F0F0;
+                border: 1px solid #333333; border-radius: 4px;
+                padding: 4px 10px; font-size: 11px; }
+            QLineEdit:focus { border-color: #CC0000; }
+        """)
+        self._lib_search_edit.setClearButtonEnabled(True)
+        self._lib_search_edit.textChanged.connect(lambda _t: self._render_model_table())
+        toolbar_layout.addWidget(self._lib_search_edit, 1)
+
+        # 显示模式切换
+        self._view_mode_btn_group = QButtonGroup(self)
+        self._view_mode_btns = {}
+        for label, key in [("全部", "all"), ("已下载", "local"), ("未下载", "online")]:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setFixedHeight(26)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #252525; color: #AAAAAA; border: 1px solid #444444;
+                    border-radius: 4px; padding: 3px 10px; font-size: 11px;
+                }
+                QPushButton:hover { background-color: #333333; color: #FFFFFF; }
+                QPushButton:checked {
+                    background-color: #CC0000; color: #FFFFFF; border-color: #FF0000;
+                    font-weight: bold;
+                }
+            """)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda checked, k=key: self._on_view_mode_changed(k))
+            self._view_mode_btn_group.addButton(btn)
+            self._view_mode_btns[key] = btn
+            toolbar_layout.addWidget(btn)
+
+        self._view_mode_btns["all"].setChecked(True)
+        self._model_view_mode = "all"
+
+        # 2026-06-10: 同步按钮——HF 元数据自动获取（替代旧 _sync_library_from_remote）
+        self._btn_library_sync = QPushButton("🔄 获取元数据")
+        self._btn_library_sync.setFixedHeight(26)
+        self._btn_library_sync.setStyleSheet("""
+            QPushButton { background-color: #1565C0; color: #FFFFFF; border: 1px solid #1976D2;
+                border-radius: 4px; padding: 3px 10px; font-size: 11px; font-weight: bold; }
+            QPushButton:hover { background-color: #1976D2; }
+            QPushButton:disabled { background-color: #333333; color: #888888; border-color: #444444; }
+        """)
+        self._btn_library_sync.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_library_sync.setToolTip("从 HuggingFace API 获取模型元数据（描述/大小/标签/缩略图）。区别于「更新模型库」——后者是拉取新模型条目")
+        self._btn_library_sync.clicked.connect(self._sync_hf_metadata)
+        toolbar_layout.addWidget(self._btn_library_sync)
+
+        # 同步状态
+        self._lbl_library_status = QLabel("")
+        self._lbl_library_status.setStyleSheet("color: #888888; font-size: 10px;")
+        toolbar_layout.addWidget(self._lbl_library_status)
+
+        # 2026-06-10: HF 元数据同步进度条（仅在运行中可见）
+        self._hf_progress_bar = QProgressBar()
+        self._hf_progress_bar.setFixedHeight(14)
+        self._hf_progress_bar.setFixedWidth(160)
+        self._hf_progress_bar.setTextVisible(True)
+        self._hf_progress_bar.setFormat("HF: %v / %m")
+        self._hf_progress_bar.setVisible(False)
+        self._hf_progress_bar.setStyleSheet("""
+            QProgressBar { background-color: #1A1A1A; border: 1px solid #444; border-radius: 3px;
+                color: #FFFFFF; font-size: 10px; text-align: center; }
+            QProgressBar::chunk { background-color: #1565C0; border-radius: 2px; }
+        """)
+        toolbar_layout.addWidget(self._hf_progress_bar)
+
+        # 2026-06-10: HF 同步取消按钮（仅 manual 时可见）
+        self._btn_hf_cancel = QPushButton("✕ 取消")
+        self._btn_hf_cancel.setFixedHeight(24)
+        self._btn_hf_cancel.setVisible(False)
+        self._btn_hf_cancel.setStyleSheet("""
+            QPushButton { background-color: #5D4037; color: #FFFFFF; border: 1px solid #795548;
+                border-radius: 4px; padding: 2px 8px; font-size: 10px; }
+            QPushButton:hover { background-color: #795548; }
+            QPushButton:pressed { background-color: #4E342E; }
+        """)
+        self._btn_hf_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_hf_cancel.setToolTip("取消当前正在运行的 HF 元数据同步（仅对手动触发有效）")
+        self._btn_hf_cancel.clicked.connect(self._cancel_hf_sync)
+        toolbar_layout.addWidget(self._btn_hf_cancel)
+
+        # 2026-06-10: HF 状态详情标签（显示上次同步时间 / 失败数）
+        self._lbl_hf_status = QLabel("")
+        self._lbl_hf_status.setStyleSheet("color: #888888; font-size: 10px;")
+        toolbar_layout.addWidget(self._lbl_hf_status)
+
+        # 目录分类管理 + 刷新（合并到工具栏）
+        self._btn_dir_categories = QPushButton("目录分类管理")
+        self._btn_dir_categories.setFixedHeight(26)
+        self._btn_dir_categories.setStyleSheet("""
+            QPushButton { background-color: #252525; color: #AAAAAA; border: 1px solid #444444;
+                border-radius: 4px; padding: 3px 14px; font-size: 11px; }
+            QPushButton:hover { background-color: #CC0000; color: #FFFFFF; border-color: #FF0000; }
+        """)
+        self._btn_dir_categories.clicked.connect(self._show_dir_categories_dialog)
+        toolbar_layout.addWidget(self._btn_dir_categories)
+
+        self._btn_refresh_models = QPushButton("刷新")
+        self._btn_refresh_models.setFixedHeight(26)
+        self._btn_refresh_models.setStyleSheet("""
+            QPushButton { background-color: #252525; color: #AAAAAA; border: 1px solid #444444;
+                border-radius: 4px; padding: 3px 14px; font-size: 11px; }
+            QPushButton:hover { background-color: #CC0000; color: #FFFFFF; border-color: #FF0000; }
+        """)
+        self._btn_refresh_models.clicked.connect(self._refresh_model_table)
+        toolbar_layout.addWidget(self._btn_refresh_models)
+
+        self._lbl_dir_cat_hint = QLabel("")
+        self._lbl_dir_cat_hint.setStyleSheet("color: #777777; font-size: 10px;")
+        toolbar_layout.addWidget(self._lbl_dir_cat_hint)
+
+        toolbar.setLayout(toolbar_layout)
+        content_layout.addWidget(toolbar)
+
+        # ── 模型表格（统一，本地+在线共用）──
         self._model_table = QTableWidget()
         self._model_table.setColumnCount(8)
         self._model_table.setHorizontalHeaderLabels(["", "模型名称", "描述", "分类", "标签", "大小", "状态", "操作"])
@@ -6633,7 +6865,10 @@ class MainWindow(QMainWindow):
         self._model_table.horizontalHeader().setSectionsMovable(False)
         self._model_table.horizontalHeader().setStretchLastSection(False)
         self._model_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        # 模型名称列: 使用 Interactive(可拖拽),但最小宽度设为文字宽度,不被挤压到只剩几个字母
+        # 拖拽缩小超过实际文字宽度时省略溢出(而不是缩减到几个字母)
         self._model_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self._model_table.horizontalHeader().setMinimumSectionSize(200)
         self._model_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self._model_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
         self._model_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
@@ -6673,10 +6908,9 @@ class MainWindow(QMainWindow):
 
         content_layout.addWidget(self._model_table, 1)
 
-        layout.addLayout(content_layout, 1)
-
         self._populate_model_table()
 
+        # ── 底部操作按钮行 ──
         btn_row = QHBoxLayout()
         btn_row.addWidget(self._select_all_cb)
         btn_row.addSpacing(10)
@@ -6726,7 +6960,7 @@ class MainWindow(QMainWindow):
         check_btn.clicked.connect(self._check_model_integrity)
         btn_row.addWidget(check_btn)
 
-        refresh_btn = QPushButton(" 同步更新")
+        refresh_btn = QPushButton(" 更新模型库")
         refresh_icon_svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>'
         pm_ref = QPixmap(14, 14)
         pm_ref.fill(QColor(0, 0, 0, 0))
@@ -6735,11 +6969,89 @@ class MainWindow(QMainWindow):
         painter_ref.end()
         refresh_btn.setIcon(QIcon(pm_ref))
         refresh_btn.setStyleSheet("QPushButton { background-color: #1565C0; color: #FFFFFF; border: 1px solid #1976D2; border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: bold; } QPushButton:hover { background-color: #1976D2; }")
+        # 2026-06-10: 重命名 + 加 tooltip——区别于工具栏的"获取元数据"
+        refresh_btn.setToolTip("从 yunjiai/ltx-model-registry 远程仓库拉取最新模型列表（添加新模型条目）。区别于「获取元数据」——后者是补全已有模型的描述/缩略图")
+        refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         refresh_btn.clicked.connect(self._sync_model_updates)
         btn_row.addWidget(refresh_btn)
 
-        layout.addLayout(btn_row)
+        content_layout.addLayout(btn_row)
+
+        layout.addLayout(content_layout, 1)
         self.page_stack.addWidget(page)
+
+    # ── 2026-06-10: 目录分类手动映射管理 ──
+
+    def _refresh_model_table(self):
+        """刷新模型列表(重新从后端获取)"""
+        self._populate_model_table()
+
+    def _show_dir_categories_dialog(self):
+        """显示当前目录分类映射(简化版,分类跟随目录添加时指定)"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("目录分类一览")
+        dialog.setMinimumSize(520, 320)
+        dialog.setStyleSheet("""
+            QDialog { background-color: #1A1A1A; color: #DDDDDD; font-size: 12px; }
+            QLabel { color: #CCCCCC; }
+            QPushButton { background-color: #252525; color: #AAAAAA; border: 1px solid #444;
+                border-radius: 4px; padding: 5px 16px; font-size: 11px; }
+            QPushButton:hover { background-color: #CC0000; color: #FFFFFF; border-color: #FF0000; }
+            QListWidget { background-color: #111113; border: 1px solid #333; border-radius: 4px;
+                color: #DDDDDD; font-size: 11px; outline: none; }
+            QListWidget::item { padding: 6px 10px; border-bottom: 1px solid #222; }
+            QListWidget::item:hover { background-color: #2A2A2E; }
+        """)
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        title = QLabel("当前目录分类映射")
+        title.setStyleSheet("font-weight: bold; font-size: 13px; color: #FFFFFF;")
+        layout.addWidget(title)
+
+        hint = QLabel("提示：添加目录时直接选择分类。此处仅展示当前映射。")
+        hint.setStyleSheet("color: #888888; font-size: 10px;")
+        layout.addWidget(hint)
+
+        # 列表
+        list_widget = QListWidget()
+        layout.addWidget(list_widget, 1)
+
+        # 分类标签
+        cat_labels = {
+            "image": "图像模型", "image-lora": "图像LoRA", "video": "视频模型",
+            "video-lora": "视频LoRA", "upscaler": "高清放大", "controlnet": "控制模型",
+            "supporting": "辅助模型",
+        }
+
+        # 从 launcher_config 读取目录→分类映射
+        dirs_config = self.config.get("model_dirs", [])
+        for d in dirs_config:
+            path = d.get("path", "")
+            label = d.get("label", "")
+            category = d.get("category", "")
+            if not category and d.get("label") == "默认":
+                continue  # 跳过系统默认目录
+            cat_display = cat_labels.get(category, category) if category else "未指定（自动识别）"
+            item_text = f"{label or os.path.basename(path)}  →  {cat_display}"
+            if path:
+                item_text += f"\n    {path}"
+            list_widget.addItem(item_text)
+
+        if list_widget.count() == 0:
+            list_widget.addItem("暂无自定义目录映射。点击「添加目录」创建。")
+
+        # 关闭按钮
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_close = QPushButton("关闭")
+        btn_close.clicked.connect(dialog.accept)
+        btn_layout.addWidget(btn_close)
+        layout.addLayout(btn_layout)
+
+        dialog.exec()
 
     def _on_model_category_changed(self, current, previous):
         if current:
@@ -6965,156 +7277,289 @@ class MainWindow(QMainWindow):
         return name
 
     def _populate_model_table(self):
+        """模型管理表格——始终基于本地文件夹扫描,不依赖后端是否启动"""
         self._model_checkboxes = {}
         self._model_rows = []
+        seen_filenames: set[str] = set()
+
+        # ===== 第1步: 本地文件夹扫描(始终执行,不依赖后端) =====
+        self._scan_local_models(seen_filenames)
+
+        # ===== 第2步: registry 模型(LTX_MODELS 硬编码 + 后端API补充) =====
+        self._merge_registry_models(seen_filenames)
+
+        # ===== 第3步: 加载本地元数据补充描述 =====
+        meta = self._load_model_meta()
+        for r in self._model_rows:
+            # 依次尝试 model_id、name（filename）、repo_id 三个 key 查找
+            applied_desc = False
+            for key in [r.get("model_id", ""), r.get("name", ""), r.get("repo_id", "")]:
+                if not key or key not in meta:
+                    continue
+                m = meta[key]
+                if m.get("description") and not applied_desc:
+                    r["description"] = m["description"]
+                    applied_desc = True
+                if m.get("tag"):
+                    r["tag"] = m["tag"]
+                if applied_desc:
+                    break
+
+        self._apply_model_sort_and_render()
+
+    def _scan_local_models(self, seen_filenames: set):
+        """扫描本地模型目录,使用目录路径分类(与后端社区模型扩展一致的规则)"""
+        models_dir = getattr(self, '_models_dir', '')
+        # 只扫描真正的模型文件格式: .safetensors 和 .ckpt
+        # .pt/.bin/.pth 是 PyTorch 中间权重，不是独立模型检查点
+        scan_suffixes = {".safetensors", ".ckpt"}
+        hf_shard = __import__('re').compile(r'^(model|diffusion_pytorch_model|pytorch_model)-\d+-of-\d+$')
+
+        # 收集所有待扫描目录
+        scan_dirs = []
+        if models_dir and os.path.isdir(models_dir):
+            scan_dirs.append(models_dir)
+        dirs_config = self.config.get("model_dirs", [])
+        for d in dirs_config:
+            p = d.get("path", "")
+            if p and os.path.isdir(p) and p not in scan_dirs:
+                scan_dirs.append(p)
+
+        for scan_dir in scan_dirs:
+            for dirpath, _dirnames, filenames in os.walk(scan_dir):
+                for fn in filenames:
+                    if Path(fn).suffix.lower() not in scan_suffixes:
+                        continue
+                    if hf_shard.match(Path(fn).stem):
+                        continue
+                    if fn in seen_filenames:
+                        continue
+                    seen_filenames.add(fn)
+                    full_path = os.path.join(dirpath, fn)
+                    if not os.path.isfile(full_path):
+                        continue
+                    try:
+                        fsize = os.path.getsize(full_path)
+                    except OSError:
+                        fsize = 0
+
+                    cat_text = self._classify_local_file(fn, dirpath)
+                    size_gb = fsize / 1024 / 1024 / 1024 if fsize else 0
+                    is_lora = "lora" in fn.lower() or "lora" in dirpath.lower()
+                    desc = _get_lora_description(fn, is_lora, cat_text)
+                    tw = _get_lora_trigger_words(fn)
+
+                    self._model_rows.append({
+                        "name": fn,
+                        "description": desc,
+                        "trigger_words": tw,
+                        "category": cat_text,
+                        "tag": "本地",
+                        "size_gb": size_gb,
+                        "status": "本地",
+                        "status_icon": "√",
+                        "status_color": "#66BB6A",
+                        "model_id": "",
+                        "local_path": full_path,
+                        "downloaded": True,
+                        "source": "local",
+                    })
+
+    def _classify_local_file(self, filename: str, dirpath: str) -> str:
+        """根据文件名和目录路径判断模型分类(与后端 _classify_dirpath 对齐)"""
+        fn_lower = filename.lower()
+        dir_lower = (dirpath or "").lower().replace("\\", "/")
+        is_lora = "lora" in fn_lower or "lora" in dir_lower
+
+        # 1) 用户自定义目录映射优先
+        user_cat = self._lookup_user_dir_category(dirpath)
+        if user_cat:
+            cat_map = {"image": "图像模型", "image-lora": "图像LoRA",
+                       "video": "视频模型", "video-lora": "视频LoRA",
+                       "upscaler": "高清放大", "controlnet": "控制模型",
+                       "supporting": "辅助模型"}
+            return cat_map.get(user_cat, "视频模型")
+
+        # 2) 内置默认目录映射(与后端 _DEFAULT_DIR_CATEGORY_MAP 对齐,基于目录basename)
+        dir_basename = os.path.basename(dirpath.rstrip("\\/")).lower()
+        default_map = {
+            "z_image": "图像模型", "z-image": "图像模型", "unet": "图像模型",
+            "diffusion_models": "图像模型",
+            "zimage": "图像LoRA",
+            "controlnet": "控制模型", "t2i_adapter": "控制模型",
+            "upscale_models": "高清放大", "latent_upscale_models": "高清放大",
+            "vae": "辅助模型", "text_encoders": "辅助模型", "clip": "辅助模型",
+            "clip_vision": "辅助模型", "tokenizer": "辅助模型", "scheduler": "辅助模型",
+            "embeddings": "辅助模型", "hypernetworks": "辅助模型", "style_models": "辅助模型",
+            "vae_approx": "辅助模型", "audio_encoders": "辅助模型",
+            "photomaker": "辅助模型", "gligen": "辅助模型", "model_patches": "辅助模型",
+        }
+        if dir_basename in default_map:
+            return default_map[dir_basename]
+
+        # 3) 已知非 LoRA 目录(即使文件名含 lora 也不判为 lora)
+        if "z_image" in dir_lower or "z-image" in dir_lower or "/unet" in dir_lower:
+            return "图像模型"
+
+        # 4) LoRA 分类
+        if is_lora:
+            if ("z-image" in fn_lower or "zimage" in fn_lower or "zib-" in fn_lower or "zit-" in fn_lower
+                    or "z_image" in dir_lower or "z-image" in dir_lower or "zimage" in dir_lower):
+                return "图像LoRA"
+            if "/ltx" in dir_lower or "ltx" in fn_lower:
+                return "视频LoRA"
+            return "视频LoRA"
+
+        # 5) 非 LoRA: 目录路径优先
+        if "/unet" in dir_lower or "z_image" in dir_lower or "z-image" in dir_lower or "zimage" in dir_lower:
+            return "图像模型"
+        if "/upscaler" in dir_lower or "upscale" in dir_lower:
+            return "高清放大"
+        if "/controlnet" in dir_lower or "t2i_adapter" in dir_lower:
+            return "控制模型"
+        if "/vae" in dir_lower or "/text_encoder" in dir_lower or "/clip" in dir_lower or "/tokenizer" in dir_lower or "/scheduler" in dir_lower:
+            return "辅助模型"
+        if "/transformer" in dir_lower or "ltx" in dir_lower or "wan" in dir_lower:
+            return "视频模型"
+        if "z-image" in fn_lower or "zimage" in fn_lower or "zit-" in fn_lower or "zib-" in fn_lower:
+            return "图像模型"
+        if any(k in fn_lower for k in ("22b", "19b", "8b", "7b", "3b", "2.3", "distilled", "checkpoint")):
+            return "视频模型"
+        return "视频模型"
+
+    def _merge_registry_models(self, seen_filenames: set):
+        """合并 registry 模型数据(LTX_MODELS 本地 + 后端API 补充)"""
+        # 先尝试从后端获取 registry
+        registry_data = {}
         try:
-            import httpx
-            with httpx.Client(timeout=httpx.Timeout(15.0)) as client:
+            import httpx, json as _json
+            with httpx.Client(timeout=httpx.Timeout(5.0)) as client:
                 resp = client.get(f"http://127.0.0.1:{self._backend_port}/api/models/registry")
-                if resp.status_code != 200:
-                    self._populate_model_table_fallback()
-                    return
-                data = resp.json()
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for rm in data.get("models", []):
+                        registry_data[rm.get("filename", "")] = rm
         except Exception:
-            self._populate_model_table_fallback()
-            return
+            pass
 
-        registry_models = data.get("models", [])
-        local_dirs = data.get("local_dirs", [])
+        # 文件索引(用于检测文件是否存在)
+        file_index = {}
+        if self._models_dir and os.path.isdir(self._models_dir):
+            for dp, _dn, files in os.walk(self._models_dir):
+                for f in files:
+                    if f not in file_index:
+                        file_index[f] = os.path.join(dp, f)
 
-        local_files_map = {}
-        for ld in local_dirs:
-            for m in ld.get("models", []):
-                p = m.get("path", "")
-                if p not in local_files_map:
-                    local_files_map[p] = m
-
-        seen_filenames = set()
-
-        for rm in registry_models:
-            fname = rm.get("filename", "")
+        # 处理 LTX_MODELS 硬编码基础模型
+        for model_id, info in LTX_MODELS.items():
+            fname = info.get("file", "")
             if fname in seen_filenames:
                 continue
             seen_filenames.add(fname)
 
-            # 使用后端的 model_category 字段映射到前端分类
-            mc = rm.get("model_category", "")
-            if mc == "checkpoint":
-                fname_lower = fname.lower()
-                if "z-image" in fname_lower or "zimage" in fname_lower:
+            # 如果有后端registry数据,优先使用其分类
+            rm = registry_data.get(fname, {})
+            if rm:
+                mc = (rm.get("model_category") or "").lower()
+                pm = (rm.get("pipeline_mode") or "").lower()
+                repo_id_lower = (rm.get("repo_id") or "").lower()
+                if mc in ("image", "image-checkpoint"):
                     category = "图像模型"
-                else:
-                    category = "视频模型"
-            elif mc == "lora":
-                fname_lower = fname.lower()
-                if "ic-lora-union" in fname_lower:
-                    category = "控制模型"
-                elif "z-image" in fname_lower or "zimage" in fname_lower or "zib-" in fname_lower or "zit-" in fname_lower:
+                elif mc == "image-lora":
                     category = "图像LoRA"
-                else:
+                elif mc == "video-lora":
                     category = "视频LoRA"
-            elif mc == "upscaler":
-                category = "高清放大"
-            elif mc == "supporting":
-                if "text-encoder" in rm.get("model_id", "") or "gemma" in fname.lower():
+                elif mc == "video":
+                    category = "视频模型"
+                elif mc == "upscaler":
+                    category = "高清放大"
+                elif mc == "controlnet":
+                    category = "控制模型"
+                elif mc == "supporting":
                     category = "辅助模型"
-                elif "z-image" in fname.lower() or "zimage" in fname.lower():
-                    category = "图像模型"
-                elif "tts" in fname.lower() or "voxcpm" in fname.lower():
-                    category = "辅助模型"
+                # 2026-06-10: 后端 BUILTIN_REGISTRY 用 model_category="lora"(40 条),
+                # 启动器之前不识别导致 fallback 到文件名匹配。现按 pipeline_mode 二次区分:
+                elif mc == "lora":
+                    # 1) pipeline_mode=lora + repo 含 z-image/zit-/zib-  → 图像LoRA
+                    if pm == "lora" and ("z-image" in repo_id_lower or "zit-" in repo_id_lower or "zib-" in repo_id_lower):
+                        category = "图像LoRA"
+                    # 2) pipeline_mode=image 但被误标 lora 的 → 图像模型
+                    elif pm == "image":
+                        category = "图像模型"
+                    # 3) 其他 lora 默认为视频 LoRA(ltx 体系)
+                    else:
+                        category = "视频LoRA"
+                # 2026-06-10: 后端用 checkpoint 表示视频/图像核心模型,需根据 pipeline_mode 区分
+                elif mc == "checkpoint":
+                    if pm == "image":
+                        category = "图像模型"
+                    else:
+                        category = "视频模型"
                 else:
-                    category = "辅助模型"
+                    category = self._classify_model(model_id, info)
             else:
-                # 回退：根据文件名推断
-                category = self._classify_model("", {"file": fname, "model_id": rm.get("model_id", "")})
+                category = self._classify_model(model_id, info)
 
-            rm_tags = rm.get("tags", [])
-            if rm_tags and "required" in rm_tags:
-                tag_text = "必需"
-            elif rm_tags and "recommended" in rm_tags:
-                tag_text = "推荐"
+            tag = "必需" if info.get("required") else "推荐" if info.get("recommended") else "可选"
+            size_gb = info["size_bytes"] / 1024 / 1024 / 1024
+
+            model_path = os.path.join(self._models_dir, info["file"]) if self._models_dir else ""
+            exists = os.path.exists(model_path)
+            if not exists and fname in file_index:
+                model_path = file_index[fname]
+                exists = True
+
+            expected_bytes = info["size_bytes"]
+            if info.get("is_folder", False):
+                if exists and os.path.isdir(model_path):
+                    folder_size = sum(f.stat().st_size for f in __import__('pathlib').Path(model_path).rglob("*") if f.is_file())
+                    is_complete = folder_size > expected_bytes * 0.5
+                else:
+                    is_complete = False
             else:
-                tag_text = "可选"
-            size_gb = rm.get("size_gb", 0)
-            downloaded = rm.get("downloaded", False)
+                is_complete = exists and os.path.getsize(model_path) > expected_bytes * 0.9 if exists else False
+
+            if is_complete:
+                status, status_icon, status_color = "完整", "√", "#66BB6A"
+            elif exists:
+                status, status_icon, status_color = "不完整", "△", "#FFA726"
+            else:
+                status, status_icon, status_color = "未下载", "×", "#FF0000"
+
+            # 2026-06-10: 提取 HF API 自动补全的字段
+            hf_repo_id = rm.get("repo_id", "") if rm else ""
+            hf_preview_url = rm.get("preview_url", "") if rm else ""
+            hf_description = rm.get("description", "") if rm else ""
+            hf_tags = rm.get("tags", []) if rm else []
+            hf_enriched = bool(hf_repo_id and (hf_preview_url or hf_description or hf_tags))
 
             self._model_rows.append({
-                "name": rm.get("name", fname),
-                "description": rm.get("description", ""),
-                "trigger_words": ", ".join(rm.get("trigger_words", [])) if rm.get("trigger_words") else "",
+                "name": info.get("file", model_id),
+                "description": info.get("desc", ""),
+                "trigger_words": _get_lora_trigger_words(info.get("file", "")),
                 "category": category,
-                "tag": tag_text,
+                "tag": tag,
                 "size_gb": size_gb,
-                "status": "已下载" if downloaded else "未下载",
-                "status_icon": "√" if downloaded else "×",
-                "status_color": "#66BB6A" if downloaded else "#FF0000",
-                "model_id": rm.get("model_id", ""),
-                "local_path": rm.get("local_path", ""),
-                "downloaded": downloaded,
-                "source": "registry",
-                "repo_id": rm.get("repo_id", ""),
-                "filename": rm.get("filename", ""),
-                "quantization": rm.get("quantization", ""),
-                "variant": rm.get("variant", ""),
-                "is_folder": rm.get("is_folder", False),
-                "modelscope_id": rm.get("modelscope_id", ""),
+                "status": status,
+                "status_icon": status_icon,
+                "status_color": status_color,
+                "model_id": model_id,
+                "local_path": model_path if exists else "",
+                "downloaded": is_complete,
+                "source": "fallback",
+                "is_complete": is_complete,
+                "exists": exists,
+                "repo_id": hf_repo_id,
+                "preview_url": hf_preview_url,
+                "hf_enriched": hf_enriched,
             })
-
-        for path_str, lm in local_files_map.items():
-            lfn = lm.get("filename", "") or lm.get("name", "")
-            if lfn in seen_filenames:
-                continue
-            seen_filenames.add(lfn)
-
-            model_type = lm.get("model_type", "checkpoint")
-            fname_lower = lfn.lower()
-            if model_type == "lora":
-                if "z-image" in fname_lower or "zimage" in fname_lower or "zib-" in fname_lower or "zit-" in fname_lower:
-                    cat_text = "图像LoRA"
-                else:
-                    cat_text = "视频LoRA"
-            elif "z-image" in fname_lower or "zimage" in fname_lower:
-                cat_text = "图像模型"
-            else:
-                cat_text = "视频模型"
-            size_bytes = lm.get("size_bytes", 0)
-            size_gb = size_bytes / 1024 / 1024 / 1024 if size_bytes else 0
-            display_name = lm.get("name", lfn)
-            desc = _get_lora_description(lfn, model_type == "lora")
-            tw = _get_lora_trigger_words(lfn)
-
-            self._model_rows.append({
-                "name": display_name,
-                "description": desc,
-                "trigger_words": tw,
-                "category": cat_text,
-                "tag": "本地",
-                "size_gb": size_gb,
-                "status": "本地",
-                "status_icon": "√",
-                "status_color": "#66BB6A",
-                "model_id": "",
-                "local_path": path_str,
-                "downloaded": True,
-                "source": "local",
-            })
-
-        meta = self._load_model_meta()
-        for r in self._model_rows:
-            key = r.get("model_id") or r.get("name", "")
-            if key in meta:
-                m = meta[key]
-                if m.get("description"):
-                    r["description"] = m["description"]
-                if m.get("tag"):
-                    r["tag"] = m["tag"]
-
-        self._apply_model_sort_and_render()
 
     def _populate_model_table_fallback(self):
         self._model_checkboxes = {}
         self._model_rows = []
         seen_filenames = set()
+        # 注意: fallback 路径也需要用正确的后缀过滤
+        scan_suffixes = {".safetensors", ".ckpt"}
 
         # junction映射使自定义目录的文件在主模型目录下可见
         # 递归扫描主模型目录构建文件索引
@@ -7165,6 +7610,13 @@ class MainWindow(QMainWindow):
                 status_icon = "×"
                 status_color = "#FF0000"
 
+            # 2026-06-10: HF 字段（fallback 路径无 registry_data 时全部为空）
+            hf_repo_id = ""
+            hf_preview_url = ""
+            hf_description = ""
+            hf_tags = []
+            hf_enriched = False
+
             self._model_rows.append({
                 "name": info.get("file", model_id),
                 "description": info.get("desc", ""),
@@ -7181,6 +7633,9 @@ class MainWindow(QMainWindow):
                 "source": "fallback",
                 "is_complete": is_complete,
                 "exists": exists,
+                "repo_id": hf_repo_id,
+                "preview_url": hf_preview_url,
+                "hf_enriched": hf_enriched,
             })
 
         scan_suffixes = {".safetensors", ".ckpt", ".pt", ".bin", ".pth"}
@@ -7213,17 +7668,46 @@ class MainWindow(QMainWindow):
                         fsize = 0
                     is_lora = "lora" in fn.lower() or "lora" in dirpath.lower()
                     fn_lower = fn.lower()
-                    if is_lora:
-                        if "z-image" in fn_lower or "zimage" in fn_lower or "zib-" in fn_lower or "zit-" in fn_lower:
+                    dir_lower = dirpath.lower().replace("\\", "/")
+
+                    # ── 2026-06-10: 目录优先分类,与后端 _classify_dirpath 对齐 ──
+                    # 1) 用户自定义目录映射优先
+                    user_category = self._lookup_user_dir_category(dirpath)
+                    if user_category:
+                        cat_map = {"image": "图像模型", "image-lora": "图像LoRA",
+                                   "video": "视频模型", "video-lora": "视频LoRA",
+                                   "upscaler": "高清放大", "controlnet": "控制模型",
+                                   "supporting": "辅助模型"}
+                        cat_text = cat_map.get(user_category, "视频模型")
+                    elif is_lora:
+                        # 2) LoRA: 根据文件名和路径判断
+                        if ("z-image" in fn_lower or "zimage" in fn_lower or "zib-" in fn_lower or "zit-" in fn_lower
+                                or "z_image" in dir_lower or "z-image" in dir_lower or "zimage" in dir_lower):
                             cat_text = "图像LoRA"
+                        elif "/ltx" in dir_lower or "ltx" in fn_lower:
+                            cat_text = "视频LoRA"
                         else:
                             cat_text = "视频LoRA"
-                    elif "z-image" in fn_lower or "zimage" in fn_lower:
-                        cat_text = "图像模型"
                     else:
-                        cat_text = "视频模型"
+                        # 3) 非LoRA: 目录路径优先
+                        if "/unet" in dir_lower or "z_image" in dir_lower or "z-image" in dir_lower or "zimage" in dir_lower:
+                            cat_text = "图像模型"
+                        elif "/upscaler" in dir_lower or "upscale" in dir_lower:
+                            cat_text = "高清放大"
+                        elif "/controlnet" in dir_lower or "t2i_adapter" in dir_lower:
+                            cat_text = "控制模型"
+                        elif "/vae" in dir_lower or "/text_encoder" in dir_lower or "/clip" in dir_lower or "/tokenizer" in dir_lower or "/scheduler" in dir_lower:
+                            cat_text = "辅助模型"
+                        elif "/transformer" in dir_lower or "ltx" in dir_lower or "wan" in dir_lower:
+                            cat_text = "视频模型"
+                        elif "z-image" in fn_lower or "zimage" in fn_lower or "zit-" in fn_lower or "zib-" in fn_lower:
+                            cat_text = "图像模型"
+                        elif any(k in fn_lower for k in ("22b", "19b", "8b", "7b", "3b", "2.3", "distilled", "checkpoint")):
+                            cat_text = "视频模型"
+                        else:
+                            cat_text = "视频模型"
                     size_gb = fsize / 1024 / 1024 / 1024 if fsize else 0
-                    desc = _get_lora_description(fn, is_lora)
+                    desc = _get_lora_description(fn, is_lora, cat_text)
                     tw = _get_lora_trigger_words(fn)
 
                     self._model_rows.append({
@@ -7326,6 +7810,25 @@ class MainWindow(QMainWindow):
             cat = self._model_category_filter
             filtered_rows = [r for r in self._model_rows if r.get("category", "") == cat]
 
+        # 2026-06-10: 显示模式过滤（全部/仅本地/仅在线未下载）
+        view_mode = getattr(self, '_model_view_mode', 'all')
+        if view_mode == "local":
+            filtered_rows = [r for r in filtered_rows if r.get("downloaded", False)]
+        elif view_mode == "online":
+            filtered_rows = [r for r in filtered_rows if not r.get("downloaded", False)]
+
+        # 搜索过滤（名称/描述/触发词）
+        search_text = ""
+        if hasattr(self, '_lib_search_edit'):
+            search_text = self._lib_search_edit.text().strip().lower()
+        if search_text:
+            def match_search(r):
+                if search_text in (r.get("name", "") or "").lower(): return True
+                if search_text in (r.get("description", "") or "").lower(): return True
+                if search_text in (r.get("trigger_words", "") or "").lower(): return True
+                return False
+            filtered_rows = [r for r in filtered_rows if match_search(r)]
+
         # 更新分类栏计数
         self._update_category_counts()
 
@@ -7349,7 +7852,22 @@ class MainWindow(QMainWindow):
             mid = r.get("model_id", "")
             self._model_checkboxes[row] = cb
 
-            name_item = QTableWidgetItem(r.get("name", ""))
+            # 2026-06-10: HF 自动获取的元数据 → 🤗 前缀 + tooltip
+            name_text = r.get("name", "")
+            hf_enriched = r.get("hf_enriched", False)
+            repo_id = r.get("repo_id", "")
+            preview_url = r.get("preview_url", "")
+            if hf_enriched and repo_id:
+                name_text = f"🤗 {name_text}"
+            name_item = QTableWidgetItem(name_text)
+            if hf_enriched:
+                tip_lines = [f"HuggingFace 自动获取元数据 ({repo_id})"]
+                if preview_url:
+                    tip_lines.append(f"预览图: {preview_url}")
+                name_item.setToolTip("\n".join(tip_lines))
+                name_item.setForeground(QColor("#FFD54F"))  # 金黄色突出
+            # 模型名称列: 当列宽不足时省略溢出文本(显示省略号),而不是挤压到只剩几个字母
+            name_item.setTextElideMode(Qt.TextElideMode.ElideRight)
             self._model_table.setItem(row, 1, name_item)
 
             # 描述中融入触发词信息
@@ -7357,9 +7875,15 @@ class MainWindow(QMainWindow):
             tw = r.get("trigger_words", "")
             if tw:
                 desc_text = f"[触发词: {tw}] {desc_text}" if desc_text else f"[触发词: {tw}]"
-            desc_item = QTableWidgetItem(desc_text)
-            desc_item.setForeground(QColor("#999999"))
-            if desc_text:
+            # 如果没有描述，显示提示信息
+            if not desc_text:
+                desc_text = "⚠ 暂无描述"
+                desc_item = QTableWidgetItem(desc_text)
+                desc_item.setForeground(QColor("#666666"))  # 灰色
+                desc_item.setToolTip("该模型的描述信息不可用（可能仓库受限或无 README）")
+            else:
+                desc_item = QTableWidgetItem(desc_text)
+                desc_item.setForeground(QColor("#999999"))
                 desc_item.setToolTip(desc_text)
             self._model_table.setItem(row, 2, desc_item)
 
@@ -7648,19 +8172,46 @@ class MainWindow(QMainWindow):
         dirs_config = self.config.get("model_dirs", [])
         if not dirs_config:
             dirs_config = [{"path": self._models_dir, "label": "默认"}]
+        # 分类标签映射
+        cat_labels = {
+            "image": "图像模型", "image-lora": "图像LoRA", "video": "视频模型",
+            "video-lora": "视频LoRA", "upscaler": "高清放大", "controlnet": "控制模型",
+            "supporting": "辅助模型",
+        }
         for i, d in enumerate(dirs_config):
             path = d.get("path", "")
             label = d.get("label", "")
+            category = d.get("category", "")
             is_default = (i == 0 and label == "默认")
             if is_default:
                 display = f"[系统默认] {path}"
             else:
-                display = f"[{label}] {path}"
+                cat_tag = f" · {cat_labels.get(category, '')}" if category else ""
+                display = f"[{label}]{cat_tag}  {path}"
             self._model_dir_combo.addItem(display)
         self._model_dir_combo.blockSignals(False)
         if self._model_dir_combo.count() > 0:
             self._model_dir_combo.setCurrentIndex(0)
         self._update_remove_dir_btn_state()
+
+    def _lookup_user_dir_category(self, dirpath: str) -> str:
+        """根据用户自定义的目录分类映射查找目录所属分类"""
+        dirs_config = self.config.get("model_dirs", [])
+        dir_lower = (dirpath or "").lower().replace("\\", "/")
+        for d in dirs_config:
+            cat = d.get("category", "")
+            if not cat:
+                continue
+            cfg_path = (d.get("path", "") or "").lower().replace("\\", "/")
+            if cfg_path and (dir_lower.startswith(cfg_path) or dir_lower == cfg_path):
+                return cat
+            # 也匹配目录名
+            cfg_name = ""
+            if cfg_path:
+                cfg_name = cfg_path.rstrip("/").split("/")[-1]
+            if cfg_name and cfg_name in dir_lower.split("/"):
+                return cat
+        return ""
 
     def _update_remove_dir_btn_state(self):
         if not hasattr(self, '_remove_dir_btn') or not hasattr(self, '_model_dir_combo'):
@@ -7672,6 +8223,9 @@ class MainWindow(QMainWindow):
         is_default = (idx == 0 and dirs_config and dirs_config[0].get("label") == "默认")
         self._remove_dir_btn.setEnabled(not is_default)
         self._remove_dir_btn.setToolTip("系统默认目录不可删除" if is_default else "删除选中的自定义目录")
+        if hasattr(self, '_edit_cat_btn'):
+            self._edit_cat_btn.setEnabled(not is_default)
+            self._edit_cat_btn.setToolTip("系统默认目录不可修改" if is_default else "修改当前目录的分类")
 
     def _save_model_dirs(self, dirs_config):
         self.config.set("model_dirs", dirs_config)
@@ -7832,28 +8386,241 @@ class MainWindow(QMainWindow):
         # 移除对应的junction映射
         if removed_path:
             self._remove_model_junction(removed_path)
+        # 清除对应的目录分类映射
+        removed_category = removed.get("category", "")
+        if removed_category and removed_path:
+            try:
+                dir_name = os.path.basename(removed_path)
+                import urllib.request, json
+                port = getattr(self, '_backend_port', 3000)
+                url_get = f"http://127.0.0.1:{port}/api/models/dir-categories"
+                req = urllib.request.Request(url_get)
+                with urllib.request.urlopen(req, timeout=3) as resp:
+                    current = json.loads(resp.read().decode()).get("categories", {})
+                current.pop(dir_name, None)
+                url_post = f"http://127.0.0.1:{port}/api/models/dir-categories"
+                req2 = urllib.request.Request(
+                    url_post, data=json.dumps({"categories": current}).encode(),
+                    headers={"Content-Type": "application/json"}, method="POST")
+                urllib.request.urlopen(req2, timeout=3)
+            except Exception:
+                pass
         self._populate_model_dir_combo()
         self._notify_backend_dirs_changed()
         self._refresh_model_status()
         self._log(f"√ 已移除目录: {removed_path}", "ok")
+
+    def _edit_model_dir_category(self):
+        """修改当前选中目录的分类"""
+        if not hasattr(self, '_model_dir_combo'):
+            return
+        idx = self._model_dir_combo.currentIndex()
+        if idx < 0:
+            return
+        dirs_config = self.config.get("model_dirs", [])
+        if not dirs_config or idx >= len(dirs_config):
+            return
+        if idx == 0 and dirs_config[0].get("label") == "默认":
+            self._log("⚠ 系统默认目录不可修改", "warn")
+            return
+
+        current = dirs_config[idx]
+        dir_path = current.get("path", "")
+        dir_name = os.path.basename(dir_path)
+        old_cat = current.get("category", "")
+
+        # 弹出简易分类选择
+        cat_dialog = QDialog(self)
+        cat_dialog.setWindowTitle("修改分类")
+        cat_dialog.setFixedSize(400, 180)
+        cat_dialog.setStyleSheet("""
+            QDialog { background-color: #1A1A1A; color: #DDDDDD; font-size: 12px; }
+            QLabel { color: #CCCCCC; }
+            QComboBox { background-color: #252525; color: #DDDDDD; border: 1px solid #444;
+                border-radius: 3px; padding: 4px 10px; font-size: 12px; min-width: 140px; }
+            QComboBox:hover { border-color: #CC0000; }
+            QComboBox::drop-down { border: none; width: 20px; }
+            QComboBox QAbstractItemView { background-color: #252525; color: #DDDDDD;
+                selection-background-color: #CC0000; border: 1px solid #444; }
+            QPushButton { background-color: #252525; color: #AAAAAA; border: 1px solid #444;
+                border-radius: 4px; padding: 5px 18px; font-size: 11px; }
+            QPushButton:hover { background-color: #CC0000; color: #FFFFFF; border-color: #FF0000; }
+            QPushButton#btnConfirm { background-color: #CC0000; color: #FFFFFF; font-weight: bold; }
+            QPushButton#btnConfirm:hover { background-color: #FF0000; }
+        """)
+        layout = QVBoxLayout(cat_dialog)
+        layout.setSpacing(10)
+        layout.setContentsMargins(20, 16, 20, 16)
+
+        layout.addWidget(QLabel(f"目录: {dir_name}"))
+        cat_layout = QHBoxLayout()
+        cat_layout.addWidget(QLabel("新分类:"))
+        cat_combo = QComboBox()
+        cat_options = [
+            ("自动识别（不指定）", ""),
+            ("图像模型", "image"), ("图像LoRA", "image-lora"),
+            ("视频模型", "video"), ("视频LoRA", "video-lora"),
+            ("高清放大", "upscaler"), ("控制模型", "controlnet"),
+            ("辅助模型", "supporting"),
+        ]
+        sel_idx = 0
+        for i, (label, val) in enumerate(cat_options):
+            cat_combo.addItem(label, val)
+            if val == old_cat:
+                sel_idx = i
+        cat_combo.setCurrentIndex(sel_idx)
+        cat_layout.addWidget(cat_combo)
+        cat_layout.addStretch()
+        layout.addLayout(cat_layout)
+        layout.addStretch()
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_cancel = QPushButton("取消")
+        btn_cancel.clicked.connect(cat_dialog.reject)
+        btn_layout.addWidget(btn_cancel)
+        btn_confirm = QPushButton("确认")
+        btn_confirm.setObjectName("btnConfirm")
+        btn_confirm.clicked.connect(cat_dialog.accept)
+        btn_layout.addWidget(btn_confirm)
+        layout.addLayout(btn_layout)
+
+        if not cat_dialog.exec():
+            return
+
+        new_cat = cat_combo.currentData()
+        dirs_config[idx]["category"] = new_cat
+        self._save_model_dirs(dirs_config)
+        self._populate_model_dir_combo()
+
+        if new_cat:
+            self._sync_dir_category(dir_name, new_cat)
+        self._notify_backend_dirs_changed()
+        self._log(f"✎ [{dir_name}] 分类 → {new_cat or '自动识别'}", "ok")
 
     def _add_model_dir(self):
         dir_path = QFileDialog.getExistingDirectory(self, "选择模型目录")
         if not dir_path:
             return
         dir_name = os.path.basename(dir_path)
+
+        # ── 分类选择对话框 ──
+        cat_dialog = QDialog(self)
+        cat_dialog.setWindowTitle("添加模型目录 — 选择分类")
+        cat_dialog.setFixedSize(480, 250)
+        cat_dialog.setStyleSheet("""
+            QDialog { background-color: #1A1A1A; color: #DDDDDD; font-size: 12px; }
+            QLabel { color: #CCCCCC; }
+            QComboBox { background-color: #252525; color: #DDDDDD; border: 1px solid #444;
+                border-radius: 3px; padding: 4px 10px; font-size: 12px; min-width: 160px; }
+            QComboBox:hover { border-color: #CC0000; }
+            QComboBox::drop-down { border: none; width: 20px; }
+            QComboBox QAbstractItemView { background-color: #252525; color: #DDDDDD;
+                selection-background-color: #CC0000; border: 1px solid #444; padding: 4px; }
+            QPushButton { background-color: #252525; color: #AAAAAA; border: 1px solid #444;
+                border-radius: 4px; padding: 6px 20px; font-size: 12px; }
+            QPushButton:hover { background-color: #CC0000; color: #FFFFFF; border-color: #FF0000; }
+            QPushButton#btnConfirm { background-color: #CC0000; color: #FFFFFF; font-weight: bold; }
+            QPushButton#btnConfirm:hover { background-color: #FF0000; }
+        """)
+
+        layout = QVBoxLayout(cat_dialog)
+        layout.setSpacing(14)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # 路径显示
+        path_label = QLabel(f"目录:  {dir_path}")
+        path_label.setStyleSheet("color: #FFFFFF; font-weight: bold; font-size: 12px; background: #222222; padding: 8px; border-radius: 4px; word-wrap: break-word;")
+        path_label.setWordWrap(True)
+        layout.addWidget(path_label)
+
+        # 分类选择
+        cat_layout = QHBoxLayout()
+        cat_layout.addWidget(QLabel("模型分类:"))
+        cat_combo = QComboBox()
+        cat_options = [
+            ("自动识别（不指定）", ""),
+            ("图像模型", "image"),
+            ("图像LoRA", "image-lora"),
+            ("视频模型", "video"),
+            ("视频LoRA", "video-lora"),
+            ("高清放大", "upscaler"),
+            ("控制模型", "controlnet"),
+            ("辅助模型", "supporting"),
+        ]
+        for label, val in cat_options:
+            cat_combo.addItem(label, val)
+        cat_combo.setCurrentIndex(0)
+        cat_layout.addWidget(cat_combo)
+        cat_layout.addStretch()
+        layout.addLayout(cat_layout)
+
+        # 说明
+        hint = QLabel("选择「自动识别」将根据目录名和文件名自动推断分类")
+        hint.setStyleSheet("color: #777777; font-size: 10px;")
+        layout.addWidget(hint)
+
+        layout.addStretch()
+
+        # 按钮
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_cancel = QPushButton("取消")
+        btn_cancel.clicked.connect(cat_dialog.reject)
+        btn_layout.addWidget(btn_cancel)
+        btn_confirm = QPushButton("确认添加")
+        btn_confirm.setObjectName("btnConfirm")
+        btn_confirm.clicked.connect(cat_dialog.accept)
+        btn_layout.addWidget(btn_confirm)
+        layout.addLayout(btn_layout)
+
+        if not cat_dialog.exec():
+            return
+
+        category = cat_combo.currentData()
         label = self._infer_tag(dir_path) or dir_name
+
+        # 保存目录配置
         dirs_config = self.config.get("model_dirs", [])
         if not dirs_config:
             dirs_config = [{"path": self._models_dir, "label": "默认"}]
-        dirs_config.append({"path": dir_path, "label": label})
+        dirs_config.append({"path": dir_path, "label": label, "category": category})
         self._save_model_dirs(dirs_config)
+
+        # 如果用户指定了分类,同步到后端的目录分类映射
+        if category:
+            self._sync_dir_category(dir_name, category)
+
         # 创建junction映射到主模型目录
         self._create_model_junction(dir_path)
         self._populate_model_dir_combo()
         self._notify_backend_dirs_changed()
         self._refresh_model_status()
-        self._log(f"√ 已添加目录 [{label}] {dir_path}", "ok")
+        self._log(f"√ 已添加 [{label}] → {category or '自动识别'}", "ok")
+
+    def _sync_dir_category(self, dir_name: str, category: str):
+        """同步目录分类映射到后端"""
+        try:
+            import urllib.request, json
+            port = getattr(self, '_backend_port', 3000)
+            # 先获取当前映射
+            url_get = f"http://127.0.0.1:{port}/api/models/dir-categories"
+            req = urllib.request.Request(url_get)
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                current = json.loads(resp.read().decode()).get("categories", {})
+            # 追加新映射
+            current[dir_name] = category
+            # 保存
+            url_post = f"http://127.0.0.1:{port}/api/models/dir-categories"
+            req2 = urllib.request.Request(
+                url_post,
+                data=json.dumps({"categories": current}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req2, timeout=3)
+        except Exception:
+            pass
 
     def _remove_model_dir_by_path(self, path):
         dirs_config = self.config.get("model_dirs", [])
@@ -10608,6 +11375,1070 @@ class MainWindow(QMainWindow):
             if not is_complete:
                 self._download_model(model_id)
 
+    # ── 2026-06-10: 模型库（在线生态）相关方法 ──
+
+    def _on_view_mode_changed(self, mode: str):
+        """显示模式切换：全部 / 仅本地 / 仅在线未下载"""
+        self._model_view_mode = mode
+        # 两个 Tab 都需要重新渲染以应用过滤
+        self._render_model_table()
+        self._render_library_table()
+
+    def _on_model_tab_changed(self, idx: int):
+        """Tab 切换：我的模型 / 模型库（在线）"""
+        if idx == 1:
+            # 进入模型库 Tab 时拉取最新数据
+            if not self._library_rows:
+                self._populate_library_table()
+            else:
+                self._render_library_table()
+
+    def _on_lib_category_changed(self, current, _previous):
+        """模型库分类切换"""
+        if current is None:
+            self._lib_category_filter = "all"
+        else:
+            self._lib_category_filter = current.data(Qt.ItemDataRole.UserRole) or "all"
+        self._render_library_table()
+
+    def _populate_library_table(self):
+        """拉取 /api/models/registry 渲染「模型库（在线）」Tab"""
+        try:
+            import httpx
+            with httpx.Client(timeout=httpx.Timeout(8.0)) as client:
+                resp = client.get(f"http://127.0.0.1:{self._backend_port}/api/models/registry")
+                if resp.status_code == 200:
+                    data = resp.json()
+                else:
+                    data = None
+        except Exception as e:
+            self._log(f"⚠ 模型库拉取失败: {e}", "warn")
+            data = None
+
+        rows: list[dict] = []
+        if data and "models" in data:
+            for m in data["models"]:
+                rows.append({
+                    "model_id": m.get("model_id", ""),
+                    "name": m.get("name", m.get("filename", "")),
+                    "filename": m.get("filename", ""),
+                    "description": m.get("description", ""),
+                    "usage_scenario": m.get("usage_scenario", ""),
+                    "trigger_word": m.get("trigger_word", ""),
+                    "category": m.get("model_category", ""),
+                    "category_text": self._library_category_text(m.get("model_category", "")),
+                    "source": m.get("source", "community"),
+                    "quantization": m.get("quantization", ""),
+                    "variant": m.get("variant", ""),
+                    "min_vram_gb": m.get("min_vram_gb", 0),
+                    "size_gb": m.get("size_gb", 0.0),
+                    "recommended_tiers": m.get("recommended_tiers", []),
+                    "tags": m.get("tags", []),
+                    "requires": m.get("requires", []),
+                    "repo_id": m.get("repo_id", ""),
+                    "downloaded": bool(m.get("downloaded", False)),
+                    "local_path": m.get("local_path", ""),
+                    "preview_url": m.get("preview_url", ""),
+                })
+
+        # 缓存同步状态
+        sync_status = (data or {}).get("sync_status") or {}
+        self._last_library_sync = sync_status
+        self._update_library_status_label(sync_status)
+
+        self._library_rows = rows
+        self._render_library_table()
+
+    def _update_library_status_label(self, sync_status: dict):
+        """更新模型库同步状态显示"""
+        try:
+            if not sync_status:
+                self._lbl_library_status.setText("在线库: 未同步")
+                self._lbl_library_status.setStyleSheet("color: #888888; font-size: 10px;")
+                return
+            if sync_status.get("success"):
+                ts = sync_status.get("time")
+                if ts:
+                    import datetime as _dt
+                    dt = _dt.datetime.fromtimestamp(float(ts))
+                    ago = _dt.datetime.now() - dt
+                    if ago.total_seconds() < 60:
+                        ago_str = f"{int(ago.total_seconds())}秒前"
+                    elif ago.total_seconds() < 3600:
+                        ago_str = f"{int(ago.total_seconds() // 60)}分钟前"
+                    else:
+                        ago_str = f"{int(ago.total_seconds() // 3600)}小时前"
+                    self._lbl_library_status.setText(
+                        f"在线库: 已同步({ago_str}  +{sync_status.get('added', 0)}/{sync_status.get('updated', 0)}↑)"
+                    )
+                else:
+                    self._lbl_library_status.setText("在线库: 已同步")
+                self._lbl_library_status.setStyleSheet("color: #66BB6A; font-size: 10px;")
+            else:
+                err = sync_status.get("error", "未知错误")
+                err_short = str(err)[:60] + ("..." if len(str(err)) > 60 else "")
+                self._lbl_library_status.setText(f"在线库: 同步失败 ({err_short})")
+                self._lbl_library_status.setStyleSheet("color: #FF0000; font-size: 10px;")
+        except Exception:
+            self._lbl_library_status.setText("在线库: 状态异常")
+            self._lbl_library_status.setStyleSheet("color: #FF9800; font-size: 10px;")
+
+    def _library_category_text(self, cat: str) -> str:
+        """将后端 model_category 翻译为显示用分类文本"""
+        m = {
+            "video": "视频核心", "video-checkpoint": "视频核心",
+            "video-lora": "视频LoRA", "lora": "视频LoRA",
+            "image": "图像核心", "image-checkpoint": "图像核心",
+            "image-lora": "图像LoRA",
+            "controlnet": "控制模型", "control": "控制模型",
+            "upscaler": "高清放大",
+            "supporting": "辅助模型", "checkpoint": "视频核心",
+        }
+        return m.get((cat or "").lower(), cat or "其他")
+
+    def _render_library_table(self):
+        """渲染「模型库（在线）」Tab 表格"""
+        if not hasattr(self, '_library_table') or not hasattr(self, '_library_rows'):
+            return
+        self._library_table.setRowCount(0)
+        rows = self._library_rows
+
+        # 1) 显示模式过滤：all / local（已下载） / online（未下载）
+        view_mode = getattr(self, '_model_view_mode', 'all')
+        if view_mode == "local":
+            rows = [r for r in rows if r.get("downloaded")]
+        elif view_mode == "online":
+            rows = [r for r in rows if not r.get("downloaded")]
+
+        # 2) 分类过滤
+        cat_filter = getattr(self, '_lib_category_filter', 'all')
+        if cat_filter != "all":
+            rows = [r for r in rows if (r.get("category", "").lower() == cat_filter)]
+
+        # 3) 来源过滤
+        src_filter = self._lib_source_combo.currentData() if hasattr(self, '_lib_source_combo') else "all"
+        if src_filter and src_filter != "all":
+            rows = [r for r in rows if r.get("source") == src_filter]
+
+        # 4) 搜索过滤（按名称/描述/触发词）
+        search_text = ""
+        if hasattr(self, '_lib_search_edit'):
+            search_text = self._lib_search_edit.text().strip().lower()
+        if search_text:
+            def match(r):
+                if search_text in (r.get("name", "") or "").lower(): return True
+                if search_text in (r.get("description", "") or "").lower(): return True
+                if search_text in (r.get("usage_scenario", "") or "").lower(): return True
+                if search_text in (r.get("trigger_word", "") or "").lower(): return True
+                if search_text in (r.get("repo_id", "") or "").lower(): return True
+                return False
+            rows = [r for r in rows if match(r)]
+
+        # 5) 排序：已下载优先 + 名称字典序
+        rows.sort(key=lambda r: (not r.get("downloaded"), (r.get("name") or "").lower()))
+
+        for row, r in enumerate(rows):
+            self._library_table.insertRow(row)
+            # 名称
+            name_item = QTableWidgetItem(r.get("name", ""))
+            self._library_table.setItem(row, 1, name_item)
+            # 描述/用途
+            desc_text = r.get("description", "")
+            if r.get("usage_scenario") and r.get("usage_scenario") != desc_text:
+                desc_text = f"{desc_text} | {r['usage_scenario']}" if desc_text else r["usage_scenario"]
+            tw = r.get("trigger_word", "")
+            if tw:
+                desc_text = f"[触发词: {tw}] {desc_text}" if desc_text else f"[触发词: {tw}]"
+            desc_item = QTableWidgetItem(desc_text)
+            desc_item.setForeground(QColor("#BBBBBB"))
+            if desc_text:
+                desc_item.setToolTip(desc_text)
+            self._library_table.setItem(row, 2, desc_item)
+            # 分类
+            self._library_table.setItem(row, 3, QTableWidgetItem(r.get("category_text", "")))
+            # 显存
+            vram = r.get("min_vram_gb", 0)
+            vram_text = f"≥{vram}GB" if vram else ""
+            self._library_table.setItem(row, 4, QTableWidgetItem(vram_text))
+            # 来源
+            src_text = "官方" if r.get("source") == "official" else "社区"
+            src_item = QTableWidgetItem(src_text)
+            src_item.setForeground(QColor("#42A5F5" if src_text == "官方" else "#FF9800"))
+            self._library_table.setItem(row, 5, src_item)
+            # 状态
+            if r.get("downloaded"):
+                status_text = "√ 已下载"
+                status_item = QTableWidgetItem(status_text)
+                status_item.setForeground(QColor("#66BB6A"))
+            else:
+                status_text = "○ 未下载"
+                status_item = QTableWidgetItem(status_text)
+                status_item.setForeground(QColor("#888888"))
+            self._library_table.setItem(row, 6, status_item)
+            # 操作
+            ops_widget = QWidget()
+            ops_widget.setStyleSheet("background: transparent;")
+            ops_layout = QHBoxLayout(ops_widget)
+            ops_layout.setContentsMargins(4, 2, 4, 2)
+            ops_layout.setSpacing(4)
+
+            # 详情按钮
+            detail_btn = QPushButton("📖 详情")
+            detail_btn.setStyleSheet("background-color: #455A64; color: white;")
+            detail_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            mid = r.get("model_id", "")
+            detail_btn.clicked.connect(lambda checked, m=dict(r): self._show_model_detail_dialog(m))
+            ops_layout.addWidget(detail_btn)
+
+            # 下载/删除按钮
+            if r.get("downloaded"):
+                rm_btn = QPushButton("🗑 删除")
+                rm_btn.setStyleSheet("background-color: #1565C0; color: white;")
+                rm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                lp = r.get("local_path", "")
+                rm_btn.clicked.connect(lambda checked, p=lp: self._delete_local_model_file(p))
+                ops_layout.addWidget(rm_btn)
+            else:
+                dl_btn = QPushButton("📥 下载")
+                dl_btn.setStyleSheet("background-color: #2E7D32; color: white;")
+                dl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                dl_btn.clicked.connect(lambda checked, m=mid: self._download_library_model(m))
+                ops_layout.addWidget(dl_btn)
+
+            ops_layout.addStretch()
+            self._library_table.setCellWidget(row, 7, ops_widget)
+            self._library_table.setRowHeight(row, 36)
+
+        # 更新计数
+        if hasattr(self, '_lib_count_lbl'):
+            total = len(self._library_rows)
+            shown = len(rows)
+            self._lib_count_lbl.setText(f"显示 {shown} / 共 {total} 个模型")
+
+    def _on_library_row_clicked(self, row, col):
+        """点击模型库表格行 -> 弹窗显示详情"""
+        if row < 0 or row >= len(self._library_rows):
+            return
+        # 根据当前过滤逻辑找到对应 row 数据
+        # 简化处理：直接通过 _library_rows 索引（不适用过滤情况）
+        # 这里用统一方法获取：重新走过滤
+        rows = list(self._library_rows)
+        view_mode = getattr(self, '_model_view_mode', 'all')
+        if view_mode == "local":
+            rows = [r for r in rows if r.get("downloaded")]
+        elif view_mode == "online":
+            rows = [r for r in rows if not r.get("downloaded")]
+        cat_filter = getattr(self, '_lib_category_filter', 'all')
+        if cat_filter != "all":
+            rows = [r for r in rows if (r.get("category", "").lower() == cat_filter)]
+        if hasattr(self, '_lib_source_combo'):
+            src_filter = self._lib_source_combo.currentData()
+            if src_filter and src_filter != "all":
+                rows = [r for r in rows if r.get("source") == src_filter]
+        if hasattr(self, '_lib_search_edit'):
+            st = self._lib_search_edit.text().strip().lower()
+            if st:
+                rows = [r for r in rows if (st in (r.get("name", "") or "").lower() or
+                                              st in (r.get("description", "") or "").lower() or
+                                              st in (r.get("usage_scenario", "") or "").lower() or
+                                              st in (r.get("trigger_word", "") or "").lower() or
+                                              st in (r.get("repo_id", "") or "").lower())]
+        rows.sort(key=lambda r: (not r.get("downloaded"), (r.get("name") or "").lower()))
+        if row < len(rows):
+            self._show_model_detail_dialog(rows[row])
+
+    def _show_model_detail_dialog(self, row: dict):
+        """弹出模型详情对话框（专业描述/用途/触发词/依赖/规格等）"""
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"📖 模型详情 — {row.get('name', '')}")
+        dlg.resize(720, 600)
+        dlg.setStyleSheet("QDialog { background-color: #1A1A1A; }")
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(10)
+
+        # 标题
+        title_lbl = QLabel(row.get("name", ""))
+        title_lbl.setStyleSheet("font-size: 17px; font-weight: bold; color: #FFFFFF;")
+        layout.addWidget(title_lbl)
+
+        # 来源 + 状态徽章
+        badge_row = QHBoxLayout()
+        badge_row.setSpacing(8)
+        src_text = "官方" if row.get("source") == "official" else "社区"
+        src_color = "#1976D2" if src_text == "官方" else "#F57C00"
+        badge = QLabel(f"  {src_text}  ")
+        badge.setStyleSheet(f"background-color: {src_color}; color: #FFFFFF; border-radius: 8px; padding: 2px 8px; font-size: 11px; font-weight: bold;")
+        badge_row.addWidget(badge)
+
+        cat_text = row.get("category_text", row.get("category", ""))
+        if cat_text:
+            cat_badge = QLabel(f"  {cat_text}  ")
+            cat_badge.setStyleSheet("background-color: #455A64; color: #FFFFFF; border-radius: 8px; padding: 2px 8px; font-size: 11px;")
+            badge_row.addWidget(cat_badge)
+
+        if row.get("quantization"):
+            q_badge = QLabel(f"  {row['quantization']}  ")
+            q_badge.setStyleSheet("background-color: #6A1B9A; color: #FFFFFF; border-radius: 8px; padding: 2px 8px; font-size: 11px;")
+            badge_row.addWidget(q_badge)
+
+        if row.get("downloaded"):
+            dl_badge = QLabel("  √ 已下载  ")
+            dl_badge.setStyleSheet("background-color: #2E7D32; color: #FFFFFF; border-radius: 8px; padding: 2px 8px; font-size: 11px; font-weight: bold;")
+            badge_row.addWidget(dl_badge)
+        else:
+            dl_badge = QLabel("  ○ 未下载  ")
+            dl_badge.setStyleSheet("background-color: #555555; color: #FFFFFF; border-radius: 8px; padding: 2px 8px; font-size: 11px;")
+            badge_row.addWidget(dl_badge)
+
+        badge_row.addStretch()
+        layout.addLayout(badge_row)
+
+        # 分隔线
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.Shape.HLine)
+        sep1.setStyleSheet("background-color: #333333; max-height: 1px;")
+        layout.addWidget(sep1)
+
+        def add_kv(label: str, value: str, color: str = "#DDDDDD"):
+            if not value:
+                return
+            row_layout = QHBoxLayout()
+            row_layout.setSpacing(8)
+            lbl = QLabel(label)
+            lbl.setFixedWidth(80)
+            lbl.setStyleSheet("color: #888888; font-size: 12px;")
+            val = QLabel(str(value))
+            val.setWordWrap(True)
+            val.setStyleSheet(f"color: {color}; font-size: 12px;")
+            row_layout.addWidget(lbl, 0)
+            row_layout.addWidget(val, 1)
+            layout.addLayout(row_layout)
+
+        # 描述
+        desc = row.get("description", "")
+        if desc:
+            desc_box = QLabel(f"📝 模型介绍\n{desc}")
+            desc_box.setWordWrap(True)
+            desc_box.setStyleSheet("background-color: #252525; border-left: 3px solid #1976D2; padding: 10px 12px; color: #DDDDDD; font-size: 12px;")
+            layout.addWidget(desc_box)
+
+        # 使用场景
+        usage = row.get("usage_scenario", "")
+        if usage and usage != desc:
+            usage_box = QLabel(f"💡 使用场景\n{usage}")
+            usage_box.setWordWrap(True)
+            usage_box.setStyleSheet("background-color: #252525; border-left: 3px solid #FF9800; padding: 10px 12px; color: #DDDDDD; font-size: 12px;")
+            layout.addWidget(usage_box)
+
+        # 触发词
+        tw = row.get("trigger_word", "")
+        if tw:
+            tw_box = QLabel(f"🔑 触发词（Prompt 关键词）\n{tw}")
+            tw_box.setWordWrap(True)
+            tw_box.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            tw_box.setStyleSheet("background-color: #1A2A1A; border-left: 3px solid #66BB6A; padding: 10px 12px; color: #A5D6A7; font-size: 12px; font-family: 'Consolas', monospace;")
+            layout.addWidget(tw_box)
+
+        # 规格信息
+        add_kv("📦 大小", f"{row.get('size_gb', 0):.1f} GB" if row.get('size_gb', 0) else "")
+        add_kv("💾 显存", f"≥{row.get('min_vram_gb', 0)} GB" if row.get('min_vram_gb', 0) else "未标注")
+        add_kv("🎯 量化", row.get("quantization", ""))
+        add_kv("🔖 变体", row.get("variant", ""))
+        rec_tiers = row.get("recommended_tiers", [])
+        if rec_tiers:
+            add_kv("✅ 推荐", "、".join(rec_tiers))
+        add_kv("📂 文件名", row.get("filename", ""))
+        add_kv("🌐 仓库", row.get("repo_id", ""))
+
+        # 依赖
+        requires = row.get("requires", [])
+        if requires:
+            add_kv("🔗 依赖", "、".join(requires), color="#42A5F5")
+
+        # 本地路径
+        lp = row.get("local_path", "")
+        if lp:
+            lp_lbl = QLabel(f"📍 本地路径: {lp}")
+            lp_lbl.setWordWrap(True)
+            lp_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            lp_lbl.setStyleSheet("color: #777777; font-size: 11px; font-family: 'Consolas', monospace;")
+            layout.addWidget(lp_lbl)
+
+        # 关闭按钮
+        layout.addStretch()
+        close_btn = QPushButton("关闭")
+        close_btn.setFixedHeight(34)
+        close_btn.setStyleSheet("""
+            QPushButton { background-color: #455A64; color: #FFFFFF; border: none; border-radius: 6px; font-size: 13px; font-weight: bold; }
+            QPushButton:hover { background-color: #546E7A; }
+        """)
+        close_btn.clicked.connect(dlg.accept)
+        layout.addWidget(close_btn)
+
+        dlg.exec()
+
+    def _sync_library_from_remote(self):
+        """已废弃(2026-06-10): 旧按钮逻辑,现由 _sync_hf_metadata 接管。
+        保留仅为兼容旧调用,实际不再被任何按钮使用。"""
+        self._btn_library_sync.setEnabled(False)
+        self._btn_library_sync.setText("🔄 同步中...")
+        QApplication.processEvents()
+
+        def do_sync():
+            try:
+                import httpx
+                with httpx.Client(timeout=httpx.Timeout(15.0)) as client:
+                    resp = client.post(f"http://127.0.0.1:{self._backend_port}/api/models/registry/sync")
+                    if resp.status_code == 200:
+                        result = resp.json()
+                        success = result.get("success", False)
+                        added = result.get("added", 0)
+                        updated = result.get("updated", 0)
+                        err = result.get("error", "")
+                        if success:
+                            self._log(f"√ 模型库同步完成: 新增 {added}, 更新 {updated}", "ok")
+                        else:
+                            self._log(f"⚠ 模型库同步失败: {err or '未知'}", "warn")
+                    else:
+                        self._log(f"⚠ 模型库同步失败: HTTP {resp.status_code}", "warn")
+            except Exception as e:
+                self._log(f"⚠ 模型库同步异常: {e}", "warn")
+            finally:
+                # 重新拉取并刷新 UI
+                self._populate_library_table()
+                self._btn_library_sync.setEnabled(True)
+                self._btn_library_sync.setText("🔄 获取元数据")
+
+        import threading
+        threading.Thread(target=do_sync, daemon=True).start()
+
+    # ──────────────────────────────────────────────────────────────────
+    # 2026-06-10: HF 自动元数据同步 UI（轮询 / 取消 / 进度 / 状态）
+    # ──────────────────────────────────────────────────────────────────
+
+    def _start_hf_status_poll(self):
+        """启动 HF 状态后台轮询（每 3 秒一次，永久运行）。"""
+        if hasattr(self, '_hf_poll_timer') and self._hf_poll_timer is not None:
+            return  # 已启动
+        self._hf_poll_timer = QTimer(self)
+        self._hf_poll_timer.timeout.connect(self._poll_hf_status)
+        self._hf_poll_timer.start(3000)
+        # 立刻轮询一次，避免用户首次进入看到 0
+        QTimer.singleShot(500, self._poll_hf_status)
+
+    def _poll_hf_status(self):
+        """拉取后端 /api/models/registry/hf-status 并更新 UI。"""
+        def fetch():
+            try:
+                import httpx
+                with httpx.Client(timeout=httpx.Timeout(2.5)) as client:
+                    resp = client.get(f"http://127.0.0.1:{self._backend_port}/api/models/registry/hf-status")
+                    if resp.status_code == 200:
+                        return resp.json()
+            except Exception:
+                return None
+            return None
+        import threading
+        def on_done(status):
+            if status is not None:
+                self._apply_hf_status_to_ui(status)
+            else:
+                # 后端不可达时，如果按钮仍禁用则恢复
+                if hasattr(self, '_btn_library_sync') and not self._btn_library_sync.isEnabled():
+                    self._log("[DEBUG] 后端不可达，恢复获取元数据按钮", "warn")
+                    self._btn_library_sync.setEnabled(True)
+                    self._btn_library_sync.setText("🔄 获取元数据")
+        # 在子线程中 fetch，结果回到主线程
+        def worker():
+            data = fetch()
+            QTimer.singleShot(0, lambda: on_done(data))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_hf_status_to_ui(self, status: dict):
+        """根据 hf-status 更新进度条 / 取消按钮 / 状态标签。"""
+        if not hasattr(self, '_hf_progress_bar'):
+            return
+        running = bool(status.get("running"))
+        total = int(status.get("total") or 0)
+        fetched = int(status.get("fetched") or 0)
+        failed = int(status.get("failed") or 0)
+        triggered_by = status.get("triggered_by")
+        current = (status.get("current") or "").strip()
+        last_run = status.get("last_run")
+        last_success = status.get("last_success")
+        last_error = status.get("last_error")
+
+        if running:
+            # ── 运行中：显示进度条 + 取消按钮（仅 manual） ──
+            self._hf_progress_bar.setVisible(True)
+            if total > 0:
+                self._hf_progress_bar.setRange(0, total)
+                self._hf_progress_bar.setValue(fetched)
+            else:
+                self._hf_progress_bar.setRange(0, 0)  # 不确定模式
+            pct_text = f"{fetched}/{total}" if total else f"{fetched}?"
+            if current:
+                short = current.split("/")[-1][:18]
+                self._lbl_hf_status.setText(f"HF: {pct_text}  {short}…")
+            else:
+                self._lbl_hf_status.setText(f"HF: {pct_text}")
+            self._lbl_hf_status.setStyleSheet("color: #42A5F5; font-size: 10px;")
+            if triggered_by == "manual":
+                self._btn_hf_cancel.setVisible(True)
+            else:
+                # 后台同步不允许取消（避免下次还要跑）
+                self._btn_hf_cancel.setVisible(False)
+            # 同步按钮状态：手动模式运行中 → 显示 "🔄 同步中…"
+            if triggered_by == "manual" and hasattr(self, '_btn_library_sync'):
+                self._btn_library_sync.setEnabled(False)
+                self._btn_library_sync.setText("🔄 同步中…")
+        else:
+            # ── 空闲 ──
+            self._hf_progress_bar.setVisible(False)
+            self._btn_hf_cancel.setVisible(False)
+            if hasattr(self, '_btn_library_sync'):
+                self._btn_library_sync.setEnabled(True)
+                self._btn_library_sync.setText("🔄 获取元数据")
+            # 状态文本：上次同步时间 + 成功/失败统计
+            text = "HF元数据: 未启动"
+            color = "#888888"
+            if last_success:
+                try:
+                    import datetime as _dt
+                    dt = _dt.datetime.fromtimestamp(float(last_success))
+                    ago = _dt.datetime.now() - dt
+                    if ago.total_seconds() < 60:
+                        ago_str = f"{int(ago.total_seconds())}秒前"
+                    elif ago.total_seconds() < 3600:
+                        ago_str = f"{int(ago.total_seconds() // 60)}分钟前"
+                    else:
+                        ago_str = f"{int(ago.total_seconds() // 3600)}小时前"
+                    fetched_total = int(status.get("last_fetched") or fetched or 0)
+                    failed_total = int(status.get("last_failed") or failed or 0)
+                    if failed_total > 0:
+                        text = f"HF元数据: {ago_str} (成功 {fetched_total} / 失败 {failed_total})"
+                        color = "#FF9800"
+                    else:
+                        text = f"HF元数据: {ago_str} (成功 {fetched_total})"
+                        color = "#66BB6A"
+                except Exception:
+                    pass
+            elif last_run and last_error:
+                err_short = str(last_error)[:50] + ("…" if len(str(last_error)) > 50 else "")
+                text = f"HF元数据: 失败 ({err_short})"
+                color = "#FF0000"
+            self._lbl_hf_status.setText(text)
+            self._lbl_hf_status.setStyleSheet(f"color: {color}; font-size: 10px;")
+
+    def _cancel_hf_sync(self):
+        """点击「取消」→ 调用 /api/models/registry/cancel-hf。"""
+        self._btn_hf_cancel.setEnabled(False)
+        def do_cancel():
+            try:
+                import httpx
+                with httpx.Client(timeout=httpx.Timeout(5.0)) as client:
+                    resp = client.post(f"http://127.0.0.1:{self._backend_port}/api/models/registry/cancel-hf")
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        status = data.get("status", "")
+                        if status == "cancelling":
+                            self._log("⚠ 正在取消 HF 元数据同步…", "warn")
+                        elif status == "refused":
+                            self._log("⚠ 后台同步不可取消（下次自动重跑）", "warn")
+                        elif status == "not_running":
+                            self._log("HF 同步已不在运行", "info")
+            except Exception as e:
+                self._log(f"⚠ 取消失败: {e}", "warn")
+            finally:
+                QTimer.singleShot(200, lambda: self._btn_hf_cancel.setEnabled(True))
+        import threading
+        threading.Thread(target=do_cancel, daemon=True).start()
+
+    # ── HF 元数据独立获取（不依赖后端） ──
+    _HF_API_MIRRORS = [
+        "https://hf-mirror.com/api/models",
+        "https://huggingface.co/api/models",
+    ]
+    _HF_RESOLVE_MIRRORS = [
+        "https://hf-mirror.com",
+        "https://huggingface.co",
+    ]
+    _MODELSCOPE_API = "https://modelscope.cn/api/v1/models"
+    _HF_API_TIMEOUT = 8.0
+    _HF_USER_AGENT = "YunJi-Desktop/1.0"
+    _HF_META_TTL = 86400  # 24h 缓存
+    _HF_CONCURRENCY = 4
+    # 自适应源选择
+    _hf_preferred_api: str | None = None
+    _hf_preferred_resolve: str | None = None
+    _hf_preferred_fails = 0
+    _HF_MAX_FAILS = 2
+
+    def _hf_fetch_readme_desc(self, repo_id: str) -> str:
+        """从 HF 仓库 README.md 提取第一段描述文本（双镜像尝试）。
+        注意：此方法可能在线程池中调用，不能直接调用 self._log()。"""
+        import re as _re
+        # 尝试两个镜像源 + 直接访问
+        mirrors = [self._hf_preferred_resolve or self._HF_RESOLVE_MIRRORS[0]]
+        for m in self._HF_RESOLVE_MIRRORS:
+            if m not in mirrors:
+                mirrors.append(m)
+        # 对于 ByteDance 等私有仓库，直接访问 huggingface.co 可能返回 401，但仍然尝试
+        # 添加一个兜底：使用不带 User-Agent 的简单请求
+        for mirror in mirrors:
+            url = f"{mirror}/{repo_id}/raw/main/README.md"
+            try:
+                import httpx
+                with httpx.Client(timeout=httpx.Timeout(8.0)) as client:
+                    r = client.get(url, headers={"User-Agent": self._HF_USER_AGENT})
+                    if r.status_code != 200:
+                        continue
+                    text = r.text
+                    # 去掉 YAML front matter
+                    if text.startswith("---"):
+                        end = text.find("---", 3)
+                        if end > 0:
+                            text = text[end + 3:]
+                    # 提取第一段有意义的文本
+                    for line in text.split("\n"):
+                        line = line.strip()
+                        if not line or line.startswith("#") or line.startswith("!") or line.startswith("---") or line.startswith("|") or line.startswith("[") or line.startswith("{"):
+                            continue
+                        if len(line) < 20:
+                            continue
+                        # 清理 markdown 格式
+                        line = _re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)
+                        line = _re.sub(r"[*_`#~]", "", line)
+                        return line[:200]
+                    return ""
+            except Exception:
+                continue
+        
+        # 兜底方案：如果 README 获取失败，尝试从 HF API cardData 中提取
+        for mirror_base in self._HF_API_MIRRORS:
+            try:
+                import httpx
+                api_url = f"{mirror_base.rstrip('/')}/{repo_id}"
+                with httpx.Client(timeout=httpx.Timeout(8.0)) as client:
+                    r = client.get(api_url, headers={"User-Agent": self._HF_USER_AGENT})
+                    if r.status_code == 200:
+                        data = r.json()
+                        cd = data.get("cardData") or {}
+                        if isinstance(cd, dict):
+                            desc = cd.get("description", "")
+                            if isinstance(desc, str) and desc.strip():
+                                return desc.strip()[:200]
+                            elif isinstance(desc, dict):
+                                text = desc.get("text", "")
+                                if text:
+                                    return text.strip()[:200]
+                break  # 如果是 401 或其他错误，不再重试
+            except Exception:
+                continue
+        
+        return ""
+
+    def _hf_fetch_modelscope(self, repo_id: str, _errors: list | None = None) -> dict | None:
+        """从 ModelScope API 获取模型信息（作为 HF 401 的备选源）。"""
+        url = f"{self._MODELSCOPE_API}/{repo_id}"
+        try:
+            import httpx
+            with httpx.Client(timeout=httpx.Timeout(10.0)) as client:
+                r = client.get(url, headers={"User-Agent": self._HF_USER_AGENT})
+                if r.status_code != 200:
+                    if _errors is not None:
+                        _errors.append(f"modelscope=HTTP{r.status_code}")
+                    return None
+                data = r.json()
+                ms_data = data.get("Data") or {}
+                if not ms_data:
+                    if _errors is not None:
+                        _errors.append("modelscope=empty_Data")
+                    return None
+                result = {
+                    "description": (ms_data.get("Description") or "").strip(),
+                    "chinese_name": (ms_data.get("ChineseName") or "").strip(),
+                    "name": (ms_data.get("Name") or "").strip(),
+                    "tags": ms_data.get("Tags") or [],
+                    "downloads": int(ms_data.get("Downloads") or 0),
+                    "likes": int(ms_data.get("Likes") or 0),
+                    "_source": "modelscope",
+                }
+                # 如果 ModelScope 有中文名，优先使用
+                if result.get("chinese_name"):
+                    result["description"] = f"{result['chinese_name']} - {result['description']}"
+                return result
+        except Exception as e:
+            if _errors is not None:
+                _errors.append(f"modelscope={type(e).__name__}")
+            return None
+
+    def _hf_http_get_json(self, url: str) -> dict | None:
+        """注意：此方法可能在线程池中调用，不能直接调用 self._log()。"""
+        try:
+            import httpx
+            with httpx.Client(timeout=httpx.Timeout(self._HF_API_TIMEOUT)) as client:
+                r = client.get(url, headers={
+                    "User-Agent": self._HF_USER_AGENT,
+                    "Accept": "application/json",
+                })
+                r.raise_for_status()
+                data = r.json()
+                if not isinstance(data, dict):
+                    return None
+                return data
+        except Exception:
+            return None
+
+    def _hf_http_get_json_race(self, urls: list[str]) -> tuple[dict | None, str]:
+        """多源竞速 GET JSON，返回最先成功的 (data, url)。"""
+        if len(urls) <= 1:
+            d = self._hf_http_get_json(urls[0]) if urls else None
+            return d, urls[0] if d else ""
+        import concurrent.futures
+
+        def _fetch(url):
+            return self._hf_http_get_json(url), url
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(urls)) as ex:
+                fmap = {ex.submit(_fetch, u): u for u in urls}
+                remaining = set(fmap.keys())
+                while remaining:
+                    done, remaining = concurrent.futures.wait(
+                        remaining, timeout=self._HF_API_TIMEOUT,
+                        return_when=concurrent.futures.FIRST_COMPLETED,
+                    )
+                    for f in done:
+                        try:
+                            data, url = f.result()
+                            if data is not None:
+                                for rf in remaining:
+                                    rf.cancel()
+                                return data, url
+                        except Exception:
+                            continue
+                    if not done:
+                        break
+        except Exception:
+            pass
+        return None, ""
+
+    def _hf_fetch_repo_meta(self, repo_id: str, _errors: list | None = None) -> dict | None:
+        """获取单个 repo 的 HF 元数据，三级回退：HF API → ModelScope → README。
+        _errors: 可选列表，收集各阶段失败原因用于诊断。"""
+        if not repo_id or "/" not in repo_id:
+            return None
+
+        # 1) 自适应源选择 → HF API
+        if self._hf_preferred_api and self._hf_preferred_fails < self._HF_MAX_FAILS:
+            url = f"{self._hf_preferred_api.rstrip('/')}/{repo_id}"
+            data, sc = self._hf_http_get_json_diag(url)
+            if data is not None:
+                self._hf_preferred_fails = 0
+                # 补充描述：HF API description 通常为空，尝试 README
+                if not (data.get("description") or "").strip():
+                    readme_desc = self._hf_fetch_readme_desc(repo_id)
+                    if readme_desc:
+                        data["description"] = readme_desc
+                return data
+            self._hf_preferred_fails += 1
+            if _errors is not None:
+                _errors.append(f"preferred={sc}")
+
+        # 2) HF API 竞速
+        urls = [f"{base.rstrip('/')}/{repo_id}" for base in self._HF_API_MIRRORS]
+        data, winning_url = self._hf_http_get_json_race(urls)
+        if data and winning_url:
+            for i, base in enumerate(self._HF_API_MIRRORS):
+                if winning_url.startswith(base):
+                    self._hf_preferred_api = base
+                    self._hf_preferred_fails = 0
+                    if i < len(self._HF_RESOLVE_MIRRORS):
+                        self._hf_preferred_resolve = self._HF_RESOLVE_MIRRORS[i]
+                    break
+            # 补充描述
+            if not (data.get("description") or "").strip():
+                readme_desc = self._hf_fetch_readme_desc(repo_id)
+                if readme_desc:
+                    data["description"] = readme_desc
+            return data
+
+        # HF API 竞速失败 → 记录原因（复用首选源探测结果，不额外请求）
+        if _errors is not None:
+            _errors.append("HF=all_fail")
+
+        # 3) HF 失败（401/超时）→ 尝试 ModelScope
+        ms_data = self._hf_fetch_modelscope(repo_id, _errors=_errors)
+        if ms_data:
+            return ms_data
+
+        # 4) ModelScope 也没有 → 尝试 README（兜底）
+        readme_desc = self._hf_fetch_readme_desc(repo_id)
+        if readme_desc:
+            return {"description": readme_desc, "_source": "readme"}
+        
+        # 5) 仍然没有描述 → 返回空字典而不是 None，让前端知道"这个仓库确实没有描述"
+        if _errors is not None:
+            _errors.append("readme=empty")
+        
+        # 返回一个空的元数据，让前端知道已尝试但确实没有数据
+        return {"description": "", "_source": "none", "_no_desc": True}
+
+    def _hf_http_get_json_diag(self, url: str) -> tuple[dict | None, str]:
+        """同 _hf_http_get_json，但额外返回状态码/错误描述用于诊断。"""
+        try:
+            import httpx
+            with httpx.Client(timeout=httpx.Timeout(self._HF_API_TIMEOUT)) as client:
+                r = client.get(url, headers={
+                    "User-Agent": self._HF_USER_AGENT,
+                    "Accept": "application/json",
+                })
+                if r.status_code != 200:
+                    # 尝试读取响应体前200字符判断是否HTML（登录页/Cloudflare等）
+                    body_preview = r.text[:200] if r.text else ""
+                    if "<html" in body_preview.lower() or "<!doctype" in body_preview.lower():
+                        return None, f"HTTP {r.status_code} (HTML,可能是登录页/CF盾)"
+                    return None, f"HTTP {r.status_code}"
+                data = r.json()
+                if not isinstance(data, dict):
+                    return None, f"HTTP 200 (非JSON对象: {type(data).__name__})"
+                return data, "200"
+        except ImportError:
+            return None, "httpx未安装"
+        except Exception as e:
+            err_cls = type(e).__name__
+            err_msg = str(e)[:100]
+            return None, f"{err_cls}: {err_msg}"
+
+    def _sync_hf_metadata(self, force: bool = False):
+        """点击「获取元数据」→ 启动器直接从 HF API 获取，不依赖后端。"""
+        if not hasattr(self, '_btn_library_sync'):
+            return
+        self._btn_library_sync.setEnabled(False)
+        self._btn_library_sync.setText("🔄 同步中…")
+        self._log("🔄 启动 HF 元数据同步（独立模式，不依赖后端）…", "info")
+
+        # 前置测试：验证 HTTP 连通性
+        def _test_connectivity():
+            try:
+                import httpx
+                test_url = f"{self._HF_API_MIRRORS[0]}/Lightricks/LTX-2.3"
+                with httpx.Client(timeout=httpx.Timeout(10.0)) as client:
+                    r = client.get(test_url, headers={
+                        "User-Agent": self._HF_USER_AGENT,
+                        "Accept": "application/json",
+                    })
+                    return f"HTTP {r.status_code} ({len(r.content)} bytes)"
+            except ImportError:
+                return "IMPORT_ERROR: httpx 未安装"
+            except Exception as e:
+                return f"ERROR: {type(e).__name__}: {e}"
+
+        # 收集所有需要获取元数据的 repo_id
+        repo_map: dict[str, str] = {}  # repo_id → filename
+        fname_to_model_id: dict[str, str] = {}  # filename → model_id（用于索引对齐）
+        for model_id, info in LTX_MODELS.items():
+            repo = info.get("repo", "")
+            fname = info.get("file", "")
+            if repo and fname:
+                repo_map[repo] = fname
+                fname_to_model_id[fname] = model_id
+
+        # 也从本地扫描结果中收集（如果有 repo 信息）
+        for row in self._model_rows:
+            repo = row.get("repo_id", "")
+            fname = row.get("name", "")
+            if repo and fname and repo not in repo_map:
+                repo_map[repo] = fname
+
+        repos = sorted(repo_map.keys())
+        total = len(repos)
+        if total == 0:
+            self._log("⚠ 无可获取元数据的模型仓库", "warn")
+            self._btn_library_sync.setEnabled(True)
+            self._btn_library_sync.setText("🔄 获取元数据")
+            return
+
+        self._log(f"  共 {total} 个仓库待获取", "info")
+        meta = self._load_model_meta()
+        fetched = 0
+        failed = 0
+
+        import concurrent.futures, time as _time
+
+        def _fetch_one(repo_id: str) -> tuple[str, dict | None, float, str]:
+            t0 = _time.time()
+            errors: list[str] = []
+            try:
+                data = self._hf_fetch_repo_meta(repo_id, _errors=errors)
+                err_str = "; ".join(errors) if errors else ""
+                return repo_id, data, _time.time() - t0, err_str
+            except Exception as e:
+                err_str = "; ".join(errors) if errors else f"{type(e).__name__}: {e}"
+                return repo_id, None, _time.time() - t0, err_str
+
+        def _run_sync():
+            nonlocal fetched, failed
+            # 前置连通性测试
+            test_result = _test_connectivity()
+            self._log(f"  [DEBUG] 连通性测试: {test_result}", "info")
+            if "ERROR" in test_result or "IMPORT_ERROR" in test_result:
+                self._log(f"⚠ 网络不可达: {test_result}", "warn")
+                QTimer.singleShot(0, lambda: (
+                    self._btn_library_sync.setEnabled(True),
+                    self._btn_library_sync.setText("🔄 获取元数据"),
+                ))
+                return
+
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=self._HF_CONCURRENCY) as ex:
+                    fmap = {ex.submit(_fetch_one, rid): rid for rid in repos}
+                    for future in concurrent.futures.as_completed(fmap):
+                        try:
+                            repo_id, data, elapsed, err = future.result(timeout=45)
+                            if data:
+                                fetched += 1
+                                # 提取描述（支持 _no_desc 标记表示确实没有）
+                                description = (data.get("description") or "").strip()
+                                if not description:
+                                    cd = data.get("cardData") or {}
+                                    description = (cd.get("description") or "").strip()
+                                if isinstance(description, dict):
+                                    description = description.get("text", "")
+
+                                # 写入元数据缓存（同时写入 fname、model_id、repo_id 三个索引）
+                                fname = repo_map.get(repo_id, "")
+                                if fname and description:
+                                    if fname not in meta:
+                                        meta[fname] = {}
+                                    meta[fname]["description"] = description
+                                    meta[fname]["hf_repo"] = repo_id
+                                    meta[fname]["hf_fetched_at"] = _time.time()
+                                    # 也写入 model_id 索引（_populate_model_table 第3步用 model_id 查找）
+                                    # 注意：始终更新，不做 mid not in meta 检查，确保重复同步时描述能刷新
+                                    mid = fname_to_model_id.get(fname, "")
+                                    if mid:
+                                        if mid not in meta:
+                                            meta[mid] = {}
+                                        meta[mid]["description"] = description
+                                        meta[mid]["hf_repo"] = repo_id
+                                        meta[mid]["hf_fetched_at"] = _time.time()
+
+                                # 也按 repo_id 索引（方便后端读取）
+                                meta[repo_id] = {
+                                    "description": description,
+                                    "tags": list(data.get("tags") or []),
+                                    "downloads": int(data.get("downloads") or 0),
+                                    "likes": int(data.get("likes") or 0),
+                                    "pipeline_tag": data.get("pipeline_tag") or "",
+                                    "hf_fetched_at": _time.time(),
+                                }
+
+                                short = repo_id.split("/")[-1][:20]
+                                has_desc = "✓" if description else "△"
+                                self._log(f"  [{has_desc}] {short} ({elapsed:.1f}s)", "info")
+                            else:
+                                failed += 1
+                                short = repo_id.split("/")[-1][:20]
+                                reason = f" ({err})" if err else ""
+                                self._log(f"  ✗ {short} ({elapsed:.1f}s){reason}", "warn")
+                        except concurrent.futures.TimeoutError:
+                            failed += 1
+                            rid = fmap.get(future, "?")
+                            short = rid.split("/")[-1][:20] if isinstance(rid, str) else str(rid)[:20]
+                            self._log(f"  ⏱ {short} (超时 45s)", "warn")
+                        except Exception as e:
+                            failed += 1
+                            self._log(f"  ✗ 异常: {e}", "warn")
+
+                # 保存元数据
+                self._save_model_meta(meta)
+                self._log(f"✓ HF 元数据同步完成: 成功 {fetched}/{total}，失败 {failed}", "ok")
+
+                # 刷新模型表格（应用新描述）
+                QTimer.singleShot(0, self._populate_model_table)
+
+            except Exception as e:
+                self._log(f"⚠ HF 同步异常: {e}", "warn")
+            finally:
+                QTimer.singleShot(0, lambda: (
+                    setattr(self, '_hf_sync_running', False),
+                    self._btn_library_sync.setEnabled(True),
+                    self._btn_library_sync.setText("🔄 获取元数据"),
+                ))
+
+        self._hf_sync_running = True
+        import threading
+        threading.Thread(target=_run_sync, daemon=True, name="hf-sync").start()
+
+    def _refresh_single_repo_meta(self, repo_id: str, on_done=None):
+        """强制刷新单个 repo 的 HF 元数据（独立模式，不依赖后端）。"""
+        if not repo_id or "/" not in repo_id:
+            return
+        def worker():
+            try:
+                import time as _time
+                t0 = _time.time()
+                data = self._hf_fetch_repo_meta(repo_id)
+                elapsed = _time.time() - t0
+                if data:
+                    description = (data.get("description") or "").strip()
+                    if not description:
+                        cd = data.get("cardData") or {}
+                        description = (cd.get("description") or "").strip()
+                    if isinstance(description, dict):
+                        description = description.get("text", "")
+
+                    meta = self._load_model_meta()
+                    meta[repo_id] = {
+                        "description": description,
+                        "tags": list(data.get("tags") or []),
+                        "downloads": int(data.get("downloads") or 0),
+                        "likes": int(data.get("likes") or 0),
+                        "pipeline_tag": data.get("pipeline_tag") or "",
+                        "hf_fetched_at": _time.time(),
+                    }
+                    self._save_model_meta(meta)
+                    self._log(f"✓ {repo_id} 元数据已更新 ({elapsed:.1f}s)", "ok")
+                    QTimer.singleShot(0, self._populate_model_table)
+                else:
+                    self._log(f"⚠ {repo_id} 获取失败 ({elapsed:.1f}s)", "warn")
+            except Exception as e:
+                self._log(f"⚠ {repo_id} 刷新失败: {e}", "warn")
+            if on_done:
+                QTimer.singleShot(0, on_done)
+        import threading
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _download_library_model(self, model_id: str):
+        """下载模型库中的模型（委托给后端 /api/models/registry/download）"""
+        if not model_id:
+            return
+        try:
+            import httpx
+            use_mirror = (self.model_source_combo.currentData() == "hf_mirror") if hasattr(self, 'model_source_combo') else True
+            with httpx.Client(timeout=httpx.Timeout(10.0)) as client:
+                resp = client.post(
+                    f"http://127.0.0.1:{self._backend_port}/api/models/registry/download",
+                    json={"model_id": model_id, "use_mirror": use_mirror},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    status = data.get("status", "")
+                    if status == "started":
+                        self._log(f"√ 已开始下载: {model_id}（使用 {'HF-Mirror' if use_mirror else 'HuggingFace'}）", "ok")
+                    elif status == "already_exists":
+                        self._log(f"√ 模型已存在: {model_id}", "ok")
+                    else:
+                        self._log(f"⚠ 下载请求响应: {data}", "warn")
+                else:
+                    self._log(f"⚠ 下载失败: HTTP {resp.status_code}", "warn")
+        except Exception as e:
+            self._log(f"⚠ 下载异常: {e}", "warn")
+
     def _check_model_integrity(self):
         results = []
         for model_id, info in LTX_MODELS.items():
@@ -10881,6 +12712,9 @@ class MainWindow(QMainWindow):
             self._probe_timer = QTimer(self)
             self._probe_timer.timeout.connect(lambda: _DBG.run_probes() if _DBG else None)
             self._probe_timer.start(15000)
+
+            # 2026-06-10: 启动 HF 元数据状态轮询（3 秒一次，永久）
+            self._start_hf_status_poll()
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -11803,7 +13637,29 @@ for d in deps:
         ts = datetime.now().strftime("%H:%M:%S")
         colors = {"info": "#B0B0C0", "ok": "#66BB6A", "warn": "#FFA726", "error": "#FF0000", "err": "#FF0000"}
         c = colors.get(level, "#B0B0C0")
-        self.log_text.append(f"<span style='color:#666688'>[{ts}]</span> <span style='color:{c}'>{msg}</span>")
+        html = f"<span style='color:#666688'>[{ts}]</span> <span style='color:{c}'>{msg}</span>"
+        # 线程安全：从非 GUI 线程调用时通过 QMetaObject.invokeMethod 投递到主线程
+        # （QTimer.singleShot 在无 Qt 事件循环的线程中不会触发回调，故改用 invokeMethod）
+        if hasattr(self, 'log_text') and self.log_text is not None:
+            try:
+                from PyQt6.QtCore import QThread, QMetaObject, Qt, Q_ARG
+                if QThread.currentThread() != self.log_text.thread():
+                    QMetaObject.invokeMethod(
+                        self.log_text, "append",
+                        Qt.ConnectionType.QueuedConnection,
+                        Q_ARG(str, html),
+                    )
+                else:
+                    self.log_text.append(html)
+            except Exception:
+                try:
+                    if QThread.currentThread() == self.log_text.thread():
+                        self.log_text.append(html)
+                    else:
+                        # 最后兜底：直接 append（非线程安全但至少能看见日志）
+                        self.log_text.append(html)
+                except Exception:
+                    pass
         self._write_debug_log(msg, level, tag)
 
     def _append_log(self, service_id, msg):
@@ -15186,10 +17042,9 @@ def main():
     global _MAIN_WINDOW_REF
     _MAIN_WINDOW_REF = window
 
-    try:
-        app.processEvents()
-    except Exception:
-        pass
+    # ★ 不再在 app.exec() 前调用 processEvents()
+    # 旧代码在此处 processEvents() 会触发 access violation (0xC0000005)
+    # deferred_init 等事件会在 app.exec() 启动后自动处理
     time.sleep(0.2)
 
     try:

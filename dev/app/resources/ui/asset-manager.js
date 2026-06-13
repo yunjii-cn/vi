@@ -284,7 +284,7 @@
             const listInfo = this.renderListInfo(item, info, isUpscale);
 
             return `
-<article class="history-card asset-card" ${dataAttrs} data-observed="0">
+<article class="history-card asset-card" ${dataAttrs} data-observed="0" draggable="true">
     <div class="grid-thumb-wrap">
         <div class="history-type-badge">${typeBadgeText}</div>
         <button class="history-delete-btn" data-act="del" title="删除">✕</button>
@@ -604,6 +604,31 @@
             node.tabIndex = 0;
             node.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(e); }
+            });
+            // 2026-06-10 修复: 启用从历史资产拖拽到上传区(高清放大/视频/图片/音频 等入口)
+            // 通过自定义 MIME 传递 filename + type,接收端在 index.js 的 drop handler 中通过 getData() 还原
+            node.addEventListener('dragstart', (e) => {
+                const key = node.dataset.assetKey;
+                if (!key) return;
+                const item = this.items.get(key);
+                if (!item) return;
+                const payload = JSON.stringify({
+                    filename: item.filename,
+                    type: item.type,
+                    key: key,
+                });
+                try {
+                    e.dataTransfer.setData('application/x-yunji-asset', payload);
+                    e.dataTransfer.setData('text/plain', item.filename || '');
+                    e.dataTransfer.effectAllowed = 'copy';
+                } catch (_) {}
+                // 自定义拖拽预览图(使用卡片缩略图)
+                try {
+                    const img = node.querySelector('img.history-thumb-media, .history-audio-thumb');
+                    if (img && e.dataTransfer.setDragImage) {
+                        e.dataTransfer.setDragImage(img, 30, 30);
+                    }
+                } catch (_) {}
             });
         }
 

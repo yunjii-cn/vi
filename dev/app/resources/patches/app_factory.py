@@ -213,7 +213,13 @@ def create_app(
     install_file_api(app, ctx)
     install_batch_api(app, ctx)
     install_env_check(app, ctx)
-    install_community_models(app, ctx)
+    try:
+        install_community_models(app, ctx)
+        print("[YunJi] community_models installed OK")
+    except Exception as e:
+        print(f"[YunJi] WARNING: community_models install failed: {e}")
+        import traceback
+        traceback.print_exc()
     install_upscale_api(app, ctx)
 
     print(f"[YunJi] All extensions installed. Upstream: {ctx.upstream_version}")

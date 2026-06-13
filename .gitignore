@@ -229,3 +229,7 @@ sl/error.log
 
 # 私钥（不提交）
 certs/private_key.pem
+
+# API Token（不提交到 Git）
+dev/app/.gitee_token
+dev/app/.github_token

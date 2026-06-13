@@ -421,7 +421,7 @@
         .btn-icon.active { color: #EF5350; background: rgba(244,67,54,0.1); }
         .sidebar-top-btn { padding: 5px 10px; border-radius: 7px; font-weight: 600; }
         .sidebar-top-btn:hover { background: rgba(255,255,255,0.08); color: var(--text-main); }
-        .sidebar-top-btn.active { background: #EF5350; color: #fff; }
+        .sidebar-top-btn.active { background: var(--accent); color: #fff; box-shadow: 0 1px 6px rgba(220,38,38,0.45); }
 
         .btn-primary {
             width: 100%; padding: 13px;

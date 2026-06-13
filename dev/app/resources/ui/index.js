@@ -755,8 +755,12 @@
             const res = await fetch(`${BASE}/api/models/registry`);
             const data = await res.json().catch(() => ({}));
             const models = data.models || [];
+            // 2026-06-10 修复: lora 过滤也用 model_category === 'image-lora' / 'video-lora'(社区自定义目录的 lora)
             const loraModels = models.filter(m =>
-                ((m.tags && m.tags.includes('lora')) || m.model_category === 'lora') &&
+                ((m.tags && m.tags.includes('lora')) ||
+                 m.model_category === 'lora' ||
+                 m.model_category === 'image-lora' ||
+                 m.model_category === 'video-lora') &&
                 m.downloaded && m.local_path
             );
             lorasFromRegistry = loraModels.map(m => ({
@@ -765,6 +769,10 @@
                 description: m.description || '',
                 trigger_words: m.trigger_word ? [m.trigger_word] : (m.trigger_words || []),
                 base_model: m.base_model || '',
+                // 2026-06-10 修复: 透传 model_category / dir_path,便于 addLoraSelection 内对图像/视频 lora 过滤
+                model_category: m.model_category || '',
+                dir_path: m.dir_path || '',
+                relative_path: m.relative_path || '',
             }));
             const localDirs = data.local_dirs || [];
             for (const dir of localDirs) {
@@ -776,6 +784,9 @@
                             description: m.description || '',
                             trigger_words: m.trigger_words || [],
                             base_model: m.base_model || '',
+                            model_category: m.model_category || '',
+                            dir_path: m.dir_path || '',
+                            relative_path: m.relative_path || '',
                         });
                     }
                 }
@@ -857,13 +868,28 @@
         let filteredLoras = availableLoras;
         if (containerId === 'img-loras-container') {
             filteredLoras = availableLoras.filter(lora => {
+                // 2026-06-10 修复: 图像 lora 判定优先级: model_category > base_model > path > name
+                // 因为很多 lora 文件的 safetensors metadata 没有 base_model 字段,单凭 base_model 会漏掉
+                const cat = (lora.model_category || '').toLowerCase();
                 const bm = (lora.base_model || '').toLowerCase();
-                return bm.includes('z-image') || bm.includes('z_image') || bm.includes('zimage');
+                const nm = (lora.name || '').toLowerCase();
+                const pth = (lora.path || '').toLowerCase();
+                if (cat === 'image-lora') return true;
+                if (bm.includes('z-image') || bm.includes('z_image') || bm.includes('zimage') || bm.includes('zit') || bm.includes('zib')) return true;
+                if (pth.includes('z-image') || pth.includes('z_image') || pth.includes('zimage') || pth.includes('zit') || pth.includes('zib')) return true;
+                if (nm.includes('z-image') || nm.includes('z_image') || nm.includes('zimage')) return true;
+                return false;
             });
         } else {
             filteredLoras = availableLoras.filter(lora => {
+                // 2026-06-10 修复: 视频 lora 判定,同样支持多字段
+                const cat = (lora.model_category || '').toLowerCase();
                 const bm = (lora.base_model || '').toLowerCase();
-                return bm.includes('ltx') || bm.includes('lightricks');
+                const pth = (lora.path || '').toLowerCase();
+                if (cat === 'video-lora') return true;
+                if (bm.includes('ltx') || bm.includes('lightricks') || bm.includes('wan')) return true;
+                if (pth.includes('ltx') || pth.includes('lightricks') || pth.includes('wan') || pth.includes('video')) return true;
+                return false;
             });
         }
         filteredLoras.forEach(lora => {
@@ -996,14 +1022,41 @@
         for (const m of (data.models || [])) {
             if (m.downloaded && m.local_path && !seen.has(m.local_path)) {
                 seen.add(m.local_path);
-                allModels.push({ name: m.filename || m.name, path: m.local_path, model_type: m.model_category || 'checkpoint' });
+                // 2026-06-10 修复: 透传后端返回的 model_category / tags / variant / pipeline_mode / dir_path
+                // dir_path 在 builtin 的 folder 模型(如 z-image-turbo)里没显式设,这里用 local_path 兜底作为目录路径
+                const dp = m.dir_path || (m.is_folder ? m.local_path : (m.local_path ? m.local_path.replace(/[/\\][^/\\]+$/, '') : ''));
+                allModels.push({
+                    name: m.filename || m.name,
+                    path: m.local_path,
+                    model_type: m.model_category || 'checkpoint',
+                    model_category: m.model_category || '',
+                    tags: m.tags || [],
+                    variant: m.variant || '',
+                    pipeline_mode: m.pipeline_mode || '',
+                    dir_path: dp,
+                    relative_path: m.relative_path || '',
+                });
             }
         }
         for (const dir of (data.local_dirs || [])) {
             for (const m of (dir.models || [])) {
                 if (!seen.has(m.path)) {
                     seen.add(m.path);
-                    allModels.push({ name: m.name, path: m.path, model_type: m.model_type || 'checkpoint' });
+                    // 2026-06-10 修复: 透传 dir_path / relative_path / model_category / base_model(便于 _isImageModel 命中 unet/z_image 目录规则,以及 lora 过滤)
+                    allModels.push({
+                        name: m.name,
+                        path: m.path,
+                        model_type: m.model_type || 'checkpoint',
+                        model_category: m.model_category || '',
+                        tags: m.tags || [],
+                        variant: m.variant || '',
+                        pipeline_mode: m.pipeline_mode || '',
+                        dir_path: m.dir_path || '',
+                        relative_path: m.relative_path || '',
+                        base_model: m.base_model || '',
+                        description: m.description || '',
+                        trigger_words: m.trigger_words || [],
+                    });
                 }
             }
         }
@@ -1012,7 +1065,22 @@
 
     function _isImageModel(m) {
         const n = (m.name || '').toLowerCase();
-        if (n.includes('lora') || n.includes('ic-lora') || n.includes('control')) return false;
+        const dp = (m.dir_path || m.relative_path || '').toLowerCase();
+        // 2026-06-10 修复: 严格排除所有 lora(包括从 local_dirs 扫到的 model_type='lora' 和 registry 的 model_category='lora')
+        if (m.model_category === 'lora' || m.model_type === 'lora') return false;
+        if (m.model_category === 'image-lora' || m.model_category === 'video-lora') return false;
+        if (n.includes('ic-lora') || n.includes('control')) return false;
+        // lora 文件名中即使没有 'lora' 字样也走 lora 路径(防误判 zit-/zib- 前缀的 lora)
+        if (m.model_category === 'upscaler' || m.model_type === 'upscaler') return false;
+        // 2026-06-10 修复: 优先以 model_category / tags / variant / pipeline_mode 字段判断
+        if (m.model_category === 'image' || m.model_category === 'image-checkpoint') return true;
+        if (m.tags && Array.isArray(m.tags) && m.tags.includes('image-gen')) return true;
+        if (m.variant === 'image-gen' || m.variant === 'image') return true;
+        if (m.pipeline_mode === 'image-gen' || m.pipeline_mode === 'image') return true;
+        // 2026-06-10 修复: 启动器目录约定 — unet/ 或 z_image/ 目录下的所有 .safetensors/.ckpt 都视为图像模型
+        if (dp.includes('unet') || dp.includes('z_image') || dp.includes('z-image') || dp.includes('zimage')) return true;
+        // 兼容旧判断: 名称包含 z-image/zimage/zit-/zib- 的文件,且不是 lora/control
+        if (n.includes('lora')) return false;
         return n.includes('z-image') || n.includes('zimage') || n.includes('zit-') || n.includes('zib-') || m.model_type === 'image';
     }
 
@@ -1279,8 +1347,22 @@
         const globalSelect = document.getElementById('model-checkpoint-select');
         const vidSelect = document.getElementById('vid-model-select');
         if (!globalSelect || !vidSelect) return;
+        // 2026-06-10 修复: 优先以 globalSelect 当前值为准(用户/同步刚改完),没有就退到 localStorage
+        // 这样多次调用时不会回退到旧值
+        let targetValue = (globalSelect.value || '').trim();
+        if (!targetValue) {
+            try { targetValue = (localStorage.getItem(MODEL_CHECKPOINT_STORAGE_KEY) || '').trim(); } catch (_) {}
+        }
         vidSelect.innerHTML = globalSelect.innerHTML;
-        vidSelect.value = globalSelect.value;
+        if (targetValue) {
+            // 校验 target 是否在 vidSelect 的选项里
+            const has = Array.from(vidSelect.options).some(o => o.value === targetValue);
+            if (has) vidSelect.value = targetValue;
+        } else {
+            vidSelect.value = globalSelect.value;
+        }
+        // 同步 steps UI(可能模型变了,需更新 dev/distilled 模式显示)
+        if (typeof updateVidStepsUI === 'function') updateVidStepsUI();
     }
     window.syncVidModelFromGlobal = syncVidModelFromGlobal;
 
@@ -1688,7 +1770,7 @@
         const ttsRefDropZone = document.getElementById('tts-ref-drop');
         const upscaleVideoDropZone = document.getElementById('upscale-video-drop-zone');
         const upscaleImageDropZone = document.getElementById('upscale-image-drop-zone');
-        
+
         const zones = [audioDropZone, startFrameDropZone, endFrameDropZone, batchImagesDropZone, motionVideoDropZone, motionImageDropZone, ttsRefDropZone, upscaleVideoDropZone, upscaleImageDropZone].filter(z => z);
 
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
@@ -1715,75 +1797,126 @@
             });
         });
 
-        if (audioDropZone) audioDropZone.addEventListener('drop', (e) => {
-            const file = e.dataTransfer.files[0];
-            if (file && file.type.startsWith('audio/')) handleAudioUpload(file);
+        // 2026-06-10 修复: 统一接管历史资产拖拽 + 本地文件拖拽两种来源
+        // 优先用 dataTransfer.files(从操作系统/外部资源拖来),再用 application/x-yunji-asset(从历史资产列表拖来)
+        const isVideoFile = (file) => file && (file.type.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi)$/i.test(file.name));
+        const isImageFile = (file) => file && file.type.startsWith('image/');
+        const isAudioFile = (file) => file && (file.type.startsWith('audio/') || /\.(wav|mp3|flac|ogg|m4a)$/i.test(file.name));
+
+        async function resolveDroppedFile(e, kind) {
+            // 1) 优先: 操作系统直接拖拽来的文件
+            const f = e.dataTransfer.files && e.dataTransfer.files[0];
+            if (f) return f;
+            // 2) 次选: 从历史资产拖拽来的(自定义 MIME 携带 filename+type)
+            const payload = (() => {
+                try { return JSON.parse(e.dataTransfer.getData('application/x-yunji-asset') || 'null'); }
+                catch (_) { return null; }
+            })();
+            if (!payload || !payload.filename || !payload.type) return null;
+            // 类型匹配: 历史资产类型必须和 drop zone 期望的类型一致
+            if (kind === 'video' && payload.type !== 'video') return null;
+            if (kind === 'image' && payload.type !== 'image') return null;
+            if (kind === 'audio' && payload.type !== 'audio') return null;
+            return await _fetchAssetAsFile(payload);
+        }
+
+        if (audioDropZone) audioDropZone.addEventListener('drop', async (e) => {
+            const file = await resolveDroppedFile(e, 'audio');
+            if (file && isAudioFile(file)) handleAudioUpload(file);
         }, false);
 
-        if (startFrameDropZone) startFrameDropZone.addEventListener('drop', (e) => {
-            const file = e.dataTransfer.files[0];
-            if (file && file.type.startsWith('image/')) handleFrameUpload(file, 'start');
+        if (startFrameDropZone) startFrameDropZone.addEventListener('drop', async (e) => {
+            const file = await resolveDroppedFile(e, 'image');
+            if (file && isImageFile(file)) handleFrameUpload(file, 'start');
         }, false);
 
-        if (endFrameDropZone) endFrameDropZone.addEventListener('drop', (e) => {
-            const file = e.dataTransfer.files[0];
-            if (file && file.type.startsWith('image/')) handleFrameUpload(file, 'end');
+        if (endFrameDropZone) endFrameDropZone.addEventListener('drop', async (e) => {
+            const file = await resolveDroppedFile(e, 'image');
+            if (file && isImageFile(file)) handleFrameUpload(file, 'end');
         }, false);
 
         // 批量图片拖拽上传
         if (batchImagesDropZone) {
-            batchImagesDropZone.addEventListener('drop', (e) => {
+            batchImagesDropZone.addEventListener('drop', async (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 batchImagesDropZone.classList.remove('dragover');
-                const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
-                if (files.length > 0) handleBatchImagesUpload(files);
+                const files = Array.from(e.dataTransfer.files).filter(f => isImageFile(f));
+                if (files.length > 0) {
+                    handleBatchImagesUpload(files);
+                    return;
+                }
+                // 历史资产单文件拖拽也支持
+                const assetFile = await resolveDroppedFile(e, 'image');
+                if (assetFile && isImageFile(assetFile)) handleBatchImagesUpload([assetFile]);
             }, false);
         }
 
         if (motionVideoDropZone) {
-            motionVideoDropZone.addEventListener('drop', (e) => {
-                const file = e.dataTransfer.files[0];
-                if (file && (file.type.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi)$/i.test(file.name))) {
+            motionVideoDropZone.addEventListener('drop', async (e) => {
+                const file = await resolveDroppedFile(e, 'video');
+                if (file && isVideoFile(file)) {
                     window.handleMotionVideoUpload(file);
                 }
             }, false);
         }
 
         if (motionImageDropZone) {
-            motionImageDropZone.addEventListener('drop', (e) => {
-                const file = e.dataTransfer.files[0];
-                if (file && file.type.startsWith('image/')) {
+            motionImageDropZone.addEventListener('drop', async (e) => {
+                const file = await resolveDroppedFile(e, 'image');
+                if (file && isImageFile(file)) {
                     window.handleMotionImageUpload(file);
                 }
             }, false);
         }
 
         if (ttsRefDropZone) {
-            ttsRefDropZone.addEventListener('drop', (e) => {
-                const file = e.dataTransfer.files[0];
-                if (file && (file.type.startsWith('audio/') || file.name.endsWith('.wav') || file.name.endsWith('.mp3'))) {
+            ttsRefDropZone.addEventListener('drop', async (e) => {
+                const file = await resolveDroppedFile(e, 'audio');
+                if (file && isAudioFile(file)) {
                     handleTtsRefUpload(file);
                 }
             }, false);
         }
 
         if (upscaleVideoDropZone) {
-            upscaleVideoDropZone.addEventListener('drop', (e) => {
-                const file = e.dataTransfer.files[0];
-                if (file && (file.type.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi)$/i.test(file.name))) {
+            upscaleVideoDropZone.addEventListener('drop', async (e) => {
+                const file = await resolveDroppedFile(e, 'video');
+                if (file && isVideoFile(file)) {
                     handleUpscaleVideoUpload(file);
                 }
             }, false);
         }
 
         if (upscaleImageDropZone) {
-            upscaleImageDropZone.addEventListener('drop', (e) => {
-                const file = e.dataTransfer.files[0];
-                if (file && file.type.startsWith('image/')) {
+            upscaleImageDropZone.addEventListener('drop', async (e) => {
+                const file = await resolveDroppedFile(e, 'image');
+                if (file && isImageFile(file)) {
                     handleUpscaleImageUpload(file);
                 }
             }, false);
+        }
+    }
+
+    // 2026-06-10 修复: 从历史资产拖拽到 drop zone 时,系统会传 application/x-yunji-asset (含 filename+type)
+    // 接收端 fetch 实际文件并包装为 File 对象,转交给 handler
+    function _mimeForType(t) {
+        if (t === 'video') return 'video/mp4';
+        if (t === 'image') return 'image/png';
+        if (t === 'audio') return 'audio/wav';
+        return 'application/octet-stream';
+    }
+    async function _fetchAssetAsFile(payload) {
+        const fileUrl = `${BASE}/api/system/file?path=${encodeURIComponent(payload.filename)}&v=${Date.now()}`;
+        const mime = _mimeForType(payload.type);
+        try {
+            const r = await fetch(fileUrl);
+            if (!r.ok) throw new Error('fetch failed: ' + r.status);
+            const blob = await r.blob();
+            return new File([blob], payload.filename, { type: mime });
+        } catch (e) {
+            addLog(`❌ 拖拽历史资产失败: ${e.message}`);
+            return null;
         }
     }
 
@@ -2967,6 +3100,13 @@
         } else {
             localStorage.removeItem(MODEL_CHECKPOINT_STORAGE_KEY);
         }
+        // 2026-06-10 修复: 任一 select 变化都同步另一个,保证两个 select 始终保持一致
+        try {
+            const vidSelect = document.getElementById('vid-model-select');
+            if (vidSelect && typeof syncVidModelFromGlobal === 'function') {
+                syncVidModelFromGlobal();
+            }
+        } catch (_) {}
         if (status) {
             status.textContent = value ? _t('modelCheckpointSaved') : _t('modelCheckpointHint');
             status.style.color = value ? '#4caf50' : 'var(--text-dim)';
@@ -3130,265 +3270,162 @@
         }, 2000);
     }
 
-    let _modelRegistryData = null;
+    // ── 2026-06-10: 按需下载入口检测 ───────────────────────────────
+    // 每个功能入口(文生图/文生视频/TTS)激活时,检查"必需模型"是否已下载。
+    // 若未下载,在参数面板顶部插入横幅,提供"立即下载"按钮。
+    // (前端不再做完整模型管理 —— 模型管理是启动器的职责)
+    // ─────────────────────────────────────────────────────────────
+    let _activeModelBanner = null;   // 当前展示的横幅 DOM 引用
 
-    window.loadModelRegistry = async function() {
-        const list = document.getElementById('model-registry-list');
-        const dirs = document.getElementById('model-registry-dirs');
-        if (!list) return;
-        list.innerHTML = `<div style="font-size:10px;color:var(--text-dim);">${_t('modelRegLoading') || 'Loading...'}</div>`;
+    async function _fetchRegistryForBanner() {
+        // 轻量读取,只取核心字段,不订阅
         try {
             const res = await fetch(`${BASE}/api/models/registry`);
+            if (!res.ok) return null;
             const data = await res.json();
-            _modelRegistryData = data.models || [];
-            if (dirs) {
-                let dirsHtml = `<div style="font-size:9px;color:var(--text-dim);line-height:1.5;">`;
-                if (data.default_models_dir) {
-                    dirsHtml += `<div style="margin-bottom:2px;"><b style="color:var(--text-main);">${_t('modelRegDefaultDir') || 'Default'}:</b> ${data.default_models_dir}</div>`;
-                }
-                const customDirs = data.custom_models_dirs || [];
-                if (customDirs.length > 0) {
-                    dirsHtml += `<div style="margin-bottom:2px;"><b style="color:#FF9800;">${_t('modelRegCustomDir') || 'Custom'}:</b></div>`;
-                    for (const cd of customDirs) {
-                        dirsHtml += `<div style="display:flex;align-items:center;gap:4px;padding:1px 0;"><span style="flex:1;font-size:9px;word-break:break-all;">${cd}</span><button onclick="removeCustomModelsDir('${cd.replace(/\\/g, '\\\\')}')" style="font-size:8px;padding:1px 4px;background:rgba(244,67,54,0.15);border:1px solid rgba(244,67,54,0.3);color:#f44336;border-radius:3px;cursor:pointer;flex-shrink:0;">✕</button></div>`;
-                    }
-                }
-                dirsHtml += `<div style="margin-top:4px;display:flex;gap:4px;align-items:center;">`;
-                dirsHtml += `<input id="custom-models-dir-input" type="text" placeholder="${_t('modelRegCustomDirPh') || 'Custom models dir path'}" style="flex:1;height:22px;font-size:10px;padding:0 6px;box-sizing:border-box;border-radius:4px;border:1px solid rgba(255,255,255,0.1);background:rgba(0,0,0,0.2);color:var(--text-main);">`;
-                dirsHtml += `<button onclick="addCustomModelsDir()" style="font-size:9px;padding:2px 8px;height:22px;background:var(--accent);border:1px solid var(--accent);color:#fff;border-radius:4px;cursor:pointer;font-weight:600;">＋</button>`;
-                dirsHtml += `</div></div>`;
-                dirs.innerHTML = dirsHtml;
-            }
-            renderModelRegistry(_modelRegistryData);
+            return data.models || [];
         } catch (e) {
-            list.innerHTML = `<div style="font-size:10px;color:#f44336;">${_t('modelRegLoadFail') || 'Failed'}: ${e.message}</div>`;
+            return null;
         }
-    };
-
-    window.addCustomModelsDir = async function() {
-        const input = document.getElementById('custom-models-dir-input');
-        if (!input) return;
-        const path = input.value.trim();
-        if (!path) return;
-        try {
-            const res = await fetch(`${BASE}/api/models/registry/custom-dir`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({path: path}),
-            });
-            const data = await res.json();
-            if (data.status === 'added') {
-                input.value = '';
-                loadModelRegistry();
-            } else {
-                alert(data.error || 'Failed');
-            }
-        } catch (e) {
-            alert(e.message);
-        }
-    };
-
-    window.removeCustomModelsDir = async function(path) {
-        if (!path) return;
-        try {
-            const res = await fetch(`${BASE}/api/models/registry/custom-dir`, {
-                method: 'DELETE',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({path: path}),
-            });
-            const data = await res.json();
-            if (data.status === 'removed') {
-                loadModelRegistry();
-            } else {
-                alert(data.error || 'Failed');
-            }
-        } catch (e) {
-            alert(e.message);
-        }
-    };
-
-    function renderModelRegistry(models) {
-        const list = document.getElementById('model-registry-list');
-        if (!list) return;
-        list.innerHTML = '';
-
-        const checkpointModels = models.filter(m => m.model_category === 'checkpoint');
-        const loraModels = models.filter(m => m.model_category === 'lora');
-        const upscalerModels = models.filter(m => m.model_category === 'upscaler');
-        const supportingModels = models.filter(m => m.model_category === 'supporting');
-        const otherModels = models.filter(m => !['checkpoint','lora','upscaler','supporting'].includes(m.model_category));
-
-        const toolbar = document.createElement('div');
-        toolbar.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;';
-
-        const selectAllCb = document.createElement('input');
-        selectAllCb.type = 'checkbox';
-        selectAllCb.id = 'model-select-all';
-        selectAllCb.style.cssText = 'cursor:pointer;accent-color:#1565C0;width:14px;height:14px;';
-        selectAllCb.onchange = function() {
-            const checked = this.checked;
-            list.querySelectorAll('.model-cb').forEach(cb => { cb.checked = checked; });
-        };
-
-        const selectAllLabel = document.createElement('label');
-        selectAllLabel.htmlFor = 'model-select-all';
-        selectAllLabel.style.cssText = 'font-size:10px;color:var(--text-dim);cursor:pointer;user-select:none;';
-        selectAllLabel.textContent = _t('modelRegSelectAll') || '全选';
-
-        const batchBtn = document.createElement('button');
-        batchBtn.id = 'model-batch-download-btn';
-        batchBtn.style.cssText = 'font-size:10px;padding:3px 10px;border-radius:4px;cursor:pointer;font-weight:600;border:1px solid;background:rgba(21,101,192,0.2);border-color:rgba(25,118,210,0.5);color:#42A5F5;';
-        batchBtn.textContent = _t('modelRegBatchDownload') || '批量下载';
-        batchBtn.onclick = function() {
-            const selected = [];
-            list.querySelectorAll('.model-cb:checked').forEach(cb => {
-                selected.push(cb.dataset.modelId);
-            });
-            if (selected.length === 0) {
-                alert(_t('modelRegNoSelection') || '请先选择要下载的模型');
-                return;
-            }
-            selected.forEach(id => {
-                const btn = document.querySelector(`[data-download-id="${id}"]`);
-                if (btn && !btn.disabled) {
-                    downloadRegistryModel(id, btn);
-                }
-            });
-        };
-
-        toolbar.appendChild(selectAllCb);
-        toolbar.appendChild(selectAllLabel);
-        toolbar.appendChild(batchBtn);
-        list.appendChild(toolbar);
-
-        function renderGroup(title, items) {
-            if (items.length === 0) return;
-            const header = document.createElement('div');
-            header.style.cssText = 'font-size:10px;font-weight:700;color:var(--text-dim);margin-top:6px;margin-bottom:2px;padding-left:2px;';
-            header.textContent = title;
-            list.appendChild(header);
-
-            for (const m of items) {
-                const row = document.createElement('div');
-                row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:5px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);margin-bottom:2px;';
-
-                const cb = document.createElement('input');
-                cb.type = 'checkbox';
-                cb.className = 'model-cb';
-                cb.dataset.modelId = m.model_id;
-                cb.style.cssText = 'cursor:pointer;accent-color:#1565C0;width:13px;height:13px;flex-shrink:0;';
-                if (m.downloaded) {
-                    cb.disabled = true;
-                    cb.checked = true;
-                    cb.style.opacity = '0.4';
-                }
-
-                const info = document.createElement('div');
-                info.style.cssText = 'flex:1;min-width:0;';
-
-                const nameRow = document.createElement('div');
-                nameRow.style.cssText = 'display:flex;align-items:center;gap:4px;';
-
-                const nameSpan = document.createElement('span');
-                nameSpan.style.cssText = 'font-size:11px;font-weight:600;color:var(--text-main);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-                nameSpan.textContent = m.name;
-                nameRow.appendChild(nameSpan);
-
-                const quantTag = document.createElement('span');
-                quantTag.style.cssText = 'font-size:8px;padding:1px 4px;border-radius:3px;font-weight:700;text-transform:uppercase;';
-                if (m.quantization === 'fp8') {
-                    quantTag.style.background = 'rgba(76,175,80,0.15)';
-                    quantTag.style.color = '#4CAF50';
-                    quantTag.textContent = 'FP8';
-                } else if (m.quantization === 'bf16') {
-                    quantTag.style.background = 'rgba(33,150,243,0.15)';
-                    quantTag.style.color = '#2196F3';
-                    quantTag.textContent = 'BF16';
-                } else {
-                    quantTag.style.background = 'rgba(255,255,255,0.06)';
-                    quantTag.style.color = 'var(--text-dim)';
-                    quantTag.textContent = m.quantization.toUpperCase();
-                }
-                nameRow.appendChild(quantTag);
-
-                if (m.tags && m.tags.includes('recommended')) {
-                    const recTag = document.createElement('span');
-                    recTag.style.cssText = 'font-size:8px;padding:1px 4px;border-radius:3px;font-weight:600;background:rgba(255,152,0,0.15);color:#FF9800;';
-                    recTag.textContent = _t('modelRegRecommended') || 'REC';
-                    nameRow.appendChild(recTag);
-                }
-
-                info.appendChild(nameRow);
-
-                if (m.description) {
-                    const descRow = document.createElement('div');
-                    descRow.style.cssText = 'font-size:9px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-                    descRow.textContent = m.description;
-                    descRow.title = m.description;
-                    info.appendChild(descRow);
-                }
-
-                if (m.usage_scenario) {
-                    const scenarioRow = document.createElement('div');
-                    scenarioRow.style.cssText = 'font-size:8px;color:rgba(33,150,243,0.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-                    scenarioRow.textContent = '▸ ' + m.usage_scenario;
-                    scenarioRow.title = m.usage_scenario;
-                    info.appendChild(scenarioRow);
-                }
-
-                if (m.trigger_word) {
-                    const triggerRow = document.createElement('div');
-                    triggerRow.style.cssText = 'font-size:8px;color:rgba(255,152,0,0.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-                    triggerRow.textContent = '⚡ ' + m.trigger_word;
-                    triggerRow.title = m.trigger_word;
-                    info.appendChild(triggerRow);
-                }
-
-                if (m.requires && m.requires.length > 0) {
-                    const reqRow = document.createElement('div');
-                    reqRow.style.cssText = 'font-size:8px;color:rgba(255,255,255,0.25);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-                    reqRow.textContent = '🔗 ' + m.requires.join(', ');
-                    reqRow.title = m.requires.join(', ');
-                    info.appendChild(reqRow);
-                }
-
-                const sizeRow = document.createElement('div');
-                sizeRow.style.cssText = 'font-size:8px;color:rgba(255,255,255,0.3);white-space:nowrap;';
-                sizeRow.textContent = `${m.size_gb}GB · VRAM: ${m.min_vram_gb}GB+`;
-                info.appendChild(sizeRow);
-
-                row.appendChild(cb);
-                row.appendChild(info);
-
-                if (m.downloaded) {
-                    const doneTag = document.createElement('span');
-                    doneTag.style.cssText = 'font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(76,175,80,0.15);color:#4CAF50;font-weight:600;white-space:nowrap;';
-                    doneTag.textContent = '✓';
-                    row.appendChild(doneTag);
-                } else {
-                    const dlBtn = document.createElement('button');
-                    dlBtn.dataset.downloadId = m.model_id;
-                    dlBtn.style.cssText = 'font-size:9px;padding:2px 8px;border-radius:4px;background:var(--accent);border:1px solid var(--accent);color:#fff;cursor:pointer;font-weight:600;white-space:nowrap;';
-                    dlBtn.textContent = _t('modelRegDownload') || 'Download';
-                    dlBtn.onclick = () => downloadRegistryModel(m.model_id, dlBtn);
-                    row.appendChild(dlBtn);
-                }
-
-                list.appendChild(row);
-            }
-        }
-
-        renderGroup(_t('modelRegCheckpoints') || '核心模型', checkpointModels);
-        renderGroup(_t('modelRegLora') || 'LoRA模型', loraModels);
-        renderGroup(_t('modelRegUpscalers') || '增强模型', upscalerModels);
-        renderGroup(_t('modelRegSupporting') || '辅助模型', supportingModels);
-        renderGroup(_t('modelRegOther') || '其他', otherModels);
     }
 
-    async function downloadRegistryModel(modelId, btn) {
+    // 根据 mode 找"必需"checkpoint (返回 model 字典或 null)
+    function _findRequiredModelForMode(models, mode) {
+        if (!Array.isArray(models) || models.length === 0) return null;
+        // 优先级:
+        // 1. tags 包含 'recommended' + pipeline_mode 匹配
+        // 2. pipeline_mode 匹配 + checkpoint 类
+        // 3. tags 包含 'image'/'video'/'tts' + checkpoint 类
+        const isVideo = mode === 'video' || (typeof VIDEO_SUB_MODES !== 'undefined' && VIDEO_SUB_MODES.includes(mode));
+        const isTts = mode === 'tts' || (typeof TTS_SUB_MODES !== 'undefined' && TTS_SUB_MODES.includes(mode));
+        const isUpscale = mode === 'upscale' || (typeof UPSCALE_SUB_MODES !== 'undefined' && UPSCALE_SUB_MODES.includes(mode));
+        const candidates = models.filter(m =>
+            m.model_category === 'checkpoint' &&
+            !m.downloaded &&
+            (m.pipeline_mode === mode ||
+             (isVideo && m.pipeline_mode === 'video') ||
+             (isTts && m.pipeline_mode === 'tts') ||
+             (isUpscale && m.pipeline_mode === 'upscale'))
+        );
+        if (candidates.length === 0) return null;
+        // 推荐优先
+        const rec = candidates.find(m => m.tags && m.tags.includes('recommended'));
+        return rec || candidates[0];
+    }
+
+    function _hideModelRequiredBanner() {
+        if (_activeModelBanner && _activeModelBanner.parentNode) {
+            _activeModelBanner.parentNode.removeChild(_activeModelBanner);
+        }
+        _activeModelBanner = null;
+    }
+
+    // 在指定 panel 顶部插入"需先下载 X 模型"横幅
+    function _showModelRequiredBanner(panelId, model) {
+        _hideModelRequiredBanner();
+        const panel = document.getElementById(panelId);
+        if (!panel || !model) return;
+        const banner = document.createElement('div');
+        banner.id = 'model-required-banner';
+        banner.style.cssText = [
+            'margin-bottom:10px',
+            'padding:10px 12px',
+            'border-radius:6px',
+            'background:linear-gradient(135deg, rgba(255,152,0,0.12), rgba(255,193,7,0.06))',
+            'border:1px solid rgba(255,152,0,0.4)',
+            'color:var(--text-main)',
+            'display:flex',
+            'align-items:center',
+            'gap:10px',
+            'font-size:11px',
+            'line-height:1.5',
+        ].join(';');
+
+        const text = document.createElement('div');
+        text.style.cssText = 'flex:1;';
+        const nameSpan = document.createElement('div');
+        nameSpan.style.cssText = 'font-weight:700;color:#FF9800;';
+        nameSpan.textContent = model.name || model.model_id;
+        const descSpan = document.createElement('div');
+        descSpan.style.cssText = 'color:var(--text-dim);font-size:10px;margin-top:2px;';
+        const sizeText = model.size_gb ? `${model.size_gb} GB` : '';
+        const vramText = model.min_vram_gb ? `需显存 ≥ ${model.min_vram_gb} GB` : '';
+        const meta = [sizeText, vramText].filter(Boolean).join(' · ');
+        descSpan.textContent = (_t('modelRequiredHint') || '需要先下载此模型才能使用此功能') + (meta ? `  ·  ${meta}` : '');
+
+        text.appendChild(nameSpan);
+        text.appendChild(descSpan);
+
+        const dlBtn = document.createElement('button');
+        dlBtn.style.cssText = [
+            'flex-shrink:0',
+            'padding:6px 14px',
+            'background:#FF9800',
+            'border:none',
+            'color:#000',
+            'border-radius:5px',
+            'cursor:pointer',
+            'font-weight:700',
+            'font-size:11px',
+        ].join(';');
+        dlBtn.textContent = _t('modelRequiredDownload') || '立即下载';
+        dlBtn.onclick = () => triggerModelDownload(model.model_id, dlBtn, () => {
+            // 下载成功 → 自动刷新检查
+            _refreshModelRequirement();
+        });
+
+        const closeBtn = document.createElement('button');
+        closeBtn.style.cssText = 'background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:16px;padding:0 4px;';
+        closeBtn.textContent = '✕';
+        closeBtn.title = _t('close') || '关闭';
+        closeBtn.onclick = () => _hideModelRequiredBanner();
+
+        banner.appendChild(text);
+        banner.appendChild(dlBtn);
+        banner.appendChild(closeBtn);
+        panel.insertBefore(banner, panel.firstChild);
+        _activeModelBanner = banner;
+    }
+
+    // 检测并展示/隐藏当前 mode 的必需模型横幅
+    let _modelReqCheckToken = 0;  // 防止竞态
+    async function _refreshModelRequirement() {
+        const token = ++_modelReqCheckToken;
+        const mode = typeof currentMode !== 'undefined' ? currentMode : null;
+        if (!mode) {
+            _hideModelRequiredBanner();
+            return;
+        }
+        const models = await _fetchRegistryForBanner();
+        if (token !== _modelReqCheckToken) return;  // 被更新的请求覆盖
+        if (!models) {
+            _hideModelRequiredBanner();
+            return;
+        }
+        const required = _findRequiredModelForMode(models, mode);
+        if (required) {
+            const panelId = _panelIdForMode(mode);
+            if (panelId) _showModelRequiredBanner(panelId, required);
+            else _hideModelRequiredBanner();
+        } else {
+            _hideModelRequiredBanner();
+        }
+    }
+
+    function _panelIdForMode(mode) {
+        if (mode === 'image') return 'image-opts';
+        if (mode === 'video' || (typeof VIDEO_SUB_MODES !== 'undefined' && VIDEO_SUB_MODES.includes(mode))) return 'video-opts';
+        if (mode === 'tts' || (typeof TTS_SUB_MODES !== 'undefined' && TTS_SUB_MODES.includes(mode))) return 'tts-opts';
+        if (mode === 'upscale' || (typeof UPSCALE_SUB_MODES !== 'undefined' && UPSCALE_SUB_MODES.includes(mode))) return 'upscale-opts';
+        if (mode === 'batch' || mode === 'motion') return 'batch-opts';
+        return null;
+    }
+
+    // 触发下载(供横幅按钮调用) —— 复用原 pollModelDownload 逻辑
+    async function triggerModelDownload(modelId, btn, onSuccess) {
         const useMirror = document.getElementById('use-mirror-cb')?.checked || false;
         const origText = btn.textContent;
-        btn.textContent = _t('modelRegDownloading') || '...';
+        btn.textContent = _t('downloading') || '下载中...';
         btn.disabled = true;
         btn.style.opacity = '0.6';
         try {
@@ -3400,29 +3437,26 @@
             const data = await res.json();
             if (data.status === 'already_exists') {
                 btn.textContent = '✓';
-                btn.style.background = 'rgba(76,175,80,0.15)';
-                btn.style.borderColor = 'rgba(76,175,80,0.3)';
-                btn.style.color = '#4CAF50';
+                btn.style.background = 'rgba(76,175,80,0.5)';
+                if (onSuccess) onSuccess();
                 return;
             }
             if (data.status === 'started') {
-                btn.textContent = _t('modelRegDownloading') || 'Downloading...';
-                pollModelDownload(modelId, btn);
+                btn.textContent = _t('downloading') || '下载中...';
+                pollModelDownload(modelId, btn, onSuccess);
                 return;
             }
-            btn.textContent = _t('modelRegFailed') || 'Failed';
-            btn.style.background = 'rgba(244,67,54,0.15)';
-            btn.style.borderColor = 'rgba(244,67,54,0.3)';
-            btn.style.color = '#f44336';
+            btn.textContent = _t('downloadFailed') || '下载失败';
+            btn.style.background = 'rgba(244,67,54,0.4)';
+            btn.disabled = false;
         } catch (e) {
-            btn.textContent = _t('modelRegFailed') || 'Failed';
-            btn.style.background = 'rgba(244,67,54,0.15)';
-            btn.style.borderColor = 'rgba(244,67,54,0.3)';
-            btn.style.color = '#f44336';
+            btn.textContent = _t('downloadFailed') || '下载失败';
+            btn.style.background = 'rgba(244,67,54,0.4)';
+            btn.disabled = false;
         }
     }
 
-    function pollModelDownload(modelId, btn) {
+    function pollModelDownload(modelId, btn, onSuccess) {
         const interval = setInterval(async () => {
             try {
                 const res = await fetch(`${BASE}/api/models/registry/status`);
@@ -3430,16 +3464,16 @@
                 if (!data.active && data.model_id === modelId) {
                     clearInterval(interval);
                     if (data.error) {
-                        btn.textContent = _t('modelRegFailed') || 'Failed';
-                        btn.style.background = 'rgba(244,67,54,0.15)';
-                        btn.style.borderColor = 'rgba(244,67,54,0.3)';
-                        btn.style.color = '#f44336';
+                        btn.textContent = _t('downloadFailed') || '下载失败';
+                        btn.style.background = 'rgba(244,67,54,0.4)';
+                        btn.disabled = false;
                     } else {
                         btn.textContent = '✓';
-                        btn.style.background = 'rgba(76,175,80,0.15)';
-                        btn.style.borderColor = 'rgba(76,175,80,0.3)';
-                        btn.style.color = '#4CAF50';
-                        loadModelCheckpoints();
+                        btn.style.background = 'rgba(76,175,80,0.5)';
+                        // 通知上层
+                        if (onSuccess) onSuccess();
+                        // 刷新相关数据
+                        if (typeof loadModelCheckpoints === 'function') loadModelCheckpoints();
                         if (typeof loadCoreModels === 'function') loadCoreModels();
                         if (typeof scanLoras === 'function') scanLoras();
                     }
@@ -3449,9 +3483,14 @@
                 }
             } catch (e) {
                 clearInterval(interval);
+                btn.textContent = _t('downloadFailed') || '下载失败';
+                btn.style.background = 'rgba(244,67,54,0.4)';
+                btn.disabled = false;
             }
         }, 3000);
     }
+
+    // ─────────────────────────────────────────────────────────────
 
     function switchMode(m) {
         const isVideoCategory = m === 'video' || VIDEO_SUB_MODES.includes(m);
@@ -3567,6 +3606,9 @@
         if (isUpscaleCategory) checkUpscaleStatus();
         if (m === 'image') { updateImgResPreview(); loadImgModelList(); }
         refreshPromptPlaceholder();
+
+        // 2026-06-10: 切换 mode 后检查必需模型 —— 缺失则显示横幅
+        if (typeof _refreshModelRequirement === 'function') _refreshModelRequirement();
     }
 
     window.switchVideoSubMode = function(sub) {
@@ -7077,7 +7119,6 @@
         // Load LoRA dir from settings
         loadLoraDir();
         loadModelCheckpoints();
-        loadModelRegistry();
         loadCoreModels();
 
         let historyRefreshInterval = null;
@@ -7412,26 +7453,17 @@ async function applyHardwareProfile() {
     }
 }
 
-async function refreshAndSync() {
+window.refreshAndSync = async function() {
+    // 2026-06-10: 模型管理已下放给启动器,前端仅触发"同步HF元数据"以便刷出最新描述/大小
     try {
-        const syncRes = await fetch(`${BASE}/api/models/registry/sync`, { method: 'POST' });
-        const syncData = await syncRes.json().catch(() => ({}));
-        if (window.loadModelRegistry) await window.loadModelRegistry();
-        if (typeof loadModelCheckpoints === 'function') await loadModelCheckpoints();
-        if (typeof scanLoras === 'function') await scanLoras();
-        if (syncData.success) {
-            const msg = syncData.added > 0 || syncData.updated > 0
-                ? `同步完成：新增 ${syncData.added} 个，更新 ${syncData.updated} 个模型`
-                : '已同步，暂无新模型';
-            addLog(`✅ ${msg}`);
-        } else if (syncData.error) {
-            addLog(`⚠️ 同步失败: ${syncData.error}，已刷新本地列表`);
-        } else {
-            addLog('✅ 已刷新模型列表');
-        }
-    } catch(e) {
-        addLog(`⚠️ 同步异常: ${e.message}，已刷新本地列表`);
-        if (window.loadModelRegistry) await window.loadModelRegistry();
+        const res = await fetch(`${BASE}/api/models/registry/refresh-hf`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({force: false}),
+        });
+        if (window._appendLog) window._appendLog('🤗 已触发 HuggingFace 元数据后台刷新', 'info');
+    } catch (e) {
+        if (window._appendLog) window._appendLog(`⚠️ 同步失败: ${e.message}`, 'warn');
     }
 }
 
