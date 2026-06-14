@@ -3191,5 +3191,13 @@
     ],
     "build_time": "2026-06-14T12:07:25.947592",
     "version_number": "2026.06.14.1205"
+  },
+  "云集智能视频创意站-v2026.06.14.1214": {
+    "version": "云集智能视频创意站-v2026.06.14.1214",
+    "changes": [
+      "修复_render_model_table中setHorizontalHeaderLabels重置列宽问题"
+    ],
+    "build_time": "2026-06-14T12:15:44.232386",
+    "version_number": "2026.06.14.1214"
   }
 }

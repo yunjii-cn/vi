@@ -7843,6 +7843,24 @@ class MainWindow(QMainWindow):
             base_labels[self._model_sort_col] = base_labels[self._model_sort_col] + arrow
         self._model_table.setHorizontalHeaderLabels(base_labels)
 
+        # 确保列模式不被 setHorizontalHeaderLabels 重置
+        self._model_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self._model_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self._model_table.horizontalHeader().setMinimumSectionSize(160)
+        self._model_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self._model_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self._model_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self._model_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self._model_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+        self._model_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+        self._model_table.setColumnWidth(0, 28)
+        self._model_table.setColumnWidth(1, 220)
+        self._model_table.setColumnWidth(3, 34)
+        self._model_table.setColumnWidth(4, 26)
+        self._model_table.setColumnWidth(5, 48)
+        self._model_table.setColumnWidth(6, 56)
+        self._model_table.setColumnWidth(7, 76)
+
         for row, r in enumerate(filtered_rows):
             self._model_table.insertRow(row)
 
