@@ -6864,28 +6864,29 @@ class MainWindow(QMainWindow):
         """)
         self._model_table.horizontalHeader().setSectionsMovable(False)
         self._model_table.horizontalHeader().setStretchLastSection(False)
-        # 第0列: 复选框固定宽度
+        # 宽度策略: 描述列 Stretch 最大化,模型名称 Interactive(可拖拽但下限小),其余全Fixed紧凑
+        # 第0列: 复选框 Fixed
         self._model_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        # 第1列: 模型名称 Interactive,尽量显示全名
+        # 第1列: 模型名称 Interactive,默认宽,可拖拽但最小160px
         self._model_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         self._model_table.horizontalHeader().setMinimumSectionSize(160)
-        # 第2列: 描述 Stretch 最大化,占用剩余所有空间
+        # 第2列: 描述 Stretch,占满剩余空间
         self._model_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        # 第3-6列: 分类/标签/大小/状态 Fixed 固定宽度,不可拖拽,尽量紧凑
+        # 第3-6列: 分类/标签/大小/状态 Fixed,尽量窄
         self._model_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         self._model_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self._model_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         self._model_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         # 第7列: 操作 Fixed
         self._model_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        # 各列固定宽度: 除描述列外全部紧凑,描述列Stretch占满剩余
+        # 各列宽度: 除描述/名称外全部压到最小,让剩余空间全给描述列
         self._model_table.setColumnWidth(0, 28)   # 复选框
-        self._model_table.setColumnWidth(1, 200)  # 模型名称(可拖拽,最小160px)
-        self._model_table.setColumnWidth(3, 40)   # 分类
-        self._model_table.setColumnWidth(4, 30)   # 标签
-        self._model_table.setColumnWidth(5, 54)   # 大小
-        self._model_table.setColumnWidth(6, 62)   # 状态
-        self._model_table.setColumnWidth(7, 84)   # 操作
+        self._model_table.setColumnWidth(1, 220)  # 模型名称(可拖拽,最小160px)
+        self._model_table.setColumnWidth(3, 34)   # 分类
+        self._model_table.setColumnWidth(4, 26)   # 标签
+        self._model_table.setColumnWidth(5, 48)   # 大小
+        self._model_table.setColumnWidth(6, 56)   # 状态
+        self._model_table.setColumnWidth(7, 76)   # 操作
         self._model_table.verticalHeader().setVisible(False)
         self._model_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._model_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)

@@ -1,5 +1,15 @@
 [
   {
+    "version": "2026.06.14.1205",
+    "date": "2026-06-14 12:07",
+    "message": "模型表格宽度策略优化:描述Stretch最大、名称Interactive可拖拽、其余Fixed紧凑最小",
+    "changes": [
+      "模型表格宽度策略优化:描述Stretch最大、名称Interactive可拖拽、其余Fixed紧凑最小"
+    ],
+    "name": "云集智能视频创意站-v2026.06.14.1205.exe",
+    "download_url": ""
+  },
+  {
     "version": "2026.06.14.1153",
     "date": "2026-06-14 11:54",
     "message": "所有列紧凑显示,仅描述列Stretch占满剩余空间",
