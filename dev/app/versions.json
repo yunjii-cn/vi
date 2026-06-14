@@ -1,5 +1,15 @@
 [
   {
+    "version": "2026.06.14.1107",
+    "date": "2026-06-14 11:08",
+    "message": "修复setTextElideMode兼容性和PyQt6缺失模块问题",
+    "changes": [
+      "修复setTextElideMode兼容性和PyQt6缺失模块问题"
+    ],
+    "name": "云集智能视频创意站-v2026.06.14.1107.exe",
+    "download_url": ""
+  },
+  {
     "version": "2026.06.14.0519",
     "date": "2026-06-14 05:21",
     "message": "修复setTextElideMode兼容性和PyQt6缺失模块问题",
