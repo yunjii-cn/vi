@@ -6856,6 +6856,11 @@ class MainWindow(QMainWindow):
             QTableWidget::item:focus { background-color: #CC0000; color: #FFFFFF; outline: none; border: none; }
             QHeaderView::section { background-color: #1A1A1A; color: #AAAAAA; border: none; border-bottom: 2px solid #333333; border-right: 1px solid #222222; padding: 6px 8px; font-size: 11px; font-weight: bold; }
             QHeaderView::section:hover { background-color: #252525; color: #FFFFFF; }
+            QScrollBar:vertical { background-color: #111113; width: 14px; border-radius: 7px; border: none; }
+            QScrollBar::handle:vertical { background-color: #444444; min-height: 20px; border-radius: 6px; border: 2px solid #111113; }
+            QScrollBar::handle:vertical:hover { background-color: #555555; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
             QCheckBox { spacing: 4px; }
             QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #555555; border-radius: 3px; background-color: #252525; }
             QCheckBox::indicator:checked { background-color: #CC0000; border-color: #FF0000; }
@@ -6879,9 +6884,9 @@ class MainWindow(QMainWindow):
         self._model_table.setColumnWidth(2, 450)  # 描述
         self._model_table.setColumnWidth(3, 80)   # 分类
         self._model_table.setColumnWidth(4, 45)   # 标签
-        self._model_table.setColumnWidth(5, 70)   # 大小
+        self._model_table.setColumnWidth(5, 75)   # 大小
         self._model_table.setColumnWidth(6, 70)   # 状态
-        self._model_table.setColumnWidth(7, 84)   # 操作
+        self._model_table.setColumnWidth(7, 80)   # 操作
         self._model_table.verticalHeader().setVisible(False)
         self._model_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._model_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -7855,9 +7860,9 @@ class MainWindow(QMainWindow):
         self._model_table.setColumnWidth(2, 450)
         self._model_table.setColumnWidth(3, 80)
         self._model_table.setColumnWidth(4, 45)
-        self._model_table.setColumnWidth(5, 60)
+        self._model_table.setColumnWidth(5, 75)
         self._model_table.setColumnWidth(6, 70)
-        self._model_table.setColumnWidth(7, 84)
+        self._model_table.setColumnWidth(7, 80)
 
         for row, r in enumerate(filtered_rows):
             self._model_table.insertRow(row)
