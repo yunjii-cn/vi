@@ -6873,14 +6873,14 @@ class MainWindow(QMainWindow):
         self._model_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         self._model_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         self._model_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        # 合理宽度分配: 总宽1160px, 描述480最大,名称280次之,其余适中
-        self._model_table.setColumnWidth(0, 30)   # 复选框
-        self._model_table.setColumnWidth(1, 280)  # 模型名称(22%)
-        self._model_table.setColumnWidth(2, 480)  # 描述(42%)
-        self._model_table.setColumnWidth(3, 70)   # 分类
+        # 合理宽度分配: 总宽1160px
+        self._model_table.setColumnWidth(0, 35)   # 复选框
+        self._model_table.setColumnWidth(1, 200)  # 模型名称
+        self._model_table.setColumnWidth(2, 450)  # 描述
+        self._model_table.setColumnWidth(3, 80)   # 分类
         self._model_table.setColumnWidth(4, 45)   # 标签
-        self._model_table.setColumnWidth(5, 70)   # 大小
-        self._model_table.setColumnWidth(6, 90)   # 状态
+        self._model_table.setColumnWidth(5, 60)   # 大小
+        self._model_table.setColumnWidth(6, 70)   # 状态
         self._model_table.setColumnWidth(7, 84)   # 操作
         self._model_table.verticalHeader().setVisible(False)
         self._model_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -6907,7 +6907,7 @@ class MainWindow(QMainWindow):
         self._model_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
 
         # 限制表格最大宽度,防止Stretch导致溢出(总宽800=描述列最大份额+其他列固定宽)
-        self._model_table.setMaximumWidth(1160)
+        self._model_table.setMaximumWidth(1054)
 
         content_layout.addWidget(self._model_table, 1)
 
@@ -7850,13 +7850,13 @@ class MainWindow(QMainWindow):
         self._model_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         self._model_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         self._model_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        self._model_table.setColumnWidth(0, 30)
-        self._model_table.setColumnWidth(1, 280)
-        self._model_table.setColumnWidth(2, 480)
-        self._model_table.setColumnWidth(3, 70)
+        self._model_table.setColumnWidth(0, 35)
+        self._model_table.setColumnWidth(1, 200)
+        self._model_table.setColumnWidth(2, 450)
+        self._model_table.setColumnWidth(3, 80)
         self._model_table.setColumnWidth(4, 45)
-        self._model_table.setColumnWidth(5, 70)
-        self._model_table.setColumnWidth(6, 90)
+        self._model_table.setColumnWidth(5, 60)
+        self._model_table.setColumnWidth(6, 70)
         self._model_table.setColumnWidth(7, 84)
 
         for row, r in enumerate(filtered_rows):
