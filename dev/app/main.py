@@ -6879,7 +6879,7 @@ class MainWindow(QMainWindow):
         self._model_table.setColumnWidth(2, 450)  # 描述
         self._model_table.setColumnWidth(3, 80)   # 分类
         self._model_table.setColumnWidth(4, 45)   # 标签
-        self._model_table.setColumnWidth(5, 60)   # 大小
+        self._model_table.setColumnWidth(5, 70)   # 大小
         self._model_table.setColumnWidth(6, 70)   # 状态
         self._model_table.setColumnWidth(7, 84)   # 操作
         self._model_table.verticalHeader().setVisible(False)
