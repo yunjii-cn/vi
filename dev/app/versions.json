@@ -1,5 +1,15 @@
 [
   {
+    "version": "2026.06.14.1228",
+    "date": "2026-06-14 12:30",
+    "message": "描述列改为Interactive最小400px吃满剩余空间",
+    "changes": [
+      "描述列改为Interactive最小400px吃满剩余空间"
+    ],
+    "name": "云集智能视频创意站-v2026.06.14.1228.exe",
+    "download_url": ""
+  },
+  {
     "version": "2026.06.14.1214",
     "date": "2026-06-14 12:15",
     "message": "修复_render_model_table中setHorizontalHeaderLabels重置列宽问题",
