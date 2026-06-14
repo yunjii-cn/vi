@@ -6864,22 +6864,26 @@ class MainWindow(QMainWindow):
         """)
         self._model_table.horizontalHeader().setSectionsMovable(False)
         self._model_table.horizontalHeader().setStretchLastSection(False)
+        # 第0列: 复选框固定宽度
         self._model_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        # 模型名称列: 使用 Interactive(可拖拽),但最小宽度设为文字宽度,不被挤压到只剩几个字母
-        # 拖拽缩小超过实际文字宽度时省略溢出(而不是缩减到几个字母)
+        # 第1列: 模型名称 Interactive,增大默认宽度和最小宽度,尽量显示全名
         self._model_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-        self._model_table.horizontalHeader().setMinimumSectionSize(200)
+        self._model_table.horizontalHeader().setMinimumSectionSize(260)
+        # 第2列: 描述 Stretch 最大化,占用剩余所有空间
         self._model_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self._model_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
-        self._model_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
-        self._model_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
-        self._model_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Interactive)
+        # 第3-6列: 分类/标签/大小/状态 Fixed 固定宽度,不可拖拽
+        self._model_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self._model_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self._model_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self._model_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+        # 第7列: 操作 Fixed
         self._model_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+        # 各列固定宽度
         self._model_table.setColumnWidth(0, 40)
-        self._model_table.setColumnWidth(1, 300)
+        self._model_table.setColumnWidth(1, 320)
         self._model_table.setColumnWidth(3, 80)
         self._model_table.setColumnWidth(4, 50)
-        self._model_table.setColumnWidth(5, 65)
+        self._model_table.setColumnWidth(5, 75)
         self._model_table.setColumnWidth(6, 90)
         self._model_table.setColumnWidth(7, 100)
         self._model_table.verticalHeader().setVisible(False)
