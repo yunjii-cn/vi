@@ -6432,9 +6432,18 @@ function downloadCurrentPreviewAsset() {
     }
 
     function historyThumbUrl(item, globalDir) {
-        if (item.type !== 'video') return historyMediaUrl(item, globalDir);
+        // ★ 2026-06-17 提速 v3: 视频/图片都走专门的缩略图端点(磁盘缓存 + ETag 304)
+        //   原: 图片用 historyMediaUrl → 直接返回原图(5-20MB),5 个图卡几十秒
+        //   新: 用 /api/system/{video,image}-thumbnail → 缩到 360px 宽(几十 KB)
         const rawPath = item.fullpath || (globalDir ? globalDir + '/' + item.filename : item.filename);
-        return `${BASE}/api/system/video-thumbnail?path=${encodeURIComponent(rawPath)}&mtime=${encodeURIComponent(item.mtime || '')}&size=${encodeURIComponent(item.size || '')}`;
+        if (item.type === 'video') {
+            return `${BASE}/api/system/video-thumbnail?path=${encodeURIComponent(rawPath)}&w=360&mtime=${encodeURIComponent(item.mtime || '')}&size=${encodeURIComponent(item.size || '')}`;
+        }
+        if (item.type === 'image') {
+            return `${BASE}/api/system/image-thumbnail?path=${encodeURIComponent(rawPath)}&w=360&mtime=${encodeURIComponent(item.mtime || '')}&size=${encodeURIComponent(item.size || '')}`;
+        }
+        // audio / 其他类型:保持原 URL
+        return historyMediaUrl(item, globalDir);
     }
 
     function renderHistoryCardHtml(item, globalDir) {
