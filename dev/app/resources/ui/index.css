@@ -568,8 +568,24 @@
             /* ★ GPU层提升,hover动画不触发重排 */
             will-change: border-color;
         }
-        .history-card:hover { border-color: var(--accent); }
+        .history-card:hover { border-color: var(--accent); cursor: grab; }
+        .history-card:active { cursor: grabbing; }
         .history-card.is-active { border-color: var(--accent); background: rgba(63,81,181,0.12); }
+        .history-card.is-dragging { opacity: 0.4; transform: scale(0.96); transition: opacity 0.15s, transform 0.15s; }
+        .history-card-list:hover { border-color: var(--accent); cursor: grab; }
+        .history-card-list:active { cursor: grabbing; }
+        .history-card-list.is-active { border-color: var(--accent); background: rgba(63,81,181,0.12); }
+        .history-card-list.is-dragging { opacity: 0.4; transform: scale(0.98); transition: opacity 0.15s, transform 0.15s; }
+        /* ★ 拖拽提示: 卡片右上角小角标,鼠标 hover 时才显示 */
+        .history-card:hover::after,
+        .history-card-list:hover::after {
+            content: '✥ 拖到输入框';
+            position: absolute; top: 6px; left: 6px;
+            background: rgba(63,81,181,0.92); color: #fff;
+            font-size: 10px; padding: 2px 6px; border-radius: 4px;
+            z-index: 20; pointer-events: none; letter-spacing: 0.5px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
         .history-card .grid-thumb-wrap {
             width: 100%; aspect-ratio: 1 / 1; position: relative; overflow: hidden;
             background: #111; flex-shrink: 0; display: flex; align-items: center; justify-content: center;

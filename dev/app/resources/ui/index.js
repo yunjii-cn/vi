@@ -6172,6 +6172,8 @@ function downloadCurrentPreviewAsset() {
                 if (data.version) window.__appVersion = data.version;
             })
             .catch(() => {});
+        // ★ 2026-06-17: 初始化"我的作品 → 输入框"拖拽支持
+        try { setupHistoryDragDrop(); } catch (e) { console.warn('[dragdrop] init failed:', e); }
     }
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', _onDomReady);
@@ -6636,7 +6638,7 @@ function downloadCurrentPreviewAsset() {
                 <div class="param-row">${gridTags.join('')}</div>
            </div>`;
 
-        return `<div class="history-card" data-history-key="${key}" data-filename="${htmlFilename}" data-fullpath="${htmlFullpath}" data-type="${item.type}" data-replayid="${replayId}" data-globaldir="${htmlGlobalDir}">
+        return `<div class="history-card" draggable="true" data-history-key="${key}" data-filename="${htmlFilename}" data-fullpath="${htmlFullpath}" data-type="${item.type}" data-replayid="${replayId}" data-globaldir="${htmlGlobalDir}">
                     <div class="grid-thumb-wrap">
                         <div class="history-type-badge">${typeBadge}</div>
                         <button class="history-delete-btn" onclick="event.stopPropagation(); deleteHistoryItem('${safeFilename}', '${item.type}', this)">✕</button>
@@ -6646,6 +6648,253 @@ function downloadCurrentPreviewAsset() {
                     ${gridInfoHtml}
                 </div>`;
     }
+
+    // ★ 2026-06-17: "我的作品" → 输入框拖拽支持
+    //   原理: history 卡片(网格 + 列表两种)dragstart 时把 {fullpath, type, filename} 写入 dataTransfer
+    //         各个 upload-zone 上注册 dragover/drop 监听,按 type 匹配后把 server 路径直接塞到 hidden input
+    //         关键: history 文件本来就在 server 端,直接复用路径,无需重新上传
+    const YUNJI_DRAG_MIME = 'application/x-yunji-history-item';
+
+    function _getHistoryItemFromDataTransfer(dt) {
+        // 1) 自定义 MIME(优先)
+        const raw = dt.getData(YUNJI_DRAG_MIME) || dt.getData('text/plain') || '';
+        if (!raw) return null;
+        try {
+            const obj = JSON.parse(raw);
+            if (obj && obj.fullpath && obj.type) return obj;
+        } catch (_) {}
+        return null;
+    }
+
+    function _buildFileUrl(fullpath) {
+        return `${BASE}/api/system/file?path=${encodeURIComponent(fullpath)}`;
+    }
+
+    // 拖入时把历史文件作为"伪 File"塞进 file input,触发已有的 onchange 逻辑
+    //   - 这样可以复用 handleFrameUpload / handleUpscaleVideoUpload 等函数
+    //   - DataTransfer.items 在 Chromium 中受限于 onchange 不能直接构造 file,需要走一个 trick
+    //   - 这里采用更稳的做法: 直接调 handleXxxUpload 风格的"已上传"路径
+    function _applyHistoryToDropZone(zoneCfg, item) {
+        const fileUrl = _buildFileUrl(item.fullpath);
+        const filename = item.filename || (item.fullpath.split(/[\\/]/).pop() || 'item');
+
+        // 1) 隐藏的 path input
+        if (zoneCfg.pathInputId) {
+            const inp = document.getElementById(zoneCfg.pathInputId);
+            if (inp) inp.value = item.fullpath;
+        }
+        // 2) 预览元素
+        if (zoneCfg.previewId) {
+            const preview = document.getElementById(zoneCfg.previewId);
+            if (preview) {
+                if (preview.tagName === 'VIDEO') {
+                    preview.src = fileUrl;
+                    preview.style.display = 'block';
+                    preview.load();
+                } else {
+                    preview.src = fileUrl;
+                    preview.style.display = 'block';
+                }
+            }
+        }
+        // 3) 隐藏 placeholder,显示 clear 按钮,显示文件名
+        if (zoneCfg.placeholderId) {
+            const p = document.getElementById(zoneCfg.placeholderId);
+            if (p) p.style.display = 'none';
+        }
+        if (zoneCfg.clearOverlayId) {
+            const c = document.getElementById(zoneCfg.clearOverlayId);
+            if (c) c.style.display = 'flex';
+        }
+        if (zoneCfg.nameElId) {
+            const n = document.getElementById(zoneCfg.nameElId);
+            if (n) { n.textContent = filename; n.style.display = 'block'; }
+        }
+        if (zoneCfg.statusElId) {
+            const s = document.getElementById(zoneCfg.statusElId);
+            if (s) s.style.display = 'block';
+        }
+        if (zoneCfg.statusFilenameElId) {
+            const f = document.getElementById(zoneCfg.statusFilenameElId);
+            if (f) f.textContent = '✅ ' + filename;
+        }
+        // 4) 特殊:TTS 参考音频(用 _ttsRefB64 而非 hidden input)
+        if (zoneCfg.onApply) {
+            try { zoneCfg.onApply(item, filename, fileUrl); } catch (e) { console.warn('drop onApply fail:', e); }
+        }
+        // 5) 分辨率预览(帧上传场景需要刷新)
+        try { if (typeof updateResPreview === 'function') updateResPreview(); } catch (_) {}
+        // 6) 持久化
+        try { if (typeof scheduleSave === 'function') scheduleSave(); } catch (_) {}
+        addLog(`✅ 已应用: ${filename} → ${zoneCfg.label || '目标'}`);
+    }
+
+    // 所有支持拖拽的 drop zone 配置
+    //   accepts: ['image'] / ['video'] / ['audio'] / ['image','video']
+    //   isImage: 决定 <video> 还是 <img> 用于预览(已通过 previewId 自动识别 tagName)
+    const HISTORY_DROP_ZONES = [
+        // 高清放大
+        {
+            zoneId: 'upscale-video-drop-zone', accepts: ['video'],
+            pathInputId: 'upscale-video-path', previewId: 'upscale-video-preview',
+            placeholderId: 'upscale-video-placeholder', clearOverlayId: 'clear-upscale-video-overlay',
+            nameElId: 'upscale-video-name', label: '输入视频(高清放大)',
+        },
+        {
+            zoneId: 'upscale-image-drop-zone', accepts: ['image'],
+            pathInputId: 'upscale-image-path', previewId: 'upscale-image-preview',
+            placeholderId: 'upscale-image-placeholder', clearOverlayId: 'clear-upscale-image-overlay',
+            label: '输入图片(高清放大)',
+        },
+        // 视频生成 - 首/尾帧
+        {
+            zoneId: 'start-frame-drop-zone', accepts: ['image'],
+            pathInputId: 'start-frame-path', previewId: 'start-frame-preview',
+            placeholderId: 'start-frame-placeholder', clearOverlayId: 'clear-start-frame-overlay',
+            label: '起始帧',
+            onApply: (item) => {
+                if (typeof uploadedFrameDims === 'object') {
+                    // 异步取真实尺寸(图片加载完成后在 _onFrameImageLoaded 风格函数里取)
+                    const img = new Image();
+                    img.onload = () => {
+                        uploadedFrameDims.start = { w: img.naturalWidth, h: img.naturalHeight };
+                        try { updateResPreview(); } catch (_) {}
+                    };
+                    img.src = _buildFileUrl(item.fullpath);
+                }
+            },
+        },
+        {
+            zoneId: 'end-frame-drop-zone', accepts: ['image'],
+            pathInputId: 'end-frame-path', previewId: 'end-frame-preview',
+            placeholderId: 'end-frame-placeholder', clearOverlayId: 'clear-end-frame-overlay',
+            label: '结束帧',
+            onApply: (item) => {
+                if (typeof uploadedFrameDims === 'object') {
+                    const img = new Image();
+                    img.onload = () => {
+                        uploadedFrameDims.end = { w: img.naturalWidth, h: img.naturalHeight };
+                        try { updateResPreview(); } catch (_) {}
+                    };
+                    img.src = _buildFileUrl(item.fullpath);
+                }
+            },
+        },
+        // 视频生成 - 音频
+        {
+            zoneId: 'audio-drop-zone', accepts: ['audio'],
+            pathInputId: 'uploaded-audio-path',
+            statusElId: 'audio-upload-status', statusFilenameElId: 'audio-filename-status',
+            placeholderId: 'audio-upload-placeholder', label: '音频(视频生成)',
+        },
+        // 动作迁移
+        {
+            zoneId: 'motion-video-drop-zone', accepts: ['video'],
+            pathInputId: 'motion-video-path', previewId: 'motion-video-preview',
+            placeholderId: 'motion-video-placeholder', clearOverlayId: 'clear-motion-video-overlay',
+            label: '输入视频(动作迁移)',
+        },
+        {
+            zoneId: 'motion-image-drop-zone', accepts: ['image'],
+            pathInputId: 'motion-image-path', previewId: 'motion-image-preview',
+            placeholderId: 'motion-image-placeholder', clearOverlayId: 'clear-motion-image-overlay',
+            label: '目标主体图(动作迁移)',
+        },
+        // TTS 参考音频
+        {
+            zoneId: 'tts-ref-drop', accepts: ['audio'],
+            label: 'TTS 参考音频',
+            onApply: (item, filename) => {
+                // TTS 流程用的是 _ttsRefB64(base64),需要 fetch 一下转 base64
+                fetch(_buildFileUrl(item.fullpath))
+                    .then(r => r.blob())
+                    .then(blob => {
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                            _ttsRefB64 = reader.result;
+                            const placeholder = document.getElementById('tts-ref-placeholder');
+                            const statusEl = document.getElementById('tts-ref-status');
+                            const clearBtn = document.getElementById('tts-ref-clear');
+                            if (placeholder) placeholder.style.display = 'none';
+                            if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = '✅ ' + filename; }
+                            if (clearBtn) clearBtn.style.display = 'flex';
+                            if (typeof _updateTtsSubModeUI === 'function') _updateTtsSubModeUI();
+                        };
+                        reader.readAsDataURL(blob);
+                    })
+                    .catch(err => addLog('❌ 读取音频失败: ' + err.message));
+            },
+        },
+    ];
+
+    function _setupHistoryDropZone(zoneCfg) {
+        const zone = document.getElementById(zoneCfg.zoneId);
+        if (!zone) return;
+        // dragover: preventDefault + 视觉反馈
+        zone.addEventListener('dragover', (e) => {
+            // 必须 preventDefault 才能触发 drop
+            if (e.dataTransfer && Array.from(e.dataTransfer.types || []).some(t => t === YUNJI_DRAG_MIME || t === 'text/plain')) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = 'copy';
+                zone.classList.add('dragover');
+            }
+        });
+        // dragleave: 清除视觉
+        zone.addEventListener('dragleave', (e) => {
+            // 只在离开整个 zone 时清除(子元素冒泡会触发)
+            if (e.target === zone) zone.classList.remove('dragover');
+        });
+        // drop: 处理
+        zone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            zone.classList.remove('dragover');
+            const item = _getHistoryItemFromDataTransfer(e.dataTransfer);
+            if (!item) {
+                // 不是从历史拖来的,什么都不做(让浏览器走文件上传)
+                return;
+            }
+            if (!zoneCfg.accepts.includes(item.type)) {
+                addLog(`❌ 类型不匹配:此目标只接受 ${zoneCfg.accepts.join('/')},但拖入的是 ${item.type}`);
+                return;
+            }
+            _applyHistoryToDropZone(zoneCfg, item);
+        });
+    }
+
+    function setupHistoryDragDrop() {
+        // 1) 在 document 层级拦截 dragstart(事件委托,只针对历史卡片)
+        document.addEventListener('dragstart', (e) => {
+            const card = e.target.closest('.history-card, .history-card-list');
+            if (!card) return;
+            const item = {
+                fullpath: card.dataset.fullpath || '',
+                type: card.dataset.type || '',
+                filename: card.dataset.filename || '',
+            };
+            if (!item.fullpath || !item.type) {
+                e.preventDefault();
+                return;
+            }
+            const payload = JSON.stringify(item);
+            try { e.dataTransfer.setData(YUNJI_DRAG_MIME, payload); } catch (_) {}
+            try { e.dataTransfer.setData('text/plain', payload); } catch (_) {}
+            e.dataTransfer.effectAllowed = 'copy';
+            // 视觉:被拖的卡片加个半透明
+            card.classList.add('is-dragging');
+        });
+        document.addEventListener('dragend', (e) => {
+            const card = e.target.closest && e.target.closest('.history-card, .history-card-list');
+            if (card) card.classList.remove('is-dragging');
+        });
+        // 2) 给所有 drop zone 装监听(只装一次,重复调用安全)
+        if (!window.__yunjiDropZonesInstalled) {
+            HISTORY_DROP_ZONES.forEach(_setupHistoryDropZone);
+            window.__yunjiDropZonesInstalled = true;
+        }
+    }
+    window.setupHistoryDragDrop = setupHistoryDragDrop;
 
     function resetHistoryAndReload() {
         _historyListFingerprint = '';
