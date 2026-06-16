@@ -1,12 +1,13 @@
 import os, sys, logging, httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import Response, StreamingResponse
+from fastapi.middleware.gzip import GZipMiddleware
 import uvicorn
 
 APP_NAME = '云集智能视频创意站'
 VERSION = '2026.06.14.1438'
 
-_ui_log_path = 'E:\\软件开发\\云集智能视频创意站\\dev\\temp\\logs\\ui_server_20260617_010209.log'
+_ui_log_path = 'E:\\软件开发\\云集智能视频创意站\\dev\\temp\\logs\\ui_server_20260617_013011.log'
 os.makedirs(os.path.dirname(_ui_log_path), exist_ok=True)
 
 def _ui_log(msg):
@@ -99,6 +100,11 @@ FRONTEND_PORT = 7000
 BACKEND_BASE = f"http://127.0.0.1:{BACKEND_PORT}"
 outputs_dir = 'E:\\软件开发\\云集智能视频创意站\\dev\\data\\outputs'
 app = FastAPI()
+# ★ 2026-06-17 提速 v2: GZip 中间件 — text/js/css/json 走压缩
+#   压缩比参考(index.html 95KB → 18KB, index.js 386KB → 96KB, index.css 60KB → 11KB)
+#   默认 min_size=500,大于 500 字节才压缩
+#   一致性: 静态资源 + API 响应都压缩(原来 30+ API 都没压缩,几百 KB 都跑明文)
+app.add_middleware(GZipMiddleware, minimum_size=500)
 # ★ 2026-06-16 v4 修复: 静态资源缓存策略
 #   - index.html: no-cache(每次都要重新验证,但命中 304 就是 0 字节)
 #   - 其他静态资源: short max-age(让浏览器有短时缓存,缓减突发刷新)

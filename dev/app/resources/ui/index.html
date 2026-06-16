@@ -28,11 +28,20 @@
     </style>
     <!-- ★ 2026-06-16 v4 提速: 预连接到 CDN(留作 fallback),但主资源已本地化 -->
     <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
-    <link rel="stylesheet" href="index.css?v=fix-replay-progress">
-    <!-- ★ 2026-06-16 v4 提速: Plyr 改本地(原 cdnjs 32KB+113KB,外网抖动会拖慢首屏)
-         原 media="print" hack 已废弃:某些浏览器按 print 渲染触发 FOUC
-         现在走标准 <link> + 同源 304 缓存(见 _ui_server.py 的 ETag 协商) -->
-    <link rel="stylesheet" href="plyr.css?v=3.7.8">
+    <!-- ★ 2026-06-17: preconnect 提前建立到 API 的 TCP+TLS 通道 -->
+    <link rel="preconnect" href="http://127.0.0.1:4000" crossorigin>
+    <link rel="preconnect" href="http://127.0.0.1:3000" crossorigin>
+    <!-- ★ 2026-06-17 提速 v2: CSS 改 preload + onload 异步加载
+         原 <link rel="stylesheet"> 会阻塞渲染,首屏要等 60KB+32KB 全部下载解析完才出
+         改异步后:CSS 与 JS 一起并发下载,首屏先出"splash + 遮罩"结构,JS 跑起来后样式再补
+         index.css 几乎全屏都需要,但 html 已带 yunji-logged-in 类的快速脱遮罩
+         plyr.css 只在播放视频时才用到,完全可以异步 -->
+    <link rel="preload" href="index.css?v=fix-replay-progress" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <link rel="preload" href="plyr.css?v=3.7.8" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript>
+        <link rel="stylesheet" href="index.css?v=fix-replay-progress">
+        <link rel="stylesheet" href="plyr.css?v=3.7.8">
+    </noscript>
     <!-- ★ 2026-06-09: 登录门控遮罩(收敛:splash 风格大LOGO 100px + 下方一个细环转圈替代进度条) -->
     <style>
         #yunji-login-veil {

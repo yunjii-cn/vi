@@ -4802,6 +4802,26 @@ async function runTts() {
         return `${BASE}/api/system/file?path=${encodeURIComponent(path)}`;
     }
 
+    /**
+     * ★ 2026-06-17: 预加载资源(图片/视频/音频)
+     *   在 <head> 注入 <link rel="preload" as="image|video|audio"> 让浏览器后台下载
+     *   等用户真正需要时(displayHistoryOutput 设 src),浏览器直接从缓存读取
+     *   关键路径: 预加载是 HTTP 缓存的"warm",displayHistoryOutput 触发时 0 网络等待
+     *   重复调用去重: 同一 URL 只注入一次
+     */
+    const _preloadedUrls = new Set();
+    function _preloadAsset(path, kind) {
+        const url = mediaUrlForPath(path);
+        if (_preloadedUrls.has(url)) return;
+        _preloadedUrls.add(url);
+        const link = document.createElement('link');
+        link.rel = 'preload';
+        link.as = kind;  // 'image' | 'video' | 'audio'
+        link.href = url;
+        // imagesrcset/imagesizes 可选;Range 不加,让服务端决定
+        try { document.head.appendChild(link); } catch (_) {}
+    }
+
     function setElValue(id, value) {
         const el = document.getElementById(id);
         if (el && value !== undefined && value !== null) el.value = value;
@@ -7015,6 +7035,18 @@ function downloadCurrentPreviewAsset() {
                             const _replayId = _firstCard.dataset.replayid || '';
                             const _fileToDisplay = _fullpath || _filename;
                             if (_fileToDisplay) {
+                                // ★ 2026-06-17: 预加载大图(关键路径优化)
+                                //   不等 displayHistoryOutput 触发 img.src 才下载
+                                //   而是先在 <head> 注入 <link rel="preload" as="image"> 提前下载
+                                //   浏览器会并发下载,等 displayHistoryOutput 设 src 时直接走浏览器缓存
+                                //   收益: 大图加载从"等 displayHistoryOutput" 降到"和 history API 并行"
+                                try {
+                                    if (_type === 'image') {
+                                        _preloadAsset(_fileToDisplay, 'image');
+                                    } else if (_type === 'video') {
+                                        _preloadAsset(_fileToDisplay, 'video');
+                                    }
+                                } catch (_ppErr) { /* preload 失败不影响主流程 */ }
                                 // ★ 仅显示大图,不重复刷日志(用户还没主动操作)
                                 displayHistoryOutput(_fileToDisplay, _type, _replayId);
                                 console.log('[AUTO-ACTIVATE] 已默认激活最新作品:', _fileToDisplay);
