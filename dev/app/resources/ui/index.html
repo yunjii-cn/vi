@@ -173,6 +173,23 @@
             border-color: rgba(200, 160, 112, 0.8);
         }
     </style>
+    <script>
+        // ★ 2026-06-17: HTML 解析阶段就预取 history(不阻塞 DOM)
+        //   关键路径: HTML 解析 → 立即 fetch → 浏览器并行下载 JS/CSS/字体
+        //   等 index.js 跑完调 fetchHistory 时,大概率已经 ready
+        //   F5 时(ETag 命中 304),0 字节响应,真正秒开
+        (function(){
+            try {
+                window.__yunjiHistoryPrefetch = fetch('/api/system/history?page=1&limit=5', {
+                    credentials: 'same-origin',
+                    cache: 'default',
+                })
+                    .then(r => (r.ok || r.status === 304) ? r.json() : null)
+                    .then(d => d && d.status === 'success' ? d : null)
+                    .catch(() => null);
+            } catch (e) { window.__yunjiHistoryPrefetch = null; }
+        })();
+    </script>
 </head>
 <body>
 

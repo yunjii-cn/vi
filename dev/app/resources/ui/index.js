@@ -6731,13 +6731,33 @@ function downloadCurrentPreviewAsset() {
     async function fetchHistory(isFirstLoad = false, silent = false) {
         if (isLoadingHistory) return;
         isLoadingHistory = true;
-        // ★ 2026-06-16 v2: 加载期间显示"加载中"状态(只对追加页生效,首屏由浏览器渲染空容器)
+        // ★ 加载期间显示"加载中"状态(只对追加页生效,首屏由浏览器渲染空容器)
         if (!isFirstLoad) _setSentinelState('loading');
 
         try {
             // ★ 2026-06-16 v2: 支持分页,首次 5 个,之后每次 +5
             //   silent 模式: 不清空 _historyListFingerprint 状态,允许"无变化则不重渲"
             const limit = isFirstLoad ? HISTORY_PAGE_LIMIT : HISTORY_PAGE_MORE;
+
+            // ★ 2026-06-17: 优先用 HTML 解析阶段就发起的预取 promise
+            //   - 场景: 用户首次打开页面 / F5 刷新
+            //   - 浏览器在 HTML 解析时就已经开始下载 /api/system/history
+            //   - 等 JS 跑完时,大概率已经 ready(等 50ms 兜底,避免预取太慢反而拖累)
+            //   - F5 时(ETag 命中 304),0 字节响应,真正秒开
+            if (isFirstLoad && !silent && window.__yunjiHistoryPrefetch) {
+                const prefetched = await Promise.race([
+                    window.__yunjiHistoryPrefetch,
+                    new Promise(resolve => setTimeout(() => resolve(null), 50)),
+                ]);
+                if (prefetched) {
+                    window.__yunjiHistoryPrefetch = null;
+                    // 走 localStorage 缓存路径(后续 fetch 仍然会发,走 304 透明命中)
+                    isLoadingHistory = false;
+                    await _renderHistoryData(prefetched, true, false, limit);
+                    isLoadingHistory = true;
+                }
+            }
+
             // ★ 2026-06-16 v4 提速: 首次加载时,先尝试从 localStorage 读缓存(0 阻塞渲染)
             //   - 如果命中 → 立刻渲染 → 用户先看到 5 个作品 → 再后台 fetch 最新数据
             //   - 视觉:F5 后 200-500ms 就能看到内容(本来要 1-2 秒)
