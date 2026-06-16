@@ -348,23 +348,87 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
 
     _ASR_MODEL = None
     _ASR_MODEL_NAME = "base"
+    # ★ 2026-06-17 修复: 国内 huggingface.co 不可达,默认走 hf-mirror.com 镜像
+    #   旧逻辑: faster-whisper 直接拉 HF → LocalEntryNotFoundError
+    #   新逻辑: 1) 优先用本地模型 2) 缺失则通过镜像预下载 3) 下载后用本地路径加载
+    _HF_MIRROR = "https://hf-mirror.com"
+    # faster-whisper "base" 对应的 HF repo_id
+    _ASR_REPO_ID = "guillaumekln/faster-whisper-base"
+
+    def _resolve_asr_local_dir() -> Path | None:
+        """返回 faster-whisper 模型的本地目录(若存在)。"""
+        models_root = resolve_models_root(ctx)
+        if not models_root:
+            return None
+        return models_root / "faster-whisper" / _ASR_MODEL_NAME
+
+    def _ensure_asr_model_downloaded() -> Path:
+        """确保 faster-whisper 模型已下载到本地,缺失则通过镜像下载。"""
+        local_dir = _resolve_asr_local_dir()
+        if local_dir and local_dir.is_dir() and any(local_dir.iterdir()):
+            return local_dir
+        # 本地没有 → 通过 hf-mirror.com 下载
+        try:
+            from huggingface_hub import snapshot_download
+        except ImportError as e:
+            raise RuntimeError(
+                "缺少 huggingface_hub,无法下载 faster-whisper 模型。"
+                "请运行: pip install huggingface_hub"
+            ) from e
+        models_root = resolve_models_root(ctx)
+        if not models_root:
+            raise RuntimeError("无法解析 models_root,无法下载 ASR 模型")
+        target = models_root / "faster-whisper" / _ASR_MODEL_NAME
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # ★ 走国内镜像 hf-mirror.com
+        #   设置 env 让 huggingface_hub 内部所有调用都走镜像(包括校验、metadata)
+        env_backup = os.environ.get("HF_ENDPOINT")
+        os.environ["HF_ENDPOINT"] = _HF_MIRROR
+        try:
+            snapshot_download(
+                repo_id=_ASR_REPO_ID,
+                local_dir=str(target),
+                endpoint=_HF_MIRROR,
+                # base 模型约 150MB,int8 量化后 ~75MB,允许较长超时
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"通过 hf-mirror.com 下载 faster-whisper 模型失败: {type(e).__name__}: {e}。"
+                f"可手动从 https://hf-mirror.com/{_ASR_REPO_ID} 下载后放到 {target}"
+            ) from e
+        finally:
+            if env_backup is None:
+                os.environ.pop("HF_ENDPOINT", None)
+            else:
+                os.environ["HF_ENDPOINT"] = env_backup
+        if not target.is_dir() or not any(target.iterdir()):
+            raise RuntimeError(f"faster-whisper 模型下载后目录仍为空: {target}")
+        return target
 
     def _get_asr_model():
         nonlocal _ASR_MODEL
         if _ASR_MODEL is not None:
             return _ASR_MODEL
         from faster_whisper import WhisperModel
-        models_root = resolve_models_root(ctx)
-        asr_dir = None
-        if models_root:
-            candidate = models_root / "faster-whisper" / _ASR_MODEL_NAME
-            if candidate.is_dir():
-                asr_dir = str(candidate)
-        if asr_dir:
-            _ASR_MODEL = WhisperModel(asr_dir, device="cpu", compute_type="int8")
-        else:
-            _ASR_MODEL = WhisperModel(_ASR_MODEL_NAME, device="cpu", compute_type="int8", download_root=str(models_root / "faster-whisper") if models_root else None)
-        return _ASR_MODEL
+        # ① 优先用本地缓存(避免每次都走网络)
+        local_dir = _resolve_asr_local_dir()
+        if local_dir and local_dir.is_dir() and any(local_dir.iterdir()):
+            _ASR_MODEL = WhisperModel(str(local_dir), device="cpu", compute_type="int8")
+            return _ASR_MODEL
+        # ② 本地没有,尝试通过镜像下载
+        try:
+            downloaded = _ensure_asr_model_downloaded()
+            _ASR_MODEL = WhisperModel(str(downloaded), device="cpu", compute_type="int8")
+            return _ASR_MODEL
+        except Exception as dl_err:
+            # ③ 下载失败 → 给清晰错误,提示用户手动处理
+            raise RuntimeError(
+                f"faster-whisper 模型不可用且自动下载失败。\n"
+                f"  本地路径: {local_dir}\n"
+                f"  错误: {dl_err}\n"
+                f"  解决: 1) 检查网络(hf-mirror.com 是否可达)\n"
+                f"        2) 或手动从 https://hf-mirror.com/{_ASR_REPO_ID} 下载后放到上述本地路径"
+            ) from dl_err
 
     @app.post("/api/tts/transcribe")
     async def route_tts_transcribe(request: Request):
