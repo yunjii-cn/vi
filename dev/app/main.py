@@ -93,44 +93,96 @@ def _early_kill_old_dev_instances():
         # - 必须杀整棵进程树:主进程被 kill 后,Uvicorn/FastAPI 子进程还活着,占端口
         #   → 用 taskkill /T /F /PID (Windows 内置,无需依赖)
         if old_pid and old_pid != my_pid:
-            import subprocess as _sp
-            try:
-                with open(r'D:\Temp\yunji_video_dev_kill.log', 'a', encoding='utf-8') as _df:
-                    _df.write(f'[KILL] 准备 taskkill /T /F /PID {old_pid}\n')
-            except Exception:
-                pass
-            try:
-                r = _sp.run(
-                    ['taskkill', '/T', '/F', '/PID', str(old_pid)],
-                    capture_output=True, text=True, timeout=5
-                )
+            # ★ 2026-06-17 fix: 先用 OpenProcess 心跳检查,死了就跳过 taskkill
+            # 原因: 旧 dev 实例被 Ctrl+C 强杀后,lock 文件的 PID 已死,但 taskkill /T
+            #   仍会遍历整棵进程树(孤儿进程 = 后端/前端还在跑),阻塞 5s 后才超时
+            #   表现: 每次启动 dev bat 都卡 5s+,让人以为启动失败
+            _PROC_QUERY = 0x0400
+            _h_check = kernel32.OpenProcess(_PROC_QUERY, False, old_pid)
+            if not _h_check:
+                # 旧 PID 已死 → 直接清 lock,跳过 taskkill(避免误杀 PID 复用的无辜进程)
                 try:
                     with open(r'D:\Temp\yunji_video_dev_kill.log', 'a', encoding='utf-8') as _df:
-                        _df.write(f'[KILL] taskkill rc={r.returncode}, stdout={r.stdout.strip()}, stderr={r.stderr.strip()}\n')
+                        _df.write(f'[KILL] 旧 PID {old_pid} 已死,跳过 taskkill,只清 lock\n')
                 except Exception:
                     pass
-            except Exception as e:
+                # ★ 2026-06-17 fix: 父进程死了但子进程可能还活着(占着 6000/7000 端口)
+                #   → 用 netstat 找监听这两个端口的 PID,直接 taskkill
                 try:
-                    with open(r'D:\Temp\yunji_video_dev_kill.log', 'a', encoding='utf-8') as _df:
-                        _df.write(f'[KILL] taskkill 异常: {e}\n')
-                except Exception:
-                    pass
-            # 等真正退出(最多 2s)
-            import time as _t
-            kernel32 = ctypes.windll.kernel32
-            PROCESS_QUERY_INFORMATION = 0x0400
-            STILL_ACTIVE = 259
-            for _i in range(20):
-                _t.sleep(0.1)
-                h4 = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, old_pid)
-                if not h4:
+                    import subprocess as _sp2
+                    import re as _re
+                    _r = _sp2.run(
+                        ['netstat', '-ano', '-p', 'TCP'],
+                        capture_output=True, text=True, timeout=3
+                    )
+                    _orphans = set()
+                    for _line in (_r.stdout or '').splitlines():
+                        # 找 LISTENING 状态 + 端口匹配
+                        if 'LISTENING' not in _line:
+                            continue
+                        for _port in (6000, 7000):
+                            if f':{_port}' in _line and '127.0.0.1' in _line:
+                                _m = _re.search(r'(\d+)\s*$', _line.strip())
+                                if _m:
+                                    _orphans.add(int(_m.group(1)))
+                    for _opid in _orphans:
+                        if _opid and _opid != my_pid:
+                            try:
+                                with open(r'D:\Temp\yunji_video_dev_kill.log', 'a', encoding='utf-8') as _df:
+                                    _df.write(f'[KILL] 孤儿端口进程 taskkill /F /PID {_opid}\n')
+                            except Exception:
+                                pass
+                            try:
+                                _sp2.run(
+                                    ['taskkill', '/F', '/PID', str(_opid)],
+                                    capture_output=True, text=True, timeout=3
+                                )
+                            except Exception:
+                                pass
+                except Exception as _e:
                     try:
                         with open(r'D:\Temp\yunji_video_dev_kill.log', 'a', encoding='utf-8') as _df:
-                            _df.write(f'[KILL] 旧进程已退出 (i={_i})\n')
+                            _df.write(f'[KILL] 端口清理异常: {_e}\n')
                     except Exception:
                         pass
-                    break
-                kernel32.CloseHandle(h4)
+            else:
+                kernel32.CloseHandle(_h_check)
+                import subprocess as _sp
+                try:
+                    with open(r'D:\Temp\yunji_video_dev_kill.log', 'a', encoding='utf-8') as _df:
+                        _df.write(f'[KILL] 准备 taskkill /T /F /PID {old_pid}\n')
+                except Exception:
+                    pass
+                try:
+                    r = _sp.run(
+                        ['taskkill', '/T', '/F', '/PID', str(old_pid)],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    try:
+                        with open(r'D:\Temp\yunji_video_dev_kill.log', 'a', encoding='utf-8') as _df:
+                            _df.write(f'[KILL] taskkill rc={r.returncode}, stdout={r.stdout.strip()}, stderr={r.stderr.strip()}\n')
+                    except Exception:
+                        pass
+                except Exception as e:
+                    try:
+                        with open(r'D:\Temp\yunji_video_dev_kill.log', 'a', encoding='utf-8') as _df:
+                            _df.write(f'[KILL] taskkill 异常: {e}\n')
+                    except Exception:
+                        pass
+                # 等真正退出(最多 2s)
+                import time as _t
+                PROCESS_QUERY_INFORMATION = 0x0400
+                for _i in range(20):
+                    _t.sleep(0.1)
+                    h4 = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, old_pid)
+                    if not h4:
+                        try:
+                            with open(r'D:\Temp\yunji_video_dev_kill.log', 'a', encoding='utf-8') as _df:
+                                _df.write(f'[KILL] 旧进程已退出 (i={_i})\n')
+                        except Exception:
+                            pass
+                        break
+                    kernel32.CloseHandle(h4)
 
         # ★ 3) 清理旧 lock(可能残留)+ 写新 lock
         try:
