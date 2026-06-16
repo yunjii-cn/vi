@@ -6583,7 +6583,7 @@ function downloadCurrentPreviewAsset() {
                     <span class="lpl-key">文件名</span><span class="lpl-val lpl-filename">${escapeHtmlAttr(item.filename)}</span>
                 </div>`}`;
 
-            return `<div class="history-card-list" data-history-key="${key}" data-filename="${htmlFilename}" data-fullpath="${htmlFullpath}" data-type="${item.type}" data-replayid="${replayId}" data-globaldir="${htmlGlobalDir}" data-mtime="${escapeHtmlAttr(String(item.mtime || ''))}" data-size="${escapeHtmlAttr(String(item.size || ''))}">
+            return `<div class="history-card-list" draggable="true" data-history-key="${key}" data-filename="${htmlFilename}" data-fullpath="${htmlFullpath}" data-type="${item.type}" data-replayid="${replayId}" data-globaldir="${htmlGlobalDir}" data-mtime="${escapeHtmlAttr(String(item.mtime || ''))}" data-size="${escapeHtmlAttr(String(item.size || ''))}">
                         <div class="list-thumb">
                             <div class="history-type-badge">${typeBadge}</div>
                             <button class="history-delete-btn" onclick="event.stopPropagation(); deleteHistoryItem('${safeFilename}', '${item.type}', this)">✕</button>
@@ -6851,6 +6851,10 @@ function downloadCurrentPreviewAsset() {
             e.stopPropagation();
             zone.classList.remove('dragover');
             const item = _getHistoryItemFromDataTransfer(e.dataTransfer);
+            // ★ 2026-06-17 debug: 临时调试日志
+            if (window.__yunjiDragDebug) {
+                console.log('[dragdrop] drop on', zoneCfg.zoneId, 'item:', item, 'types:', e.dataTransfer && Array.from(e.dataTransfer.types || []));
+            }
             if (!item) {
                 // 不是从历史拖来的,什么都不做(让浏览器走文件上传)
                 return;
@@ -6880,6 +6884,11 @@ function downloadCurrentPreviewAsset() {
             const payload = JSON.stringify(item);
             try { e.dataTransfer.setData(YUNJI_DRAG_MIME, payload); } catch (_) {}
             try { e.dataTransfer.setData('text/plain', payload); } catch (_) {}
+            // ★ 2026-06-17 fix: 同时写 application/x-yunji-asset(已有 initDragAndDrop 系统的 MIME)
+            //   - payload 字段保持兼容:{filename, type}
+            //   - _fetchAssetAsFile 用 filename 拼 URL,但实际接受 path 参数,所以传 fullpath 也能解析
+            //   - 这样 initDragAndDrop 的 drop handler 也能正确处理,双保险
+            try { e.dataTransfer.setData('application/x-yunji-asset', JSON.stringify({ filename: item.fullpath, type: item.type })); } catch (_) {}
             e.dataTransfer.effectAllowed = 'copy';
             // 视觉:被拖的卡片加个半透明
             card.classList.add('is-dragging');
