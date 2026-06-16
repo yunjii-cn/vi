@@ -30,6 +30,7 @@ LTX Desktop/
 # ── dev/ 根目录临时文件 ──
 dev/*.txt
 dev/*.bat
+!dev/dev_start.bat
 dev/icon.ico
 dev/icon.png
 

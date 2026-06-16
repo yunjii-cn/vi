@@ -150,12 +150,17 @@ def _early_kill_old_dev_instances():
                 import subprocess as _sp
                 try:
                     with open(r'D:\Temp\yunji_video_dev_kill.log', 'a', encoding='utf-8') as _df:
-                        _df.write(f'[KILL] 准备 taskkill /T /F /PID {old_pid}\n')
+                        _df.write(f'[KILL] 准备 taskkill /F /PID {old_pid}(无 /T,只杀启动器,保留前后端子进程)\n')
                 except Exception:
                     pass
                 try:
+                    # ★ 2026-06-17: 改用 taskkill /F /PID(无 /T)
+                    # 原因: 杀整棵进程树(/T)会连带杀前后端子进程,丢失服务状态
+                    # 现在设计: 只杀启动器进程,前后端变孤儿继续跑
+                    #   → 新启动器启动后 _start_backend/_start_frontend 会探测端口
+                    #   → 验证是自家服务 → 接管(创建 _VirtualServiceProcess)
                     r = _sp.run(
-                        ['taskkill', '/T', '/F', '/PID', str(old_pid)],
+                        ['taskkill', '/F', '/PID', str(old_pid)],
                         capture_output=True, text=True, timeout=5
                     )
                     try:
@@ -178,7 +183,7 @@ def _early_kill_old_dev_instances():
                     if not h4:
                         try:
                             with open(r'D:\Temp\yunji_video_dev_kill.log', 'a', encoding='utf-8') as _df:
-                                _df.write(f'[KILL] 旧进程已退出 (i={_i})\n')
+                                _df.write(f'[KILL] 旧启动器已退出 (i={_i})\n')
                         except Exception:
                             pass
                         break
@@ -1630,6 +1635,74 @@ class ServiceProcess(QThread):
                     self.process.kill()
                 except:
                     pass
+
+
+class _VirtualServiceProcess:
+    """
+    ★ 2026-06-17:虚拟 ServiceProcess,表示"端口被占但不是我启动的(接管旧实例)"
+    - 用于 dev 模式重启时:旧启动器被杀,前后端孤儿继续跑 → 新启动器接管
+    - 替代 ServiceProcess 放进 self.service_processes 字典,UI 把它当"已运行"
+    - 关键区别:我们没有 QThread 也没有 subprocess.Popen,只持有端口号
+    - 终止时:发 shutdown API(后端)或直接 taskkill 端口(前端)
+    """
+    def __init__(self, service_id, port):
+        self.service_id = service_id
+        self._port = port
+        self.process = None  # 兼容代码:proc.process 不存在
+        self.output_received = None  # 不接信号
+        self.process_finished = None
+
+    def isRunning(self):
+        try:
+            conn = socket.create_connection(('127.0.0.1', self._port), timeout=0.5)
+            conn.close()
+            return True
+        except Exception:
+            return False
+
+    def start(self):
+        # 接管的服务不需要启动,什么都不做
+        pass
+
+    def terminate(self):
+        # 接管的服务:先发优雅 shutdown API,再 taskkill 端口
+        if self.service_id == "backend":
+            try:
+                import urllib.request
+                urllib.request.urlopen(
+                    f"http://127.0.0.1:{self._port}/api/system/shutdown",
+                    timeout=2
+                )
+            except Exception:
+                pass
+        # taskkill 端口进程(无 /T,只杀主进程)
+        try:
+            hidden_run(
+                ['netstat', '-aon', '-p', 'TCP'],
+                capture_output=True, text=True, timeout=3
+            )
+        except Exception:
+            pass
+        # 调用 _kill_specific_port 风格的逻辑
+        try:
+            from subprocess import run as _r
+            _r_netstat = _r(
+                ['netstat', '-aon', '-p', 'TCP'],
+                capture_output=True, text=True, timeout=3
+            )
+            port_pat = re.compile(rf':{self._port}\s')
+            for line in (_r_netstat.stdout or '').split('\n'):
+                if port_pat.search(line) and 'LISTENING' in line:
+                    parts = line.strip().split()
+                    if len(parts) >= 5:
+                        pid = int(parts[-1])
+                        if pid and pid != os.getpid():
+                            _r(
+                                ['taskkill', '/F', '/PID', str(pid)],
+                                capture_output=True, timeout=3
+                            )
+        except Exception:
+            pass
 
 
 _gitee_token_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".gitee_token")
@@ -14671,10 +14744,14 @@ for d in deps:
             if is_own:
                 self._log(f"√ 核心引擎已在运行 (端口{self._backend_port})，跳过启动", "ok")
                 return
-            else:
-                self._log(f"△ 端口{self._backend_port}被未知进程占用，正在清理...", "warn")
-                self._kill_specific_port(self._backend_port)
-                time.sleep(0.5)
+            # ★ 2026-06-17: 端口被占 → 先探测是不是自家服务(接管旧实例,不杀进程)
+            if self._probe_our_service("backend", self._backend_port):
+                self._log(f"√ 检测到旧核心引擎 (端口{self._backend_port})，接管中(保留服务状态)", "ok")
+                self.service_processes["backend"] = _VirtualServiceProcess("backend", self._backend_port)
+                return
+            self._log(f"△ 端口{self._backend_port}被未知进程占用，正在清理...", "warn")
+            self._kill_specific_port(self._backend_port)
+            time.sleep(0.5)
         except Exception:
             pass
 
@@ -14767,10 +14844,14 @@ if __name__ == '__main__':
             if is_own:
                 self._log(f"√ AI视频工作站已在运行 (端口{self._frontend_port})，跳过启动", "ok")
                 return
-            else:
-                self._log(f"△ 端口{self._frontend_port}被未知进程占用，正在清理...", "warn")
-                self._kill_specific_port(self._frontend_port)
-                time.sleep(0.5)
+            # ★ 2026-06-17: 端口被占 → 先探测是不是自家服务(接管旧实例,不杀进程)
+            if self._probe_our_service("frontend", self._frontend_port):
+                self._log(f"√ 检测到旧 AI视频工作站 (端口{self._frontend_port})，接管中(保留服务状态)", "ok")
+                self.service_processes["frontend"] = _VirtualServiceProcess("frontend", self._frontend_port)
+                return
+            self._log(f"△ 端口{self._frontend_port}被未知进程占用，正在清理...", "warn")
+            self._kill_specific_port(self._frontend_port)
+            time.sleep(0.5)
         except Exception:
             pass
 
@@ -15903,6 +15984,32 @@ if __name__ == '__main__':
                             self._log(f"⏹ 已强制终止端口 {port} 的进程 (PID:{pid})", "warn")
         except Exception:
             pass
+
+    def _probe_our_service(self, service_id, port):
+        """
+        ★ 2026-06-17:探测端口上的服务是不是自家项目
+        - dev 模式重启时,旧启动器被杀但子进程变孤儿继续跑 → 端口仍被占
+        - 用 HTTP 探测验证:后端 /api/health,前端 /api/health(代理)
+        - 后端:响应含 "status" 字段
+        - 前端:响应 HTML 含 "云集智能视频创意站" 标题
+        - 返回 True 表示是自家服务(可以接管,不杀)
+        """
+        try:
+            import urllib.request
+            # 后端/前端都探测 /api/health(前端代理会把请求转发到后端)
+            url = f"http://127.0.0.1:{port}/api/health"
+            req = urllib.request.Request(url, headers={"User-Agent": "yunji-probe", "Accept": "*/*"})
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                if resp.status == 200:
+                    body = resp.read().decode('utf-8', errors='ignore')[:500]
+                    if service_id == "backend":
+                        return '"status"' in body or '"ok"' in body.lower() or '"yunji"' in body.lower()
+                    else:
+                        # 前端:HTML 含项目标题
+                        return '云集智能视频创意站' in body
+        except Exception:
+            return False
+        return False
 
     def _wait_for_port_free(self, port, timeout=8):
         start = time.time()
