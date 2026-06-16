@@ -6927,6 +6927,36 @@ function downloadCurrentPreviewAsset() {
             }
             _historyListFingerprint = fingerprint;
 
+            // ★ 2026-06-17: 默认激活最新作品并显示大图
+            //   触发条件: 首次加载 + 列表非空 + 当前没有用户主动激活的卡
+            //   作用: 切回 history tab 时自动展示最新;用户点过别的就不再覆盖
+            try {
+                if (isFirstLoad && validHistory.length > 0) {
+                    const _hasActive = container.querySelector('.history-card.is-active, .history-card-list.is-active');
+                    if (!_hasActive) {
+                        const _firstCard = container.querySelector('.history-card[data-history-key], .history-card-list[data-history-key]');
+                        if (_firstCard) {
+                            // 标记活跃样式
+                            container.querySelectorAll('.history-card.is-active, .history-card-list.is-active').forEach(c => c.classList.remove('is-active'));
+                            _firstCard.classList.add('is-active');
+                            // 优先用 fullpath,回退到 filename
+                            const _fullpath = _firstCard.dataset.fullpath || '';
+                            const _filename = _firstCard.dataset.filename || '';
+                            const _type = _firstCard.dataset.type || 'image';
+                            const _replayId = _firstCard.dataset.replayid || '';
+                            const _fileToDisplay = _fullpath || _filename;
+                            if (_fileToDisplay) {
+                                // ★ 仅显示大图,不重复刷日志(用户还没主动操作)
+                                displayHistoryOutput(_fileToDisplay, _type, _replayId);
+                                console.log('[AUTO-ACTIVATE] 已默认激活最新作品:', _fileToDisplay);
+                            }
+                        }
+                    }
+                }
+            } catch (_autoErr) {
+                console.warn('[AUTO-ACTIVATE] 失败:', _autoErr);
+            }
+
             // ★ 2026-06-16 v2: 决定"还有没有更多页",并启动底部哨兵观察者
             //   后端响应里有 total_pages / current_page,直接对位判断
             //   容错:服务端没给字段时,按"返回的卡片数 < limit"判定为最后一页
