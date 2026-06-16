@@ -4,9 +4,9 @@ from fastapi.responses import Response, StreamingResponse
 import uvicorn
 
 APP_NAME = '云集智能视频创意站'
-VERSION = '2026.06.14.1423'
+VERSION = '2026.06.14.1438'
 
-_ui_log_path = 'E:\\软件开发\\云集智能视频创意站\\dev\\temp\\logs\\ui_server.log'
+_ui_log_path = 'E:\\软件开发\\云集智能视频创意站\\dev\\temp\\logs\\ui_server_20260617_010209.log'
 os.makedirs(os.path.dirname(_ui_log_path), exist_ok=True)
 
 def _ui_log(msg):
@@ -15,8 +15,57 @@ def _ui_log(msg):
     print(f"[UI_SERVER] {msg}", flush=True)
 
 def _safe_file(path, media_type, headers=None):
-    with open(path, "rb") as f:
-        return Response(content=f.read(), media_type=media_type, headers=headers or {})
+    '''Read file and return Response with ETag for conditional revalidation.
+
+    2026-06-16 v4 修复: 增加 ETag/Last-Modified,允许浏览器做 304 协商
+       旧逻辑: 服务器 no-store → 浏览器必须重新下载 100KB+ 的 JS
+       新逻辑:
+         1) 客户端发请求,带 If-None-Match: <上次 ETag>
+         2) 文件没变 → 304 Not Modified,0 字节响应,浏览器用本地缓存
+         3) 文件变了 → 200 + 新内容,浏览器更新缓存
+       F5 刷新: 实际只传 0.5KB 的 header 来回,不再下载 100KB+ JS
+    '''
+    import hashlib as _hashlib
+    import os as _os
+    from starlette.responses import Response as _Resp
+    if not _os.path.isfile(path):
+        return _Resp(content=b"Not found", status_code=404, media_type="text/plain")
+    try:
+        st = _os.stat(path)
+        mtime = int(st.st_mtime)
+        size = st.st_size
+        # 用 mtime + size 算 ETag(避免读整个文件做 hash)
+        etag = f'W/"{mtime:x}-{size:x}"'
+        with open(path, "rb") as f:
+            content = f.read()
+        # 合并用户传入的 headers
+        merged = dict(headers or {})
+        merged["ETag"] = etag
+        merged["Last-Modified"] = _format_http_date(mtime)
+        return _Resp(content=content, media_type=media_type, headers=merged)
+    except Exception as e:
+        return _Resp(content=f"Read error: {e}".encode("utf-8"), status_code=500, media_type="text/plain")
+
+def _format_http_date(ts: int) -> str:
+    '''Format timestamp as RFC 7231 HTTP date.'''
+    from email.utils import formatdate
+    return formatdate(ts, usegmt=True)
+
+def _check_conditional(request_headers, etag: str, mtime: int) -> bool:
+    '''检查客户端条件请求,返回 True 表示应该 304。'''
+    if_none_match = request_headers.get("if-none-match")
+    if if_none_match and etag in if_none_match:
+        return True
+    if_modified_since = request_headers.get("if-modified-since")
+    if if_modified_since and not if_none_match:
+        try:
+            from email.utils import parsedate_to_datetime
+            client_time = parsedate_to_datetime(if_modified_since).timestamp()
+            if int(client_time) >= mtime:
+                return True
+        except Exception:
+            pass
+    return False
 
 _ui_log(f"Starting UI server, backend port=6000")
 
@@ -26,53 +75,169 @@ FRONTEND_PORT = 7000
 BACKEND_BASE = f"http://127.0.0.1:{BACKEND_PORT}"
 outputs_dir = 'E:\\软件开发\\云集智能视频创意站\\dev\\data\\outputs'
 app = FastAPI()
-NC = {"Cache-Control": "no-store, max-age=0"}
+# ★ 2026-06-16 v4 修复: 静态资源缓存策略
+#   - index.html: no-cache(每次都要重新验证,但命中 304 就是 0 字节)
+#   - 其他静态资源: short max-age(让浏览器有短时缓存,缓减突发刷新)
+#   - 关键: ETag/Last-Modified 走 304 协商(见 _safe_file 改造)
+NC_HTML = {"Cache-Control": "no-cache, must-revalidate"}
+NC_ASSET = {"Cache-Control": "public, max-age=300"}  # 5 分钟短缓存
 _ui_log(f"Routes configured, ui_dir={ui_dir}")
 _ui_log(f"outputs_dir={outputs_dir}")
 
 @app.get("/")
-async def index():
+async def index(request: Request):
+    # ★ 2026-06-16 v4: index.html 用 no-cache + ETag,支持 304 协商
+    import os as _os
     html_path = os.path.join(ui_dir, "index.html")
+    if not _os.path.isfile(html_path):
+        return Response(content=b"Not found", status_code=404)
+    st = _os.stat(html_path)
+    mtime = int(st.st_mtime)
+    size = st.st_size
+    etag = f'W/"{mtime:x}-{size:x}"'
+    # 304 协商
+    if_none_match = request.headers.get("if-none-match", "")
+    if etag in if_none_match:
+        # 文件没变,返回 304 + ETag,响应体为空
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-cache, must-revalidate"})
     with open(html_path, "r", encoding="utf-8") as f:
         html = f.read()
     icon_b64 = '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'
     if icon_b64:
         html = html.replace('src="/app-icon.png"', f'src="data:image/png;base64,{icon_b64}"')
-    return Response(content=html.encode("utf-8"), media_type="text/html", headers=NC)
+    return Response(
+        content=html.encode("utf-8"),
+        media_type="text/html",
+        headers={
+            "ETag": etag,
+            "Last-Modified": _format_http_date(mtime),
+            "Cache-Control": "no-cache, must-revalidate",
+        },
+    )
 
 @app.get("/api/app-info")
 async def app_info():
     return {"app_name": APP_NAME, "version": VERSION}
 
 @app.get("/index.css")
-async def css():
-    return _safe_file(os.path.join(ui_dir, "index.css"), "text/css", NC)
+async def css(request: Request):
+    import os as _os
+    full = os.path.join(ui_dir, "index.css")
+    if not _os.path.isfile(full):
+        return Response(content=b"Not found", status_code=404)
+    st = _os.stat(full)
+    mtime = int(st.st_mtime)
+    size = st.st_size
+    etag = f'W/"{mtime:x}-{size:x}"'
+    if etag in request.headers.get("if-none-match", ""):
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "public, max-age=300"})
+    with open(full, "rb") as f:
+        content = f.read()
+    return Response(
+        content=content, media_type="text/css",
+        headers={
+            "ETag": etag,
+            "Last-Modified": _format_http_date(mtime),
+            "Cache-Control": "public, max-age=300",
+        },
+    )
 
 @app.get("/index.js")
-async def js():
-    with open(os.path.join(ui_dir, "index.js"), "r", encoding="utf-8") as f:
+async def js(request: Request):
+    # ★ 2026-06-16 v4: index.js 是最大的文件(383KB),304 协商对刷新速度影响最大
+    import os as _os
+    full = os.path.join(ui_dir, "index.js")
+    if not _os.path.isfile(full):
+        return Response(content=b"Not found", status_code=404)
+    st = _os.stat(full)
+    mtime = int(st.st_mtime)
+    size = st.st_size
+    etag = f'W/"{mtime:x}-{size:x}"'
+    if etag in request.headers.get("if-none-match", ""):
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "public, max-age=300"})
+    with open(full, "r", encoding="utf-8") as f:
         content = f.read()
     content = content.replace("{{BACKEND_PORT}}", str(BACKEND_PORT))
-    return Response(content=content, media_type="application/javascript", headers=NC)
+    return Response(
+        content=content.encode("utf-8"), media_type="application/javascript",
+        headers={
+            "ETag": etag,
+            "Last-Modified": _format_http_date(mtime),
+            "Cache-Control": "public, max-age=300",
+        },
+    )
 
 @app.get("/i18n.js")
-async def i18n():
-    return _safe_file(os.path.join(ui_dir, "i18n.js"), "application/javascript", NC)
+async def i18n(request: Request):
+    import os as _os
+    full = os.path.join(ui_dir, "i18n.js")
+    if not _os.path.isfile(full):
+        return Response(content=b"Not found", status_code=404)
+    st = _os.stat(full)
+    mtime = int(st.st_mtime)
+    size = st.st_size
+    etag = f'W/"{mtime:x}-{size:x}"'
+    if etag in request.headers.get("if-none-match", ""):
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "public, max-age=300"})
+    with open(full, "rb") as f:
+        content = f.read()
+    return Response(
+        content=content, media_type="application/javascript",
+        headers={
+            "ETag": etag,
+            "Last-Modified": _format_http_date(mtime),
+            "Cache-Control": "public, max-age=300",
+        },
+    )
 
 @app.get("/docs")
-async def usage_guide():
+async def usage_guide(request: Request):
+    import os as _os
     guide_path = os.path.join(ui_dir, "usage_guide.html")
-    return _safe_file(guide_path, "text/html; charset=utf-8", NC)
+    if not _os.path.isfile(guide_path):
+        return Response(content=b"Not found", status_code=404)
+    st = _os.stat(guide_path)
+    mtime = int(st.st_mtime)
+    size = st.st_size
+    etag = f'W/"{mtime:x}-{size:x}"'
+    if etag in request.headers.get("if-none-match", ""):
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "public, max-age=300"})
+    with open(guide_path, "rb") as f:
+        content = f.read()
+    return Response(
+        content=content, media_type="text/html; charset=utf-8",
+        headers={
+            "ETag": etag,
+            "Last-Modified": _format_http_date(mtime),
+            "Cache-Control": "public, max-age=300",
+        },
+    )
 
 @app.get("/app-icon.png")
-async def app_icon():
+async def app_icon(request: Request):
+    import os as _os
     icon_candidates = ['E:\\软件开发\\云集智能视频创意站\\dev\\app\\ico.png']
     if hasattr(sys, '_MEIPASS'):
         for name in ('ico.png', 'icon.png', 'icon.ico'):
             icon_candidates.insert(0, os.path.join(sys._MEIPASS, name))
     for p in icon_candidates:
         if os.path.exists(p):
-            return _safe_file(p, "image/png", NC)
+            st = _os.stat(p)
+            mtime = int(st.st_mtime)
+            size = st.st_size
+            etag = f'W/"{mtime:x}-{size:x}"'
+            if etag in request.headers.get("if-none-match", ""):
+                return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "public, max-age=86400"})
+            with open(p, "rb") as f:
+                content = f.read()
+            return Response(
+                content=content, media_type="image/png",
+                headers={
+                    "ETag": etag,
+                    "Last-Modified": _format_http_date(mtime),
+                    "Cache-Control": "public, max-age=86400",  # 图标 1 天缓存
+                },
+            )
     return Response(content=b"Not found", status_code=404)
 
 @app.api_route("/outputs/{path:path}", methods=["GET", "HEAD"])
@@ -253,7 +418,8 @@ async def proxy_health():
 #   - 不带扩展名的路径视为非法(动态 API 已被上面路由处理,落到这里是 404)
 #   - 这样未来新增 ui/ 下 .js/.css/.png/.svg 文件都不用改 main.py 模板
 @app.get("/{file_path:path}", include_in_schema=False)
-async def ui_static_catchall(file_path: str):
+async def ui_static_catchall(request: Request, file_path: str):
+    import os as _os
     if not os.path.splitext(file_path)[1]:                       # 无扩展名 → 不归我管
         return Response(b"Not found", status_code=404, media_type="text/plain")
     full = os.path.join(ui_dir, file_path.replace("/", os.sep))
@@ -263,7 +429,23 @@ async def ui_static_catchall(file_path: str):
     mt, _ = _mt.guess_type(full)
     if mt is None:
         mt = "application/octet-stream"
-    return _safe_file(full, mt, NC)
+    # ★ 2026-06-16 v4: 拆分文件(asset-manager.js 等)也走 ETag/304
+    st = _os.stat(full)
+    mtime = int(st.st_mtime)
+    size = st.st_size
+    etag = f'W/"{mtime:x}-{size:x}"'
+    if etag in request.headers.get("if-none-match", ""):
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "public, max-age=300"})
+    with open(full, "rb") as f:
+        content = f.read()
+    return Response(
+        content=content, media_type=mt,
+        headers={
+            "ETag": etag,
+            "Last-Modified": _format_http_date(mtime),
+            "Cache-Control": "public, max-age=300",
+        },
+    )
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)

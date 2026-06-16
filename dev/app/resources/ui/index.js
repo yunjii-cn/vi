@@ -30,13 +30,25 @@
     // 构造 yunji_user base64 + 跳到 next 页面
     function gotoNext(userObj) {
         try {
+            // ★ 2026-06-16 v4 修复: 用 sessionStorage 传 user,不再做整页重定向
+            //   旧逻辑: location.href 跳到 "?yunji_user=base64" → 浏览器重新加载所有资源
+            //           (虽然有 cache 也要重 parse+execute 385KB JS) → 多花 300-1000ms
+            //   新逻辑: 写 sessionStorage(本 tab 共享,刷新就清),直接调 onLoggedIn
+            //           视觉效果: 0ms 切换,跟用户没有"刷一下"的感觉
+            //   兜底: 如果 sessionStorage 不可用,再走老路径(给极少数老浏览器)
             const enc = btoa(unescape(encodeURIComponent(JSON.stringify(userObj))));
+            try {
+                sessionStorage.setItem('__yunji_user', enc);
+                onLoggedIn(userObj);
+                return;
+            } catch (e) {
+                // sessionStorage 写失败(隐私模式 / 配额满),降级到 URL 跳转
+                console.warn('[yunji] sessionStorage 不可用,降级到 URL 跳转:', e);
+            }
             const next = `${location.origin}${location.pathname}`;
-            // 跳到当前页(去掉原 query),带上 yunji_user
             location.href = `${next}?yunji_user=${encodeURIComponent(enc)}`;
         } catch (e) {
             console.error('[yunji] 构造跳转 URL 失败:', e);
-            // 失败时回退到正常登录页
             redirectToLogin();
         }
     }
@@ -48,18 +60,68 @@
     }
 
     // 走 islogin.php 检查服务端 cookie 是否已登录
+    // ★ 2026-06-16 v4 修复: 超时从 5s 缩到 1.5s
+    //   旧逻辑: vi.yunjii.cn 不通时用户卡黑屏 5 秒才出回退按钮
+    //   局域网/本机访问 1.5s 内必然有响应(成功 or 失败),真不通就立刻降级
+    //   - 1.5s 真超时(AbortError)→ 返回 'TIMEOUT' → 显示回退按钮
+    //   - CORS 拦截/网络错误(TypeError)→ 返回 null → 走 redirectToLogin 跳 vi 网站
+    //     (vi 的 CORS 是 * + 无 Allow-Credentials,credentials:include 必失败,
+    //      但这只是没法跨域读 cookie,跳到 vi 网站登录是正常的)
     async function checkIsLogin() {
+        const ctl = new AbortController();
+        const tid = setTimeout(() => ctl.abort(), 1500);
         try {
-            const r = await fetch('https://vi.yunjii.cn/sl/islogin.php', { credentials: 'include' });
+            const r = await fetch('https://vi.yunjii.cn/sl/islogin.php', {
+                credentials: 'include',
+                signal: ctl.signal,
+            });
+            clearTimeout(tid);
             const data = await r.json();
             if (data && data.code === 1 && data.data) {
                 return data.data;  // {nickname, avatar, openid, username, token, site}
             }
             return null;
         } catch (e) {
-            console.warn('[yunji] islogin.php 请求失败:', e);
-            return null;
+            clearTimeout(tid);
+            if (e && (e.name === 'AbortError' || String(e).includes('abort'))) {
+                console.warn('[yunji] islogin.php 1.5s 超时 (网络真不通)');
+                return 'TIMEOUT';
+            }
+            // TypeError = CORS 拦截 / DNS 失败 / 离线 等
+            console.warn('[yunji] islogin.php 跨域/网络错误,降级走登录页:', e && e.message || e);
+            return null;  // 走 redirectToLogin → 跳 vi 网站看二维码
         }
+    }
+
+    // ★ 2026-06-16: 登录超时回退 - 显示"跳过登录"按钮让用户进入本地模式
+    function showVeilFallback() {
+        const fb = document.getElementById('yunji-veil-fallback');
+        if (fb) fb.style.display = 'flex';
+        const sub = document.querySelector('#yunji-login-veil .veil-sub');
+        if (sub) sub.textContent = '登录服务无响应,可选择重试或进入本地模式';
+    }
+
+    function hideVeilFallback() {
+        const fb = document.getElementById('yunji-veil-fallback');
+        if (fb) fb.style.display = 'none';
+        const sub = document.querySelector('#yunji-login-veil .veil-sub');
+        if (sub) sub.textContent = '正在准备登录环境…';
+    }
+
+    function buildLocalUser() {
+        // 本地模式: 用浏览器时区+时间做唯一 id,避免多个本地用户混淆
+        const d = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        const localId = 'local-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate())
+                       + '-' + pad(d.getHours()) + pad(d.getMinutes());
+        return {
+            nickname: '本地用户',
+            username: localId,
+            openid: localId,
+            token: 'local-mode',
+            avatar: '',
+            site: 'local',
+        };
     }
 
     // 注入已登录用户信息框(整体一个下拉按钮: 头像+昵称+在线)
@@ -266,12 +328,18 @@
     }
 
     // 退出登录(给 injectUserInfoBox 暴露成 window.yunjiLogout)
-    window.yunjiLogout = function() {
+function yunjiLogout() {
         if (!confirm('确定要退出登录吗?退出后需要重新扫码。')) return;
+        // ★ 2026-06-16 v5: 主动清 localStorage,否则 index.html 的内联脱遮罩脚本会一直命中
+        //   用户登出后,F5 仍看到内容,会困惑"我已经登出为什么还显示?"
+        try { localStorage.removeItem('__yunji_user_lc'); } catch (_) {}
+        try { sessionStorage.removeItem('__yunji_user'); } catch (_) {}
         const next = `${location.origin}${location.pathname}`;
         // 用 vi 的 logout.php 清 cookie,带 next 跳回登录页
         location.href = `https://vi.yunjii.cn/sl/logout.php?next=${encodeURIComponent(next)}`;
-    };
+
+    }
+    window.yunjiLogout = yunjiLogout;
 
     // 隐藏登录遮罩(已登录时调用)
     function hideVeil() {
@@ -301,52 +369,43 @@
     function onLoggedIn(user) {
         window.__yunjiUser = user;
         try { history.replaceState(null, '', location.pathname); } catch (_) {}
+        // ★ 2026-06-16 v5 提速: 写到 localStorage,让 F5 后的 inline 脚本瞬间脱遮罩
+        //   sessionStorage 只活当前 tab,F5 不清;但配合 index.html 的内联 <script> + CSS
+        //   才能在 index.js(363KB) 还没 parse 完时就让用户看到内容
+        try {
+            const enc = btoa(unescape(encodeURIComponent(JSON.stringify(user))));
+            localStorage.setItem('__yunji_user_lc', enc);
+            sessionStorage.setItem('__yunji_user', enc);
+        } catch (_) { /* 隐私模式也不影响,降级到原本的 URL/远程校验 */ }
         hideVeil();  // 已登录:立即淡出遮罩
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => injectUserInfoBox(user));
         } else {
             injectUserInfoBox(user);
         }
-        // ★ 2026-06-09: 登录成功就开始在后台静默拉取历史资产列表,
-        //              等用户切到"历史"标签时,数据已经准备好,瞬间渲染不卡。
-        //              这里只做轻量预热(fetchHistory silent=true),不直接渲染 DOM,
-        //              把主动权留给用户,避免登录一进来就弹一堆图。
-        if (typeof window.__preloadHistoryDuringLogin === 'function') {
-            try { window.__preloadHistoryDuringLogin(); } catch (e) { console.warn('[login-preload] failed:', e); }
-        }
+        // ★ 2026-06-16 v4 修复: 不再在登录后做"全局历史预热 + 视频预下载"
+        //   旧逻辑会做两件糟糕的事:
+        //     1) 又拉一遍 /api/system/history?page=1 (fetchHistory 反正会拉,白调一次)
+        //     2) 立刻后台预下载 5 个完整视频文件(各 5-50MB)
+        //        → 抢光浏览器 6 个并发连接名额,导致后续缩略图全部卡死,首页"转圈 1 分钟"
+        //   新逻辑: 什么都不做,等用户切到"我的作品" tab,fetchHistory 会自然加载
+        //   视频预下载已经由 IntersectionObserver 接管(进视口才下载,自然不会和缩略图抢带宽)
     }
-
-    // 登录后预热:拉取历史列表(后端会做缓存)+ 让前 5 个视频卡片进入预下载队列
-    // 用户后续切到"历史"标签时,首屏可见的视频文件大概率已经在 HTTP 缓存里,秒开
-    function __preloadHistoryDuringLogin() {
-        const run = async () => {
-            try {
-                const res = await fetch(`${BASE}/api/system/history?page=1&limit=${HISTORY_PAGE_LIMIT || 240}`, { credentials: 'same-origin' });
-                if (!res.ok) return;
-                const data = await res.json();
-                const items = (data && data.history) ? data.history : [];
-                // 取前 5 个视频,后台静默预下载完整文件
-                items.slice(0, 5).forEach((item) => {
-                    if (item && item.type === 'video') {
-                        const fileKey = `video::${item.fullpath || item.filename}`;
-                        const buster = (typeof _getFileBuster === 'function') ? _getFileBuster(fileKey) : String(Date.now());
-                        const rawPath = item.fullpath || item.filename;
-                        const url = `${BASE}/api/system/file?path=${encodeURIComponent(rawPath)}&v=${buster}`;
-                        // 静默后台下载,失败不报错
-                        fetch(url, { method: 'GET', cache: 'force-cache', credentials: 'same-origin' })
-                            .then((r) => { try { r.body && r.body.cancel && r.body.cancel(); } catch (_) {} })
-                            .catch(() => {});
-                    }
-                });
-            } catch (_) { /* 静默失败 */ }
-        };
-        // 给主流程一点缓冲再开始,避免和登录跳转抢带宽
-        setTimeout(run, 800);
-    }
-    window.__preloadHistoryDuringLogin = __preloadHistoryDuringLogin;
 
     // 异步门控主流程
     (async function gate() {
+        // 0) ★ 2026-06-16 v4 提速: 先看 sessionStorage,避免无谓的 checkIsLogin
+        //    上次已登录过,user 被存到 sessionStorage(F5 不清),直接复用
+        //    旧逻辑: 每次 F5 都 fetch vi.yunjii.cn → 200ms-1.5s 网络等待
+        //    新逻辑: 本地 0ms 取,跳过整轮 islogin
+        try {
+            const cached = sessionStorage.getItem('__yunji_user');
+            if (cached) {
+                const u = parseUserB64(cached);
+                if (u) { onLoggedIn(u); return; }
+            }
+        } catch (_) { /* 隐私模式/不可用,降级到下面 */ }
+
         // 1) 优先用 URL 上的 yunji_user 参数
         if (userB64) {
             const u = parseUserB64(userB64);
@@ -357,9 +416,26 @@
         }
 
         // 2) 没参数 → 检查服务端 cookie(浏览器可能在 vi.yunjii.cn 已登录)
+        //    ★ 2026-06-16: 返回 'TIMEOUT' 时不跳官方登录,直接显示回退面板
         const serverUser = await checkIsLogin();
-        if (serverUser) {
+        if (serverUser && serverUser !== 'TIMEOUT') {
             gotoNext(serverUser);
+            return;
+        }
+        if (serverUser === 'TIMEOUT') {
+            // 网络挂了/超时,显示回退面板让用户选择
+            showVeilFallback();
+            const skipBtn = document.getElementById('yunji-veil-skip');
+            const retryBtn = document.getElementById('yunji-veil-retry');
+            const enterLocal = () => {
+                hideVeilFallback();
+                onLoggedIn(buildLocalUser());
+            };
+            if (skipBtn) skipBtn.addEventListener('click', enterLocal, { once: true });
+            if (retryBtn) retryBtn.addEventListener('click', () => {
+                hideVeilFallback();
+                gate();  // 重新走流程
+            }, { once: true });
             return;
         }
 
@@ -444,6 +520,28 @@
     const UPSCALE_SUB_MODES = ['upscale_video', 'upscale_image'];
     let _upscaleSubMode = 'upscale_video';
     let _upscaleAutoTileSize = 0;
+
+    // ★ 2026-06-16 修复 TDZ: 下列声明必须在 loadAllSettings() 之前完成。
+    //   原因:loadAllSettings() (L2929) 在模块加载时同步执行,内部会调用
+    //        switchMode() 触发 _refreshModelRequirement(),以及给 upscale-ratio /
+    //        upscale-quality 等 select 派发 change 事件,同步触发
+    //        onUpscaleRatioChange() → 直接访问下面三个 const/let。
+    //        原代码把它们声明在 L3399/L3869/L3878,运行时处于 TDZ → ReferenceError。
+    let _modelReqCheckToken = 0;  // 防止竞态
+    const UPSCALE_RATIO_PRESETS = {
+        '16:9': { rw: 16, rh: 9 },
+        '9:16': { rw: 9, rh: 16 },
+        '21:9': { rw: 21, rh: 9 },
+        '3:2': { rw: 3, rh: 2 },
+        '4:3': { rw: 4, rh: 3 },
+        '1:1': { rw: 1, rh: 1 },
+    };
+    const UPSCALE_QUALITY_PRESETS = {
+        '720p': { shortSide: 720 },
+        '1080p': { shortSide: 1080 },
+        '2k': { shortSide: 1440 },
+        '4k': { shortSide: 2160 },
+    };
 
     const SETTINGS_KEY = 'yunji_ui_settings';
     const PERSIST_SELECTS = [
@@ -842,7 +940,7 @@
         return merged;
     }
 
-    window.addLoraSelection = function(containerId) {
+function addLoraSelection(containerId) {
         const container = document.getElementById(containerId);
         if (!container) return;
 
@@ -915,7 +1013,9 @@
         removeBtn.style.cursor = 'pointer';
         removeBtn.style.fontSize = '18px';
         removeBtn.style.padding = '0 6px';
-        removeBtn.onclick = () => { wrapper.remove(); };
+        removeBtn.onclick = () => { wrapper.remove(); 
+    }
+    window.addLoraSelection = addLoraSelection;
 
         row1.appendChild(select);
         row1.appendChild(removeBtn);
@@ -1097,7 +1197,7 @@
         return n || name;
     }
 
-    window.loadImgModelList = async function() {
+async function loadImgModelList() {
         const select = document.getElementById('img-model-select');
         if (!select) return;
         const currentVal = select.value;
@@ -1117,7 +1217,9 @@
                 select.value = currentVal;
             }
         } catch (_) {}
-    };
+    
+    }
+    window.loadImgModelList = loadImgModelList;
 
     function _fillLoraSelect(select, baseModelKind) {
         const currentVal = select.value;
@@ -1185,7 +1287,7 @@
         });
     }
 
-    window.updateLoraStrength = function() {};
+window.updateLoraStrength = function() {};
 
     function updateBatchLoraDropdown() {
         if (document.getElementById('batch-loras-container') && document.getElementById('batch-loras-container').children.length === 0) {
@@ -1209,7 +1311,7 @@
         });
     }
     
-    window.updateBatchLoraStrength = function() {};
+window.updateBatchLoraStrength = function() {};
 
     function updateImageLoraDropdown() {
         if (document.getElementById('img-loras-container') && document.getElementById('img-loras-container').children.length === 0) {
@@ -1430,12 +1532,14 @@
         return resLabelFromQuality(q);
     }
 
-    window.updateMotionResPreview = function() {
+function updateMotionResPreview() {
         const qEl = document.getElementById('motion-quality');
         const preview = document.getElementById('motion-res-preview');
         if (!qEl || !preview) return;
         const q = qEl.value;
-        const shortSideMap = { '1080': 1088, '720': 704, '540': 576, '480': 416, '360': 352 };
+        const shortSideMap = { '1080': 1088, '720': 704, '540': 576, '480': 416, '360': 352 
+    }
+    window.updateMotionResPreview = updateMotionResPreview;
         const shortSide = shortSideMap[q] || 704;
         preview.textContent = `${shortSide}p · ` + (q === '1080' ? 'Full HD' : q === '720' ? 'Standard' : q === '540' ? 'Preview' : q === '480' ? 'Lite' : 'Minimal') + ' · 跟随参考视频比例';
     };
@@ -1655,7 +1759,7 @@
 
     let _motionVideoUploadGen = 0;
 
-    window.handleMotionVideoUpload = async function(file) {
+async function handleMotionVideoUpload(file) {
         if (!file) return;
         const gen = ++_motionVideoUploadGen;
         const label = _t('motionRefVideoName');
@@ -1682,7 +1786,9 @@
                         }
                         addLog(_fmt('motionVideoDuration', { duration: dur.toFixed(1) }));
                     }
-                };
+                
+    }
+    window.handleMotionVideoUpload = handleMotionVideoUpload;
             }
             const path = await uploadBase64File(file, label);
             if (gen !== _motionVideoUploadGen) return;
@@ -1701,7 +1807,7 @@
         }
     };
 
-    window.clearMotionVideo = function() {
+function clearMotionVideo() {
         _motionVideoUploadGen++;
         document.getElementById('motion-video-input').value = "";
         document.getElementById('motion-video-path').value = "";
@@ -1713,11 +1819,13 @@
         document.getElementById('clear-motion-video-overlay').style.display = 'none';
         addLog(_t('motionClearRefVideo'));
         scheduleSave();
-    };
+    
+    }
+    window.clearMotionVideo = clearMotionVideo;
 
     let _motionImageUploadGen = 0;
 
-    window.handleMotionImageUpload = async function(file) {
+async function handleMotionImageUpload(file) {
         if (!file) return;
         const gen = ++_motionImageUploadGen;
         const preview = document.getElementById('motion-image-preview');
@@ -1730,7 +1838,9 @@
             preview.style.display = 'block';
             placeholder.style.display = 'none';
             clearOverlay.style.display = 'flex';
-        };
+        
+    }
+    window.handleMotionImageUpload = handleMotionImageUpload;
         reader.readAsDataURL(file);
         const label = _t('motionTargetImageName');
         try {
@@ -1747,7 +1857,7 @@
         }
     };
 
-    window.clearMotionImage = function() {
+function clearMotionImage() {
         _motionImageUploadGen++;
         document.getElementById('motion-image-input').value = "";
         document.getElementById('motion-image-path').value = "";
@@ -1757,7 +1867,9 @@
         document.getElementById('clear-motion-image-overlay').style.display = 'none';
         addLog(_t('motionClearTargetImage'));
         scheduleSave();
-    };
+    
+    }
+    window.clearMotionImage = clearMotionImage;
 
     // 初始化拖拽上传逻辑
     function initDragAndDrop() {
@@ -2658,7 +2770,7 @@
         }
     }
 
-    window.togglePause = async function() {
+async function togglePause() {
         try {
             if (_isQueuePaused) {
                 const res = await fetch(`${BASE}/api/queue/resume`, { method: 'POST' });
@@ -2679,9 +2791,11 @@
         } catch (e) {
             addLog(`❌ 暂停/恢复失败: ${e.message}`);
         }
-    };
+    
+    }
+    window.togglePause = togglePause;
 
-    window.cancelCurrentTask = async function() {
+async function cancelCurrentTask() {
         if (!_currentQueueTaskId && !_isGeneratingFlag) return;
         const taskId = _currentQueueTaskId;
         if (taskId) {
@@ -2697,7 +2811,9 @@
                 addLog(`❌ ${_t('forceCancelFail')}: ${e.message}`);
             }
         }
-    };
+    
+    }
+    window.cancelCurrentTask = cancelCurrentTask;
 
     function _updateGenButtons() {
         const mainBtn = document.getElementById('mainBtn');
@@ -2834,7 +2950,15 @@
                 }
             }
             queueInitialPollDone = true;
-        } catch (e) { console.error('[QUEUE] pollQueueStatus error:', e); }
+        } catch (e) {
+            console.error('[QUEUE] pollQueueStatus error:', e);
+            const list = document.getElementById('queue-list');
+            const summary = document.getElementById('queue-summary');
+            if (list && list.innerHTML.trim() === '') {
+                list.innerHTML = `<div style="font-size:11px;color:var(--text-dim);padding:6px 0;">后端未连接，队列暂不可用</div>`;
+            }
+            if (summary) summary.textContent = '后端离线';
+        }
         finally {
             queuePollInFlight = false;
         }
@@ -2952,7 +3076,7 @@
     _restoreFeDebugState();
     } catch(e) { console.error('[INIT] Top-level init error:', e); }
 
-    window.onUiLanguageChanged = function () {
+function onUiLanguageChanged() {
         updateResPreview();
         updateBatchResPreview();
         updateImgResPreview();
@@ -2969,7 +3093,9 @@
         updateLoraDropdown();
         updateBatchLoraDropdown();
         pollQueueStatus();
-    };
+    
+    }
+    window.onUiLanguageChanged = onUiLanguageChanged;
 
     async function setOutputDir() {
         const dir = document.getElementById('global-out-dir').value.trim();
@@ -3118,7 +3244,16 @@
     }
     window.saveSelectedModelCheckpoint = saveSelectedModelCheckpoint;
 
-    window.loadModelCheckpoints = async function() {
+    // ★ 兼容旧 HTML 诊断脚本:loadModelRegistry 在 3402d56 之后被 _refreshModelRequirement
+    //   取代,这里保留一个空实现,避免 [DEBUG] JS加载异常 - 缺失函数: loadModelRegistry。
+    //   真正的必需模型检查由 _refreshModelRequirement() 在 switchMode 末尾自动调用完成。
+function loadModelRegistry() {
+        try { if (typeof _refreshModelRequirement === 'function') _refreshModelRequirement(); } catch (e) { /* ignore */ }
+    
+    }
+    window.loadModelRegistry = loadModelRegistry;
+
+async function loadModelCheckpoints() {
         const select = document.getElementById('model-checkpoint-select');
         const status = document.getElementById('model-checkpoint-status');
         if (!select) return;
@@ -3160,11 +3295,13 @@
             }
         }
         if (typeof syncVidModelFromGlobal === 'function') syncVidModelFromGlobal();
-    };
+    
+    }
+    window.loadModelCheckpoints = loadModelCheckpoints;
 
     let _coreModelsData = null;
 
-    window.loadCoreModels = async function() {
+async function loadCoreModels() {
         const list = document.getElementById('core-models-list');
         if (!list) return;
         list.innerHTML = '<div style="font-size:10px;color:var(--text-dim);">...</div>';
@@ -3196,7 +3333,9 @@
                     dlBtn.style.cssText = 'font-size:9px;padding:2px 8px;border-radius:3px;cursor:pointer;font-weight:600;border:1px solid;background:rgba(21,101,192,0.2);border-color:rgba(25,118,210,0.5);color:#42A5F5;';
                     dlBtn.textContent = _t('coreModelDownload') || '下载';
                     dlBtn.dataset.modelType = m.id;
-                    dlBtn.onclick = function() { startCoreModelDownload(m.id, dlBtn); };
+                    dlBtn.onclick = function() { startCoreModelDownload(m.id, dlBtn); 
+    }
+    window.loadCoreModels = loadCoreModels;
                     row.appendChild(nameSpan);
                     row.appendChild(descSpan);
                     row.appendChild(sizeSpan);
@@ -3388,7 +3527,7 @@
     }
 
     // 检测并展示/隐藏当前 mode 的必需模型横幅
-    let _modelReqCheckToken = 0;  // 防止竞态
+    //   _modelReqCheckToken 已在文件顶部声明,避免 loadAllSettings 同步触发时出现 TDZ。
     async function _refreshModelRequirement() {
         const token = ++_modelReqCheckToken;
         const mode = typeof currentMode !== 'undefined' ? currentMode : null;
@@ -3611,11 +3750,13 @@
         if (typeof _refreshModelRequirement === 'function') _refreshModelRequirement();
     }
 
-    window.switchVideoSubMode = function(sub) {
+function switchVideoSubMode(sub) {
         switchMode(sub);
-    };
+    
+    }
+    window.switchVideoSubMode = switchVideoSubMode;
 
-    window.setVideoTransferMode = function(mode) {
+function setVideoTransferMode(mode) {
         window._videoTransferMode = mode || 'action';
         const select = document.getElementById('motion-conditioning-type');
         const actionBtn = document.getElementById('motion-mode-action');
@@ -3647,19 +3788,23 @@
             btn.style.background = active ? 'var(--accent)' : 'var(--panel-2)';
             btn.style.color = active ? '#fff' : 'var(--text-sub)';
             btn.style.borderColor = active ? 'var(--accent)' : 'var(--border)';
-        };
+        
+    }
+    window.setVideoTransferMode = setVideoTransferMode;
         activeStyle(actionBtn, isAction);
         activeStyle(cameraBtn, window._videoTransferMode === 'camera');
         activeStyle(repaintBtn, isRepaint);
     };
 
-    window.toggleHelpBubble = function(id) {
+function toggleHelpBubble(id) {
         const el = document.getElementById(id);
         if (!el) return;
         const isVisible = el.style.display !== 'none';
         document.querySelectorAll('.help-bubble-content').forEach(b => b.style.display = 'none');
         if (!isVisible) el.style.display = 'block';
-    };
+    
+    }
+    window.toggleHelpBubble = toggleHelpBubble;
     document.addEventListener('click', function(e) {
         if (!e.target.closest('.help-bubble') && !e.target.closest('.help-bubble-content')) {
             document.querySelectorAll('.help-bubble-content').forEach(b => b.style.display = 'none');
@@ -3717,16 +3862,22 @@
         _pendingTtsTaskId = null;
     }
 
-    window.onTtsModeChange = function() {
+function onTtsModeChange() {
         _updateTtsSubModeUI();
-    };
+    
+    }
+    window.onTtsModeChange = onTtsModeChange;
 
-    window.switchTtsSubMode = function(sub) {
+function switchTtsSubMode(sub) {
         switchMode(sub);
-    };
+    
+    }
+    window.switchTtsSubMode = switchTtsSubMode;
 
-    window.switchUpscaleSubMode = function(sub) {
-        const modeMap = { 'video': 'upscale_video', 'image': 'upscale_image' };
+function switchUpscaleSubMode(sub) {
+        const modeMap = { 'video': 'upscale_video', 'image': 'upscale_image' 
+    }
+    window.switchUpscaleSubMode = switchUpscaleSubMode;
         switchMode(modeMap[sub] || sub);
     };
 
@@ -3858,22 +4009,7 @@
         customEl.style.display = fpsEl.value === 'custom' ? 'block' : 'none';
     }
 
-    const UPSCALE_RATIO_PRESETS = {
-        '16:9': { rw: 16, rh: 9 },
-        '9:16': { rw: 9, rh: 16 },
-        '21:9': { rw: 21, rh: 9 },
-        '3:2': { rw: 3, rh: 2 },
-        '4:3': { rw: 4, rh: 3 },
-        '1:1': { rw: 1, rh: 1 },
-    };
-
-    const UPSCALE_QUALITY_PRESETS = {
-        '720p': { shortSide: 720 },
-        '1080p': { shortSide: 1080 },
-        '2k': { shortSide: 1440 },
-        '4k': { shortSide: 2160 },
-    };
-
+    // UPSCALE_RATIO_PRESETS / UPSCALE_QUALITY_PRESETS 已在文件顶部声明。
     function _computeResolutionForRatio(ratio, quality) {
         const r = UPSCALE_RATIO_PRESETS[ratio];
         const q = UPSCALE_QUALITY_PRESETS[quality];
@@ -4175,7 +4311,7 @@
         });
     }
 
-    window.transcribeTtsRef = async function(target) {
+async function transcribeTtsRef(target) {
         if (!_ttsRefB64) { addLog('❌ 请先上传参考音频'); return; }
         const cloneBtn = document.getElementById('tts-clone-transcribe-btn');
         const ultBtn = document.getElementById('tts-ultimate-transcribe-btn');
@@ -4208,9 +4344,11 @@
         } finally {
             if (activeBtn) { activeBtn.disabled = false; activeBtn.textContent = _t('ttsTranscribeBtn') || '🔍 识别为文字'; }
         }
-    };
+    
+    }
+    window.transcribeTtsRef = transcribeTtsRef;
 
-    window.handleTtsRefUpload = async function(file) {
+async function handleTtsRefUpload(file) {
         if (!file) return;
         const placeholder = document.getElementById('tts-ref-placeholder');
         const statusEl = document.getElementById('tts-ref-status');
@@ -4225,11 +4363,13 @@
             if (clearBtn) clearBtn.style.display = 'flex';
             _updateTtsSubModeUI();
             addLog(`✅ 参考音频已加载: ${file.name}`);
-        };
+        
+    }
+    window.handleTtsRefUpload = handleTtsRefUpload;
         reader.readAsDataURL(file);
     };
 
-    window.clearTtsRef = function() {
+function clearTtsRef() {
         _ttsRefB64 = null;
         const fi = document.getElementById('tts-ref-input');
         if (fi) fi.value = '';
@@ -4241,11 +4381,13 @@
         if (clearBtn) clearBtn.style.display = 'none';
         _updateTtsSubModeUI();
         addLog('🧹 已清除参考音频');
-    };
+    
+    }
+    window.clearTtsRef = clearTtsRef;
 
     let _asrLastResult = '';
 
-    window.runAsr = async function() {
+async function runAsr() {
         if (!_ttsRefB64) { addLog('❌ 请先上传音频文件'); return; }
         const btn = document.getElementById('tts-top-btn');
         const resultEl = document.getElementById('asr-result');
@@ -4276,24 +4418,30 @@
         } finally {
             if (btn) { btn.disabled = false; btn.textContent = _t('asrRunBtn') || '🔍 开始识别'; }
         }
-    };
+    
+    }
+    window.runAsr = runAsr;
 
-    window.copyAsrResult = function() {
+function copyAsrResult() {
         if (!_asrLastResult) return;
         navigator.clipboard.writeText(_asrLastResult).then(() => {
             addLog('✅ 已复制到剪贴板');
         }).catch(() => {
             addLog('❌ 复制失败');
         });
-    };
+    
+    }
+    window.copyAsrResult = copyAsrResult;
 
-    window.runTtsOrAsr = function() {
+function runTtsOrAsr() {
         if (_ttsSubMode === 'asr') {
             runAsr();
         } else {
             runTts();
         }
-    };
+    
+    }
+    window.runTtsOrAsr = runTtsOrAsr;
 
     async function checkTtsStatus() {
         const bar = document.getElementById('tts-status-bar');
@@ -4372,7 +4520,7 @@
         }
     }
 
-    window.playTtsFromQueue = function(audioUrl) {
+function playTtsFromQueue(audioUrl) {
         if (!audioUrl) return;
         const fullUrl = audioUrl.startsWith('http') ? audioUrl : `${BASE}${audioUrl}`;
         const player = document.getElementById('tts-audio-player');
@@ -4384,9 +4532,11 @@
             dlLink.download = 'tts_output.wav';
         }
         if (resultSec) resultSec.style.display = 'block';
-    };
+    
+    }
+    window.playTtsFromQueue = playTtsFromQueue;
 
-    window.runTts = async function() {
+async function runTts() {
         const text = (document.getElementById('tts-text')?.value || '').trim();
         if (!text) { addLog(_t('ttsErrNoText')); return; }
 
@@ -4416,7 +4566,9 @@
                 reference_wav: _ttsRefB64 || null,
                 prompt_wav: (mode === 'ultimate_clone' && _ttsRefB64) ? _ttsRefB64 : null,
                 prompt_text: promptText || null,
-            };
+            
+    }
+    window.runTts = runTts;
 
             const label = text.length > 40 ? text.slice(0, 40) + '...' : text;
             const queueRes = await submitQueuedTask('tts', '/api/tts/generate', payload, `🎙️ ${label}`);
@@ -4807,7 +4959,7 @@
         addLog(_t('replayLoadedLog'));
     }
 
-    window.loadCurrentPreviewSeed = function() {
+function loadCurrentPreviewSeed() {
         const record = currentPreviewReplayId ? replayStore.get(currentPreviewReplayId) : null;
         const seed = record?.payload?.seed;
         if (!seed) {
@@ -4817,15 +4969,19 @@
         if (setFixedSeed(seed)) {
             addLog(_fmt('previewSeedLoadedLog', { seed }));
         }
-    };
+    
+    }
+    window.loadCurrentPreviewSeed = loadCurrentPreviewSeed;
 
-    window.loadCurrentPreviewParams = function() {
+function loadCurrentPreviewParams() {
         if (!currentPreviewReplayId || !replayStore.has(currentPreviewReplayId)) {
             addLog(_t('previewNoReplayParams'));
             return;
         }
         applyReplayPayloadById(currentPreviewReplayId);
-    };
+    
+    }
+    window.loadCurrentPreviewParams = loadCurrentPreviewParams;
 
     async function refreshPreviewReplayFromFile(fileOrPath, fileName) {
         if (currentPreviewReplayId) return;
@@ -5590,7 +5746,7 @@
         return map[ext] || 'audio/wav';
     }
 
-    window.toggleAudioPreviewPlayback = function() {
+function toggleAudioPreviewPlayback() {
         const audio = document.getElementById('res-audio');
         if (audioPlayer) {
             if (audioPlayer.playing) {
@@ -5612,7 +5768,9 @@
         } else {
             audio.pause();
         }
-    };
+    
+    }
+    window.toggleAudioPreviewPlayback = toggleAudioPreviewPlayback;
 
     function initAudioPreviewToggle() {
         const art = document.getElementById('audio-preview-art');
@@ -5645,12 +5803,16 @@
         if (!b) { b = String(Date.now()); _fileBusterMap.set(fileKey, b); }
         return b;
     }
-    window.__invalidateFileBuster = function(fileKey) {
+function __invalidateFileBuster(fileKey) {
         if (fileKey) _fileBusterMap.delete(fileKey);
-    };
-    window.__invalidateAllFileBusters = function() {
+    
+    }
+    window.__invalidateFileBuster = __invalidateFileBuster;
+function __invalidateAllFileBusters() {
         _fileBusterMap.clear();
-    };
+    
+    }
+    window.__invalidateAllFileBusters = __invalidateAllFileBusters;
 
     function displayOutput(fileOrPath, outputType = null, options = {}) {
         // ★ 抢占代次,本次调用从此刻起就是"最新"
@@ -5899,7 +6061,7 @@
         }
     }
 
-    window.downloadCurrentPreviewAsset = function() {
+function downloadCurrentPreviewAsset() {
         if (!currentPreviewAssetUrl) {
             addLog(_t('previewNoDownload'));
             return;
@@ -5910,7 +6072,9 @@
         document.body.appendChild(a);
         a.click();
         a.remove();
-    };
+    
+    }
+    window.downloadCurrentPreviewAsset = downloadCurrentPreviewAsset;
 
 
 
@@ -6016,17 +6180,52 @@
     
     
     
-    let currentHistoryPage = 1;
+    let currentHistoryPage = 1;          // 当前已加载到的页码(从 1 开始)
     let isLoadingHistory = false;
-    const HISTORY_PAGE_LIMIT = 240;
-    const HISTORY_THUMB_CONCURRENCY = 8;  // ★ 图片缩略图并发度,后端API返回图片无需前端解码
+    // ★ 2026-06-16 v2: 首次进入"我的作品"只拉 5 个,首屏 5 张卡片秒开
+    //   5 个 × (replay 775B + gen_info 679B) ≈ 7 KB,后端响应 gzip 后 < 5 KB
+    //   适合"快速进入随手点作品"的体验
+    //   滚动到底部时由 IntersectionObserver 自动再拉 5 个
+    const HISTORY_PAGE_LIMIT = 5;        // 首次加载数量
+    const HISTORY_PAGE_MORE = 5;         // 每次"加载更多"自动追加数量
+    const HISTORY_THUMB_CONCURRENCY = 8; // ★ 图片缩略图并发度,后端API返回图片无需前端解码
     let _historyListFingerprint = '';
+    let _historyHasMore = true;          // 后端是否还有更多页(total_pages > current_page)
+    let _historyTotalPages = 0;          // ★ 2026-06-16 v3: 用于 IO 防御性检查,避免越过末页
     let _historyHasRendered = false;
     const _historyRenderedKeys = new Set();
     let historyThumbLoaderBusy = false;
     let historyThumbLoadQueued = false;
     let historyThumbLoaderToken = 0;
     let _historyLayout = localStorage.getItem('historyLayout') || 'list';
+    let _historySentinelObserver = null;  // ★ 2026-06-16 v2: 触底加载的 IO
+    let _historySentinel = null;          // 滚动到容器底部时显示的"加载中/已加载完"哨兵元素
+    // ★ 2026-06-16 v4 提速: 首页 5 个作品的 localStorage 缓存
+    //   F5 瞬间显示,不等网络回来(网络是 304 也好、200 也好,用户先看到东西)
+    //   缓存时间: 24h(超过 24h 直接当过期,等网络)
+    //   key: 包含 limit(=5) 让"加载更多"不会命中这个缓存
+    const _HISTORY_LOCAL_CACHE_KEY = '__yunji_history_p1_v4';
+    const _HISTORY_LOCAL_CACHE_TTL = 24 * 60 * 60 * 1000;  // 24h
+    function _loadHistoryFromLocal(page, limit) {
+        if (page !== 1 || limit !== HISTORY_PAGE_LIMIT) return null;
+        try {
+            const raw = localStorage.getItem(_HISTORY_LOCAL_CACHE_KEY);
+            if (!raw) return null;
+            const wrap = JSON.parse(raw);
+            if (!wrap || !wrap.savedAt || !wrap.data) return null;
+            if (Date.now() - wrap.savedAt > _HISTORY_LOCAL_CACHE_TTL) return null;
+            return wrap.data;
+        } catch (_) { return null; }
+    }
+    function _saveHistoryToLocal(page, limit, data) {
+        if (page !== 1 || limit !== HISTORY_PAGE_LIMIT) return;
+        try {
+            localStorage.setItem(_HISTORY_LOCAL_CACHE_KEY, JSON.stringify({
+                savedAt: Date.now(),
+                data: data,
+            }));
+        } catch (_) {}
+    }
 
     function setHistoryLayout(layout) {
         _historyLayout = layout;
@@ -6148,7 +6347,9 @@
         }
         
         if (tab === 'history') {
-            return fetchHistory(true);
+            // ★ 2026-06-16 v2: 切回 history tab 时重置回第一页 + 5 个
+            //   (避免"上次滚到第3页,切走再切回还显示第3页"的不一致体验)
+            return resetHistoryAndReload();
         }
         return Promise.resolve();
     }
@@ -6372,35 +6573,193 @@
         _historyListFingerprint = '';
         _historyHasRendered = false;
         _historyRenderedKeys.clear();
+        currentHistoryPage = 1;
+        _historyHasMore = true;
+        _historyTotalPages = 0;  // ★ 重置 total_pages,让哨兵在拿到新数据前不误判
         historyThumbLoaderToken++;
+        // ★ 2026-06-16 v2: 切回第一页后,移除旧哨兵 + 重置观察者
+        _destroyHistorySentinel();
         const container = document.getElementById('history-container');
         if (container) container.innerHTML = '';
         isLoadingHistory = false;
         return fetchHistory(true);
     }
+    // ★ 2026-06-16 v2: 暴露到 window,供 HTML 内联 onclick="resetHistoryAndReload()" 使用
+    window.resetHistoryAndReload = resetHistoryAndReload;
+
+    // ★ 2026-06-16 v3 修复: 创建/获取底部"哨兵"元素,IntersectionObserver 触底自动加载下一页
+    //   关键: 哨兵必须放在 #history-wrapper(滚动容器)内部,IO 的 root 也必须是这个 wrapper
+    //   否则哨兵在文档流里直接可见,IO 立刻触发 → 一次加载全部 → 无限转圈
+    function _ensureHistorySentinel() {
+        const wrapper = document.getElementById('history-wrapper');
+        if (!wrapper) return null;
+        // ★ 哨兵要插到 wrapper 末尾(不是 wrapper 之后),跟随 wrapper 一起滚动
+        let sentinel = document.getElementById('history-sentinel');
+        if (sentinel && sentinel.parentNode === wrapper) {
+            return sentinel;
+        }
+        // 清理可能存在的旧节点(防御性)
+        if (sentinel && sentinel.parentNode) {
+            sentinel.parentNode.removeChild(sentinel);
+        }
+        sentinel = document.createElement('div');
+        sentinel.id = 'history-sentinel';
+        sentinel.className = 'history-sentinel';
+        sentinel.innerHTML = '<span class="hs-spinner"></span><span class="hs-text" data-i18n="loadingMore">加载中...</span>';
+        wrapper.appendChild(sentinel);
+        _historySentinel = sentinel;
+        return sentinel;
+    }
+
+    function _destroyHistorySentinel() {
+        if (_historySentinelObserver) {
+            try { _historySentinelObserver.disconnect(); } catch (_) {}
+            _historySentinelObserver = null;
+        }
+        if (_historySentinel && _historySentinel.parentNode) {
+            _historySentinel.parentNode.removeChild(_historySentinel);
+        }
+        _historySentinel = null;
+    }
+
+    // 更新哨兵文字
+    function _setSentinelState(state) {
+        const sentinel = _historySentinel;
+        if (!sentinel) return;
+        const textEl = sentinel.querySelector('.hs-text');
+        const t = (window.t || ((k) => k));  // i18n.js 暴露的全局 t()
+        if (state === 'loading') {
+            sentinel.classList.remove('hs-done', 'hs-end');
+            sentinel.classList.add('hs-loading');
+            if (textEl) textEl.textContent = t('loadingMore');
+        } else if (state === 'end') {
+            sentinel.classList.remove('hs-loading');
+            sentinel.classList.add('hs-end');
+            if (textEl) textEl.textContent = t('noMore');
+        } else if (state === 'done') {
+            sentinel.classList.remove('hs-loading', 'hs-end');
+            if (textEl) textEl.textContent = '';
+        }
+    }
+
+    // 启动哨兵观察: 哨兵进入 #history-wrapper 视口 → 加载下一页 5 个
+    //   ★ 关键修复 v3:
+    //   - root 用 history-wrapper(滚动容器),不是 window,否则哨兵不跟随滚动
+    //   - rootMargin 400px: 哨兵离 wrapper 底部还有 400px 就触发,用户感觉不到延迟
+    //   - 加载期间 disconnect,加载完重新 observe,防止连续触发
+    function _startHistorySentinelObserver() {
+        if (!('IntersectionObserver' in window)) return;
+        if (_historySentinelObserver) return;
+        const wrapper = document.getElementById('history-wrapper');
+        const sentinel = _ensureHistorySentinel();
+        if (!wrapper || !sentinel) return;
+        const io = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                if (!entry.isIntersecting) continue;
+                if (isLoadingHistory || !_historyHasMore) continue;
+                // ★ v3 修复: 防御性检查,万一后端 total_pages 字段缺失但已经超出范围
+                //   也不要去发无意义的请求
+                if (_historyTotalPages > 0 && currentHistoryPage >= _historyTotalPages) {
+                    _historyHasMore = false;
+                    _setSentinelState('end');
+                    continue;
+                }
+                // ★ 立刻 disconnect,加载完成后再重新 observe(防止同一次进入视口触发多次)
+                io.unobserve(entry.target);
+                currentHistoryPage += 1;
+                fetchHistory(false, true).finally(() => {
+                    // 加载完后再 observe 哨兵(没更多页了就不 observe)
+                    if (_historyHasMore && _historySentinel) {
+                        try { io.observe(_historySentinel); } catch (_) {}
+                    }
+                });
+            }
+        }, { root: wrapper, rootMargin: '0px 0px 400px 0px', threshold: 0 });
+        _historySentinelObserver = io;
+        try { io.observe(sentinel); } catch (_) {}
+    }
 
     async function fetchHistory(isFirstLoad = false, silent = false) {
         if (isLoadingHistory) return;
         isLoadingHistory = true;
+        // ★ 2026-06-16 v2: 加载期间显示"加载中"状态(只对追加页生效,首屏由浏览器渲染空容器)
+        if (!isFirstLoad) _setSentinelState('loading');
 
         try {
-            // 只加载最近一批历史，避免输出目录视频过多时拖慢缩略图初始化
-            const res = await fetch(`${BASE}/api/system/history?page=1&limit=${HISTORY_PAGE_LIMIT}`);
+            // ★ 2026-06-16 v2: 支持分页,首次 5 个,之后每次 +5
+            //   silent 模式: 不清空 _historyListFingerprint 状态,允许"无变化则不重渲"
+            const limit = isFirstLoad ? HISTORY_PAGE_LIMIT : HISTORY_PAGE_MORE;
+            // ★ 2026-06-16 v4 提速: 首次加载时,先尝试从 localStorage 读缓存(0 阻塞渲染)
+            //   - 如果命中 → 立刻渲染 → 用户先看到 5 个作品 → 再后台 fetch 最新数据
+            //   - 视觉:F5 后 200-500ms 就能看到内容(本来要 1-2 秒)
+            //   - 后台 fetch 回来后用 silent 路径,内容不变就啥都不做,变了就 diff
+            if (isFirstLoad && !silent) {
+                const cached = _loadHistoryFromLocal(currentHistoryPage, limit);
+                if (cached) {
+                    // ★ 标记当前正在"显示缓存",避免 200ms 后网络回来走 silent 时
+                    //   把已经渲染好的卡片当成"未渲染",触发额外的 needsFullRender
+                    isLoadingHistory = false;
+                    await _renderHistoryData(cached, true, false, limit);
+                    isLoadingHistory = true;
+                }
+            }
+            // ★ 2026-06-16 v4 提速: cache:'default' 让浏览器自动处理 304
+            //   - 后端带 ETag/Last-Modified,同参数二次请求会自动加 If-None-Match/If-Modified-Since
+            //   - 后端返回 304 → 浏览器自动用本地缓存(0 字节响应)
+            //   - 用户感受: F5 后 1-2 秒的网络请求变成 < 50ms
+            const res = await fetch(`${BASE}/api/system/history?page=${currentHistoryPage}&limit=${limit}`, {
+                cache: 'default',
+                headers: { 'Accept': 'application/json' },
+            });
             if (!res.ok) {
+                // ★ 304 已被浏览器透明处理(res.ok=true 且 status=304 时浏览器自动解出来)
+                //   这里只处理真正的 4xx/5xx
                 isLoadingHistory = false;
                 return;
             }
+            // ★ 2026-06-16 v4: status 304 时 res.json() 会抛 — 浏览器其实早已自动从
+            //   HTTP 缓存里取回上次的 body,fetch API 在多数浏览器里会把 304 重写为 200
+            //   + 上次的 body。但为了兜底(老浏览器 / Service Worker 拦截),
+            //   如果真的撞到 304,直接用 localStorage 缓存补上。
+            if (res.status === 304) {
+                const cached = _loadHistoryFromLocal(currentHistoryPage, limit);
+                if (cached) {
+                    await _renderHistoryData(cached, isFirstLoad, silent, limit);
+                }
+                return;
+            }
             const data = await res.json();
-            // ★ 列表刷新 = 文件可能新增/覆盖,清掉所有 per-file cache buster,
-            //   下次点击历史卡会拿到新 v= 拿到最新文件(防止浏览器拿旧缓存挡掉)
+            // ★ 2026-06-16 v4: 拉到新数据后写 localStorage,F5 才能秒开
+            _saveHistoryToLocal(currentHistoryPage, limit, data);
+            // ★ 2026-06-16 v4 修复: 如果已经从 localStorage 渲染过了,网络回来的
+            //   数据要走 silent 模式,避免"刚渲染完又被清空重渲"
+            const useSilent = isFirstLoad && _historyListFingerprint && _historyHasRendered;
+            await _renderHistoryData(data, isFirstLoad, useSilent || silent, limit);
+        } catch(e) {
+            console.error("Failed to load history", e);
+        } finally {
+            isLoadingHistory = false;
+        }
+    }
+
+    // ★ 2026-06-16 v4 提速: 把 fetchHistory 里的"拿到数据 → 渲染"逻辑抽出来
+    //   1) 让 fetchHistory 主体只管"发请求 + 304 兜底",逻辑更清晰
+    //   2) 让 304 路径(命中 localStorage)能直接复用渲染逻辑
+    async function _renderHistoryData(data, isFirstLoad, silent, limit) {
+        // ★ 2026-06-16 v3 修复: 只在首次加载/重置时清掉 cache buster 和预下载缓存
+        //   旧逻辑: 每次 fetchHistory 都调 → 翻页时把第1页正在下载的缩略图全部作废,
+        //          → 浏览器取消旧请求 + 拿新 buster 重新请求 → 缩略图永远加载不完
+        //   新逻辑: 只有"用户主动刷新"才清,翻页追加不动现有缩略图
+        // ★ 2026-06-16 v4 修复: 二次渲染(从 localStorage 渲染过了,网络又回来)
+        //   不能再清 bust,否则刚显示的缓存卡片缩略图 URL 全部失效 → 视觉上"清空重渲"
+        if (isFirstLoad && !silent) {
             if (typeof window.__invalidateAllFileBusters === 'function') {
                 window.__invalidateAllFileBusters();
             }
-            // ★ 同步清空视频预下载缓存:旧预下载的 URL 带的是旧 buster,
-            //   不清的话下次 prefetch 会跳过本应重新预拉的文件
             if (typeof window.__resetVideoPrefetchCache === 'function') {
                 window.__resetVideoPrefetchCache();
             }
+        }
 
             const validHistory = (data.history || []).filter(item => {
                 if (!item || !item.filename) return false;
@@ -6430,10 +6789,18 @@
                 loadingCardHtml = lc.outerHTML;
             }
 
+            // ★ 2026-06-16 v3 修复: 空响应不再清空容器
+            //   旧逻辑: validHistory 为空就 container.innerHTML = loadingCardHtml
+            //   翻页触底时 API 返回 [] → 容器被清空 → 用户看到"已加载的作品全没了"
+            //   新逻辑: 只有"用户主动刷新"且确实没有数据时才清空
             if (validHistory.length === 0) {
-                container.innerHTML = loadingCardHtml;
-                const newLcEmpty = document.getElementById('current-loading-card');
-                if (newLcEmpty) newLcEmpty.onclick = showGeneratingView;
+                if (isFirstLoad || !_historyHasRendered) {
+                    // 真正空目录(没有作品)才清空,显示 loading card
+                    container.innerHTML = loadingCardHtml;
+                    const newLcEmpty = document.getElementById('current-loading-card');
+                    if (newLcEmpty) newLcEmpty.onclick = showGeneratingView;
+                }
+                // 翻页触底:什么都不做,保留已有卡片
                 _historyListFingerprint = fingerprint;
                 return;
             }
@@ -6442,7 +6809,18 @@
             const globalDir = outInput ? outInput.value.replace(/\\/g, '/').replace(/\/$/, '') : "";
 
             const needsFullRender = !_historyHasRendered || container.querySelectorAll('.history-card[data-history-key], .history-card-list[data-history-key]').length === 0;
-            if (needsFullRender) {
+            // ★ 2026-06-16 v2: 分页追加模式 = (非首次) + (已有渲染过的卡片)
+            //   这种情况直接 append 新卡片到底部,不重做 diff/merge(分页天然没有重复)
+            const isAppending = !isFirstLoad && _historyHasRendered;
+            if (isAppending) {
+                // 过滤掉"已经渲染过"的卡(防御性,理论上分页不会重复)
+                const newOnly = validHistory.filter((item) => !_historyRenderedKeys.has(historyItemKey(item)));
+                if (newOnly.length > 0) {
+                    const cardsHtml = newOnly.map((item) => renderHistoryCardHtml(item, globalDir)).join('');
+                    container.insertAdjacentHTML('beforeend', cardsHtml);
+                    newOnly.forEach((item) => _historyRenderedKeys.add(historyItemKey(item)));
+                }
+            } else if (needsFullRender) {
                 const cardsHtml = validHistory.map((item) => renderHistoryCardHtml(item, globalDir)).join('');
                 container.insertAdjacentHTML('beforeend', cardsHtml);
                 _historyRenderedKeys.clear();
@@ -6548,13 +6926,27 @@
                 requestHistoryThumbLoad();
             }
             _historyListFingerprint = fingerprint;
-        } catch(e) {
-            console.error("Failed to load history", e);
-        } finally {
-            isLoadingHistory = false;
-        }
+
+            // ★ 2026-06-16 v2: 决定"还有没有更多页",并启动底部哨兵观察者
+            //   后端响应里有 total_pages / current_page,直接对位判断
+            //   容错:服务端没给字段时,按"返回的卡片数 < limit"判定为最后一页
+            const totalPages = Number(data.total_pages || 0);
+            const currentPage = Number(data.current_page || currentHistoryPage);
+            _historyTotalPages = totalPages;  // ★ v3: 记下来,IO 用它防御
+            if (totalPages > 0) {
+                _historyHasMore = currentPage < totalPages;
+            } else {
+                _historyHasMore = validHistory.length >= limit;
+            }
+            // 启动底部哨兵 IO(只在有更多时才有意义,但哨兵本身一直挂载以便统一管理)
+            _startHistorySentinelObserver();
+            if (!_historyHasMore) {
+                _setSentinelState('end');
+            } else {
+                _setSentinelState('done');  // 不显示文字,只占位触发 IO
+            }
     }
-    
+
     async function deleteHistoryItem(filename, type, btn) {
         if (!confirm(`确定要删除 "${filename}" 吗？`)) return;
         
@@ -6832,7 +7224,9 @@
     const _videoPrefetchedSet = new Set();     // 已经预下载过的 filename
     const _videoPrefetchActiveMap = new Map();  // 正在下载的 filename -> AbortController
     const _videoPrefetchQueue = [];            // 等候中的预下载任务
-    const VIDEO_PREFETCH_MAX_CONCURRENT = 2;   // 最多同时 2 个,避免和用户点击抢带宽
+    const VIDEO_PREFETCH_MAX_CONCURRENT = 1;   // ★ 2026-06-16 v4: 改 1,给缩略图让出带宽
+                                              // 浏览器同源最多 6 并发,缩略图 8 并发本身就要排队
+                                              // 视频一个一个下,首屏缩略图秒现,视频预下载慢慢补
     function _cancelAllVideoPrefetch() {
         for (const ctrl of _videoPrefetchActiveMap.values()) {
             try { ctrl.abort(); } catch (_) {}
@@ -6962,18 +7356,22 @@
         }, { root: null, rootMargin: '300px 0px', threshold: 0.01 });
 
         // 暴露给 renderHistoryList 用,新生成的卡片挂上观察者
-        window.__observeHistoryCard = function(card) {
+        // ★ 2026-06-16 v4 提速: 用函数声明 + 单独赋值,V8 才能 lazy-parse body
+        function __observeHistoryCard(card) {
             if (!card) return;
             try { containerObs.observe(card); } catch (_) {}
             try { winObs.observe(card); } catch (_) {}
-        };
+        }
+        window.__observeHistoryCard = __observeHistoryCard;
     }
 
-    // 页面加载时初始化滚动监听
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => setTimeout(initHistoryScrollListener, 500));
+    // ★ 2026-06-16 v4 修复: 直接同步注册 IO 监听器,不再白等 500ms
+    //   旧逻辑: 担心 IO 提前触发所以拖 500ms,实测现代浏览器完全没这问题
+    //   收益: 首屏缩略图加载提前 500ms
+    if (typeof IntersectionObserver !== 'undefined' && document.getElementById('history-wrapper')) {
+        initHistoryScrollListener();
     } else {
-        setTimeout(initHistoryScrollListener, 500);
+        document.addEventListener('DOMContentLoaded', initHistoryScrollListener, { once: true });
     }
 
     window.displayHistoryOutput = function displayHistoryOutput(file, type, replayId = '') {
@@ -7121,19 +7519,23 @@
         loadModelCheckpoints();
         loadCoreModels();
 
+        // ★ 2026-06-16 v4 提速: 自动刷新改成"首次 30s,后续 60s"
+        //   旧: 每 15s 跑一次 → 哪怕用户没动,前端也频繁发请求 + 检查 fingerprint
+        //   新: 首次 30s(让用户先消化首屏)→ 后续 60s(生成场景下够用,静止场景几乎无感)
+        //   关键: 即便触发,fingerprint 一致就静默返回,不会清空 UI
         let historyRefreshInterval = null;
         function startHistoryAutoRefresh() {
             if (historyRefreshInterval) return;
-            historyRefreshInterval = setInterval(() => {
+            // ★ 首次延迟 30s,避开"刚加载完用户还没看清"就被打断的尴尬
+            historyRefreshInterval = setTimeout(function _tick() {
                 const hc = document.getElementById('history-container');
-                if (hc && hc.offsetParent !== null && !_isGeneratingFlag) {
-                    // ★ 2026-06-09 修复: 原来误传 isFirstLoad=1,导致每次都强制走
-                    //   loadVisibleImages() 跟用户操作抢缩略图带宽。
-                    //   改用 isFirstLoad=false:无变化走 fingerprint 短路,有变化走
-                    //   IO 触发新卡懒加载,不再"主动全量扫一遍"
+                // 容器存在 + 可见(非隐藏) + 没在生成中 + 没在加载中 → 才发请求
+                if (hc && hc.offsetParent !== null && !_isGeneratingFlag && !isLoadingHistory) {
                     fetchHistory(false, true);
                 }
-            }, 15000);
+                // ★ 后续每 60s 一次(原来是 15s,太快了)
+                historyRefreshInterval = setTimeout(_tick, 60000);
+            }, 30000);
         }
         startHistoryAutoRefresh();
         } catch(e) { console.error('[INIT] _onDomReady2 error:', e); }
@@ -7453,7 +7855,7 @@ async function applyHardwareProfile() {
     }
 }
 
-window.refreshAndSync = async function() {
+async function refreshAndSync() {
     // 2026-06-10: 模型管理已下放给启动器,前端仅触发"同步HF元数据"以便刷出最新描述/大小
     try {
         const res = await fetch(`${BASE}/api/models/registry/refresh-hf`, {
@@ -7466,6 +7868,7 @@ window.refreshAndSync = async function() {
         if (window._appendLog) window._appendLog(`⚠️ 同步失败: ${e.message}`, 'warn');
     }
 }
+window.refreshAndSync = refreshAndSync;
 
 // ── 动态联动事件绑定 ──────────────────────────────────────────
 // FPS/清晰度/时长 变化时自动更新推荐
@@ -7543,10 +7946,16 @@ function _updateMotionParamWarnings() {
     }
 }
 
-// 延迟加载硬件档案（等后端就绪）
-setTimeout(loadHardwareProfile, 3000);
-// 延迟绑定动态事件（等DOM就绪）
-setTimeout(_initDynamicRecommendation, 3500);
+// ★ 2026-06-16 v4 修复: 延迟从 3s/3.5s/4s 缩到 0.5s/0.5s/requestIdleCallback
+//   旧逻辑: 写"3秒等后端就绪"是因为早期后端启动慢,现在后端 100ms 就绪,白等 3 秒
+//   env-check 改用 requestIdleCallback(浏览器空闲时跑,不抢首屏带宽)
+const _idle = window.requestIdleCallback || function (cb) { return setTimeout(cb, 200); };
+const _now = function (cb, delay) { setTimeout(cb, delay); };
+_now(loadHardwareProfile, 500);
+_now(_initDynamicRecommendation, 500);
+_idle(() => {
+    fetch(`${BASE}/api/system/env-check`).then(r => r.json()).then(d => { _envCheckData = d; }).catch(() => {});
+});
 
 // ── 环境检测面板 ──────────────────────────────────────────────────
 let _envCheckData = null;
@@ -7859,7 +8268,5 @@ function renderEnvPreset(data) {
     details.innerHTML = html;
 }
 
-setTimeout(() => {
-    fetch(`${BASE}/api/system/env-check`).then(r => r.json()).then(d => { _envCheckData = d; }).catch(() => {});
-}, 4000);
+// ★ 2026-06-16 v4: 删掉 4s 的 env-check 重复定时器(上面已经用 requestIdleCallback 启过了)
 

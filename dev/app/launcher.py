@@ -2,8 +2,18 @@
 # -*- coding: utf-8 -*-
 """
 EXE 入口点 - 云集智能视频创意站
-参考云集智能网联代理专家的 launcher.py
-简洁设计：不 monkey-patch subprocess，避免破坏标准库行为
+
+★ 2026-06-16 进程控制策略重构（参考 1.PC 进程控制策略-技术文档.md）:
+  - launcher.py 的强杀逻辑**只对 frozen 模式生效**(EXE)
+  - launcher.py 看到 python.exe **直接跳过**(不杀开发模式实例)
+  - dev 模式的单实例控制由 main.py 的优雅通知机制负责:
+    * 共享内存存路径(同版本不同路径判断)
+    * 全局 Shutdown Event(跨版本/同版本异路径时通知旧实例退出)
+    * window activation(同版本同路径时激活旧窗口)
+  - 避免 launcher.py 误伤:
+    * 自伤(launcher 自己是 python.exe,宽泛条件会自杀)
+    * 误伤(dev 目录下用户其他脚本)
+    * 不优雅(强杀丢工作区状态)
 """
 import sys
 import os
@@ -23,63 +33,45 @@ if sys.platform == 'win32' and getattr(sys, 'frozen', False):
     sys.stderr = _NullWriter()
 
 
-def _is_this_a_launcher_process(pid):
+def _is_exe_instance(pid, base_prefix):
     """
-    ★ 2026-06-09:判断指定 PID 是否为"启动器实例"（EXE 或开发模式的 main.py）
-    - EXE 模式:exe 文件名以"云集智能视频创意站"开头
-    - 开发模式:命令行包含 main.py 且工作目录在 dev/app 下
-    - 双重保险,避免误杀其他 python 进程
+    ★ 2026-06-16:严格判断指定 PID 是否为"本项目 EXE 启动器实例"
+    - 用 psutil 拿 exe 路径,与当前进程 sys.executable 同 basename 才算
+    - 不再用 cmdline 模糊匹配(避免误伤同前缀但不同项目的 exe)
     """
     if sys.platform != 'win32':
         return False
     try:
-        # 用 WMI 不可靠,直接用 psutil(项目已依赖)
         import psutil
         proc = psutil.Process(pid)
         try:
-            cmdline = proc.cmdline()
+            exe_path = proc.exe()
         except (psutil.AccessDenied, psutil.NoSuchProcess):
             return False
-        if not cmdline:
+        if not exe_path:
             return False
-        cmdline_str = ' '.join(cmdline).lower()
-        # ★ 匹配条件1:EXE 模式(脚本名是"云集智能视频创意站"开头)
-        if any(part.lower().startswith('云集智能视频创意站') and part.lower().endswith('.exe')
-               for part in cmdline):
-            return True
-        # ★ 匹配条件2:开发模式(命令行包含 main.py 且当前在 dev/app 目录下)
-        if any('main.py' in part.lower() for part in cmdline):
-            # 进一步验证:进程的工作目录或脚本路径应该在 dev/app 下
-            try:
-                cwd = proc.cwd().lower()
-                if 'dev\\app' in cwd or 'dev/app' in cwd:
-                    return True
-            except (psutil.AccessDenied, psutil.NoSuchProcess):
-                pass
-            # 或:命令行里包含绝对路径的 main.py,且路径含 dev/app
-            for part in cmdline:
-                if 'main.py' in part.lower() and ('dev\\app' in part.lower() or 'dev/app' in part.lower()):
-                    return True
-        return False
+        # 必须和当前 EXE 同 basename(同名 = 同 EXE 实例)
+        return os.path.basename(exe_path).lower() == os.path.basename(sys.executable).lower()
     except Exception:
         return False
 
 
 def _kill_old_instances():
     """
-    ★ 2026-06-08(加强):杀掉所有同前缀的旧 EXE 进程,确保单实例
-    ★ 2026-06-09(扩展):开发模式下也支持杀掉旧的 main.py 实例
-    - EXE 模式:匹配 exe 文件名以"云集智能视频创意站"开头
-    - 开发模式:匹配 cmdline 含 main.py 且工作目录在 dev/app 下
-    - 不区分大小写
-    - 排除自身 PID
-    - 不误杀其他 python 进程(双条件校验)
+    ★ 2026-06-16 进程控制策略重构:
+    - **只对 frozen 模式(EXE)生效**
+    - dev 模式(python.exe 进程)**直接跳过** → dev 模式走 main.py 优雅通知
+    - 用 CreateToolhelp32Snapshot + TerminateProcess(标准 Win32 API)
+    - 等旧进程真正退出(最多 2s)再返回,避免新进程端口冲突
     """
+    # ★ 关键: dev 模式完全跳过 launcher 的硬杀
     if sys.platform != 'win32':
+        return
+    if not getattr(sys, 'frozen', False):
+        # dev 模式: 不杀 python.exe,留给 main.py 的单实例检测做优雅通知
         return
 
     my_pid = ctypes.windll.kernel32.GetCurrentProcessId()
-    is_frozen = getattr(sys, 'frozen', False)
 
     kernel32 = ctypes.windll.kernel32
 
@@ -107,41 +99,27 @@ def _kill_old_instances():
     entry = PROCESSENTRY32W()
     entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
 
+    base_prefix = "云集智能视频创意站".lower()
     pids_to_kill = []
-    # ★ EXE 模式:用 EXE 文件名前缀快速匹配
-    if is_frozen:
-        my_exe = os.path.normcase(os.path.abspath(sys.executable))
-        base_prefix = "云集智能视频创意站".lower()
 
     if kernel32.Process32FirstW(snap, ctypes.byref(entry)):
         while True:
             pid = entry.th32ProcessID
-            if pid == my_pid:
-                # 跳过自身
-                pass
-            else:
-                exe_name = (entry.szExeFile or "").lower()
-                should_kill = False
-                if is_frozen:
-                    # EXE 模式:exe 文件名以"云集智能视频创意站"开头
-                    should_kill = (
-                        exe_name.startswith(base_prefix)
-                        and exe_name.endswith('.exe')
-                    )
-                else:
-                    # ★ 开发模式:python.exe 进程 + 详细 cmdline 校验
-                    if exe_name in ('python.exe', 'pythonw.exe'):
-                        should_kill = _is_this_a_launcher_process(pid)
-                if should_kill:
-                    pids_to_kill.append(pid)
+            if pid != my_pid and _is_exe_instance(pid, base_prefix):
+                pids_to_kill.append(pid)
             entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
             if not kernel32.Process32NextW(snap, ctypes.byref(entry)):
                 break
 
     kernel32.CloseHandle(snap)
 
+    if not pids_to_kill:
+        return
+
     # ★ 强杀进程(给 0x0001 权限:PROCESS_TERMINATE)
     PROCESS_TERMINATE = 0x0001
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x00100000
+    STILL_ACTIVE = 259
     killed = []
     for pid in pids_to_kill:
         handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
@@ -152,14 +130,12 @@ def _kill_old_instances():
 
     if killed:
         # ★ 等待旧进程真正退出(最多 2s),避免新进程启动后端口冲突
-        import time as _time
         for _ in range(20):
-            _time.sleep(0.1)
+            time.sleep(0.1)
             still_alive = []
             for pid in killed:
-                h = kernel32.OpenProcess(0x00100000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+                h = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
                 if h:
-                    STILL_ACTIVE = 259
                     exit_code = ctypes.c_ulong()
                     if kernel32.GetExitCodeProcess(h, ctypes.byref(exit_code)) and exit_code.value == STILL_ACTIVE:
                         still_alive.append(pid)
@@ -170,10 +146,9 @@ def _kill_old_instances():
 
 def main():
     """
-    ★ 2026-06-09:EXE/dev 共用入口
-    - EXE 模式:launcher.py 自身即 __main__,此函数被直接调用
-    - 开发模式:main.py 在其 __main__ 块里调用 _kill_old_instances() 后再 main(),
-      不需要再走一遍这里的 main() 流程
+    ★ 2026-06-16:EXE 入口点
+    - 强杀旧 EXE 实例(launcher 自己)
+    - 然后导入 main.main()(EXE 内嵌的 main 模块)
     """
     _kill_old_instances()
     import main

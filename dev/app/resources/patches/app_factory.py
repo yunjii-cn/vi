@@ -100,6 +100,12 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # ★ 2026-06-16: 启用 GZip 压缩
+    #   /api/models/registry 75KB → ~15KB
+    #   /api/loras /api/presets 等 JSON 响应普遍 -70%~80%
+    #   浏览器看到 Content-Encoding: gzip 自动解压
+    from starlette.middleware.gzip import GZipMiddleware as _GZip
+    app.add_middleware(_GZip, minimum_size=512)
 
     @app.middleware("http")
     async def _sync_gpu_middleware(request: Request, call_next: Callable[[Request], Awaitable[StarletteResponse]]) -> StarletteResponse:

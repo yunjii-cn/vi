@@ -111,6 +111,14 @@ _HF_BG_INTERVAL_SECONDS = 12 * 3600   # 后台 12h 周期
 _HF_BG_INITIAL_DELAY = 10             # 启动 10s 后第一次 (用户感知友好)
 _HF_BG_CONCURRENCY = 4
 
+# ★ 2026-06-16: HF-mirror 401 自适应退避
+# 国内 hf-mirror 镜像在匿名访问时统一返回 401,大量空转浪费 CPU + 阻塞日志。
+# 触发条件: 连续 3 个仓库返回 401 → 整批跳过 24 小时,期间 background loop 完全不发起请求。
+_HF_401_COOLDOWN_SECONDS = 24 * 3600
+_HF_401_TRIGGER_THRESHOLD = 3
+_hf_401_count_window: list[float] = []  # 近 5 分钟内的 401 时间戳
+_hf_skip_until: float = 0.0            # > time.time() 时整批跳过
+
 # ── 自适应源选择 ──
 # 竞速一次后记住最快源，后续直接用，不再每次都竞速
 # 如果快源连续失败则降级回竞速
@@ -118,6 +126,7 @@ _hf_preferred_api_base: str | None = None   # 最快的 API base
 _hf_preferred_resolve: str | None = None    # 最快的 resolve base
 _hf_preferred_consecutive_fails = 0         # 快源连续失败次数
 _HF_PREFERRED_MAX_FAILS = 2                 # 连续失败超过此数则降级
+_last_hf_was_401: bool = False              # 最近的 HF 请求是否被镜像站 401/403 拒绝
 
 # 缩略图候选 (按顺序探测,命中即用)
 _HF_PREVIEW_CANDIDATES = (
@@ -1498,11 +1507,19 @@ def _write_cached_dict(path: Path, data: dict) -> None:
 
 
 def _http_get_json(url: str) -> dict | None:
-    """同步 HTTP GET,带 UA 和超时。返回 None 表示失败。"""
+    """同步 HTTP GET,带 UA 和超时。返回 None 表示失败。
+    当遇到 401/403 时设置全局 _last_hf_was_401=True,供上层触发 24h 退避。
+    """
+    global _last_hf_was_401
+    _last_hf_was_401 = False
     try:
         import httpx
         with httpx.Client(timeout=httpx.Timeout(_HF_API_TIMEOUT)) as client:
             r = client.get(url, headers={"User-Agent": _HF_USER_AGENT, "Accept": "application/json"})
+            if r.status_code in (401, 403):
+                _last_hf_was_401 = True
+                logger.debug("HF HTTP %d for %s", r.status_code, url)
+                return None
             r.raise_for_status()
             return r.json()
     except Exception as e:
@@ -1616,8 +1633,12 @@ def _fetch_hf_metadata_sync(repo_id: str, *, force: bool = False) -> dict | None
       - 后续请求: 直接用最快源（省去竞速开销）
       - 快源连续失败超过阈值: 降级回竞速，重新选源
     """
-    global _hf_preferred_api_base, _hf_preferred_consecutive_fails
+    global _hf_preferred_api_base, _hf_preferred_consecutive_fails, _hf_skip_until
     if not repo_id or "/" not in repo_id:
+        return None
+
+    # ★ 2026-06-16: 命中 24h 401 退避时,直接返回 None 不打网络
+    if not force and time.time() < _hf_skip_until:
         return None
 
     cache_path = _hf_cache_path(repo_id, "meta")
@@ -1708,6 +1729,25 @@ def _fetch_hf_metadata_sync(repo_id: str, *, force: bool = False) -> dict | None
 
         if result is not None:
             _write_cached_dict(cache_path, result)
+            # 成功后清空 401 计数 (有 repo 能拿到数据,说明镜像整体可达)
+            _hf_401_count_window.clear()
+        else:
+            # 失败时:如果是 401/403,记录到时间窗口;累计到阈值后整批跳过 24h
+            if _last_hf_was_401:
+                _hf_401_count_window.append(time.time())
+                cutoff = time.time() - 300
+                while _hf_401_count_window and _hf_401_count_window[0] < cutoff:
+                    _hf_401_count_window.pop(0)
+                if len(_hf_401_count_window) >= _HF_401_TRIGGER_THRESHOLD and time.time() > _hf_skip_until:
+                    _hf_skip_until = time.time() + _HF_401_COOLDOWN_SECONDS
+                    _hf_status["consecutive_401"] = len(_hf_401_count_window)
+                    _hf_status["cooldown_until"] = _hf_skip_until
+                    logger.warning(
+                        "[HF] 连续 %d 次 401,整批跳过 %d 小时 (直到 %s)",
+                        len(_hf_401_count_window),
+                        _HF_401_COOLDOWN_SECONDS // 3600,
+                        time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(_hf_skip_until)),
+                    )
         return result
     finally:
         with _hf_meta_lock:
@@ -1925,6 +1965,11 @@ def _refresh_all_hf_metadata(force: bool = False, triggered_by: str = "backgroun
     使用 _HF_BG_CONCURRENCY 个工作线程并发获取，自适应源选择避免重复竞速。
     """
     global _hf_status
+    # ★ 2026-06-16: 退避期内拒绝任何来源的 refresh 请求
+    if time.time() < _hf_skip_until:
+        return {"skipped": True, "reason": "cooldown",
+                "cooldown_until": _hf_skip_until,
+                "triggered_by": triggered_by}
     if _hf_status.get("running"):
         return {"skipped": True, "reason": "already_running",
                 "triggered_by": _hf_status.get("triggered_by")}
@@ -2013,12 +2058,20 @@ def _refresh_all_hf_metadata(force: bool = False, triggered_by: str = "backgroun
 
 
 def _hf_updater_loop() -> None:
-    """后台守护线程: 启动后延迟首跑,之后每 _HF_BG_INTERVAL_SECONDS 跑一次。"""
+    """后台守护线程: 启动后延迟首跑,之后每 _HF_BG_INTERVAL_SECONDS 跑一次。
+    若命中 401 退避(全局 _hf_skip_until),整轮直接跳过,完全不打网络。
+    """
     if _hf_stop_event.wait(timeout=_HF_BG_INITIAL_DELAY):
         return  # 已请求停止
     while not _hf_stop_event.is_set():
         try:
-            _refresh_all_hf_metadata(force=False)
+            if time.time() < _hf_skip_until:
+                # 退避中:不发起任何 HF 请求,等下次周期再看
+                _hf_status["state"] = "cooldown"
+                _hf_status["cooldown_until"] = _hf_skip_until
+                logger.info("[HF] 退避中,本轮跳过 (剩 %ds)", int(_hf_skip_until - time.time()))
+            else:
+                _refresh_all_hf_metadata(force=False)
         except Exception as e:
             logger.warning("HF background loop error: %s", e)
         # 周期等待 (可被 stop event 提前唤醒)
@@ -2049,6 +2102,165 @@ def _merge_registries(builtin: dict, cached: dict) -> dict[str, ModelRegistryEnt
         elif entry.source != "official" or builtin.get(mid, None) is None:
             merged[mid] = entry
     return merged
+
+
+# ★ 2026-06-16: 注册表扫描 TTL 缓存
+# 原 route_registry() 在 async 路由里同步执行 _scan_dir_for_models() 遍历全部 5 个模型目录
+# (含 F: 盘等网络盘),单次 30-180s,期间整个 asyncio 事件循环被卡死,
+# 表现就是 /health 这种最简端点也要 11s 才返回 → 前端"加载慢 + 黑屏"。
+# 修复: 用 TTL 缓存 + asyncio.to_thread() 把扫描丢到线程池,事件循环不再被阻塞。
+# 缓存命中时 route_registry() < 1ms 返回。
+_REGISTRY_CACHE_TTL_SECONDS = 30.0
+_registry_cache: dict[str, Any] = {
+    "data": None,
+    "expires_at": 0.0,
+    "lock": threading.Lock(),
+}
+
+
+def _is_network_dir(p: Path) -> bool:
+    """粗略判断目录是否位于网络/外置盘(启发式,用于配置 skip_network_dirs_on_scan 时跳过)。
+
+    判定规则: 盘符为 F: 及以后视为"慢盘"(用户机器上 F: 是 ComfyUI 共用盘,经常挂在 NAS 上)。
+    也允许用户在 launcher_config.json 里显式列 excluded_dirs 强制排除。
+    """
+    try:
+        s = str(p).replace("\\", "/")
+        # 提取盘符(Windows 风格)
+        if len(s) >= 2 and s[1] == ":":
+            drive = s[0].upper()
+            if drive >= "F":
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _get_effective_models_dirs() -> list[Path]:
+    """过滤掉用户排除的目录(网络盘/坏盘),避免单次扫描拖死事件循环。"""
+    cfg = _read_launcher_config()
+    skip_network = bool(cfg.get("skip_network_dirs_on_scan", False))
+    excluded = [str(x).lower().replace("\\", "/") for x in cfg.get("excluded_model_dirs", []) or []]
+    out: list[Path] = []
+    for d in _get_models_dirs():
+        try:
+            ds = str(d).lower().replace("\\", "/")
+            if any(ex in ds for ex in excluded):
+                logger.info("[community_models] excluded dir by config: %s", d)
+                continue
+            if skip_network and _is_network_dir(d):
+                logger.info("[community_models] skipped network dir: %s", d)
+                continue
+        except Exception:
+            pass
+        out.append(d)
+    return out
+
+
+def _read_launcher_config() -> dict:
+    """读取 launcher_config.json,兼容 _ctx.config_dir 和 _ctx.config_dir/config/ 两种位置。
+    任何 IO 错误都返回空 dict,不抛错。"""
+    if _ctx is None:
+        return {}
+    try:
+        for base in (_ctx.config_dir, _ctx.config_dir / "config"):
+            cfg_path = base / "launcher_config.json"
+            if cfg_path.is_file():
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _scan_all_dirs_sync() -> dict[str, Any]:
+    """在后台线程执行:扫描所有模型目录 + 合并注册表。返回 route_registry 要发的 JSON。
+
+    之前直接写在线程里是因为 os.walk 同步、stat() 同步,只能这样搬。
+    任何 IO 错误都吞掉不让其拖死整个 scan。
+    """
+    try:
+        default_dir = _get_default_models_dir()
+        cfg = _read_launcher_config()
+        skip_network = bool(cfg.get("skip_network_dirs_on_scan", False))
+        excluded = [str(x).lower().replace("\\", "/") for x in cfg.get("excluded_model_dirs", []) or []]
+        custom_dirs = _load_custom_dirs()
+
+        def _filt(d: Path) -> bool:
+            try:
+                ds = str(d).lower().replace("\\", "/")
+                if any(ex in ds for ex in excluded):
+                    return False
+                if skip_network and _is_network_dir(d):
+                    return False
+            except Exception:
+                return True
+            return True
+
+        local_dirs: list[dict[str, Any]] = []
+        if default_dir is not None and _filt(default_dir):
+            local_dirs.append({
+                "path": str(default_dir),
+                "is_default": True,
+                "models": _scan_dir_for_models(default_dir),
+            })
+        for cd in custom_dirs:
+            if default_dir is not None and str(cd) == str(default_dir):
+                continue
+            if not _filt(cd):
+                continue
+            local_dirs.append({
+                "path": str(cd),
+                "is_default": False,
+                "models": _scan_dir_for_models(cd),
+            })
+
+        return {
+            "models": _get_registry_status(),
+            "default_models_dir": str(default_dir) if default_dir else None,
+            "custom_models_dirs": [str(d) for d in custom_dirs],
+            "local_dirs": local_dirs,
+            "sync_status": _last_sync_status,
+            "hf_status": dict(_hf_status),
+        }
+    except Exception as e:
+        logger.exception("registry scan crashed: %s", e)
+        return {
+            "models": [],
+            "default_models_dir": None,
+            "custom_models_dirs": [],
+            "local_dirs": [],
+            "sync_status": _last_sync_status,
+            "hf_status": dict(_hf_status),
+            "error": str(e),
+        }
+
+
+async def _build_registry_response_async() -> dict[str, Any]:
+    """route_registry 的异步实现:命中缓存立即返回,否则在后台线程跑扫描。"""
+    now = time.time()
+    with _registry_cache["lock"]:
+        cached = _registry_cache["data"]
+        expires = _registry_cache["expires_at"]
+        if cached is not None and now < expires:
+            cached["_cache"] = "hit"
+            return cached
+    # 缓存未命中 → 线程池跑扫描
+    import asyncio
+    data = await asyncio.to_thread(_scan_all_dirs_sync)
+    with _registry_cache["lock"]:
+        _registry_cache["data"] = data
+        _registry_cache["expires_at"] = time.time() + _REGISTRY_CACHE_TTL_SECONDS
+    data["_cache"] = "miss"
+    return data
+
+
+def invalidate_registry_cache() -> None:
+    """外部修改了模型目录后(新增/删除/重命名),应主动失效缓存。
+    调一下这个就行,下个请求会重新扫描。"""
+    with _registry_cache["lock"]:
+        _registry_cache["data"] = None
+        _registry_cache["expires_at"] = 0.0
 
 
 def _sync_registry_from_remote() -> dict[str, Any]:
@@ -2653,18 +2865,10 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
 
     @app.get("/api/models/registry")
     async def route_registry():
+        # ★ 2026-06-16: 改用异步实现(TTL 缓存 + asyncio.to_thread 跑扫描),
+        # 不再阻塞事件循环,前端轮询这个端点再也不会让整个 backend 卡死。
         try:
-            default_dir = _get_default_models_dir()
-            custom_dirs = _load_custom_dirs()
-            return {
-                "models": _get_registry_status(),
-                "default_models_dir": str(default_dir) if default_dir else None,
-                "custom_models_dirs": [str(d) for d in custom_dirs],
-                "local_dirs": _get_local_models_by_dir(),
-                "sync_status": _last_sync_status,
-                # 2026-06-10: 暴露 HF 后台更新状态给前端
-                "hf_status": dict(_hf_status),
-            }
+            return await _build_registry_response_async()
         except Exception as e:
             logger.exception("registry list failed")
             return JSONResponse(status_code=500, content={"error": str(e)})
@@ -2891,6 +3095,7 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
         _custom_models_dirs.append(p)
         _save_custom_dirs()
         _sync_custom_dirs_to_settings()
+        invalidate_registry_cache()
         return {"status": "added", "custom_models_dirs": [str(d) for d in _custom_models_dirs]}
 
     @app.delete("/api/models/registry/custom-dir")
@@ -2913,6 +3118,7 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
 
         _save_custom_dirs()
         _sync_custom_dirs_to_settings()
+        invalidate_registry_cache()
         return {"status": "removed", "custom_models_dirs": [str(d) for d in _custom_models_dirs]}
 
     @app.post("/api/models/local/delete")

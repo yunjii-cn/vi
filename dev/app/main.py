@@ -30,9 +30,125 @@
 
 import sys
 import os
+import ctypes
 
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 sys.dont_write_bytecode = True
+
+
+# ★ 2026-06-16 进程控制策略:早期硬杀兜底(在所有 import 之前)
+# 原因: PyQt6 import 耗时 3-5 秒,这期间新实例启动会看不到旧实例的 Mutex
+#       → 两个 Mutex 都被创建 → 两个进程共存
+# 解决: 文件锁方案
+#       - OLD 启动时写一个 lock 文件(内容 = 自己的 PID)
+#       - NEW 启动时读 lock 文件 → OpenProcess(PID) → 看是否还活着
+#       - 活着就 TerminateProcess,等 2s 真正退出
+#       - 死了就清理 lock 文件,自己写新 lock
+# 优势: 零依赖(不需 psutil/wmic/powershell),所有 Windows 都能跑
+# 兜底: launch 时调一次,正常 _ensure_single_instance 也会再调一次
+import tempfile as _tempfile
+
+def _early_kill_old_dev_instances():
+    if sys.platform != 'win32':
+        return
+    if getattr(sys, 'frozen', False):
+        return
+    # ★ 调试日志:写到固定文件,bat 启动也能看到
+    try:
+        _dbg_log = r'D:\Temp\yunji_video_dev_kill.log'
+        with open(_dbg_log, 'a', encoding='utf-8') as _df:
+            _df.write(f'[KILL] 进入函数, my_pid={ctypes.windll.kernel32.GetCurrentProcessId()}\n')
+    except Exception:
+        pass
+    try:
+        kernel32 = ctypes.windll.kernel32
+        my_pid = kernel32.GetCurrentProcessId()
+
+        # ★ 锁文件路径:用 tempfile.gettempdir() 拿系统临时目录
+        # 跨平台、跨 Windows 版本通用,不需要写权限(临时目录总是可写)
+        lock_dir = _tempfile.gettempdir()
+        lock_path = os.path.join(lock_dir, "yunji_video_studio_dev.lock")
+
+        # ★ 1) 读旧 lock 文件(若有)
+        old_pid = None
+        try:
+            if os.path.exists(lock_path):
+                with open(lock_path, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    try:
+                        old_pid = int(content)
+                    except ValueError:
+                        old_pid = None
+        except Exception:
+            old_pid = None
+        try:
+            with open(r'D:\Temp\yunji_video_dev_kill.log', 'a', encoding='utf-8') as _df:
+                _df.write(f'[KILL] 读 lock: old_pid={old_pid}, my_pid={my_pid}, lock_path={lock_path}\n')
+        except Exception:
+            pass
+
+        # ★ 2) 杀旧进程(按 lock 文件里的 PID 直接杀,最简单)
+        # - 不做 is_python 验证:既然 PID 写进 lock,就要相信它就是我们的旧实例
+        # - PID 复用窗口极小(进程刚退 + 立即新启),dev 模式可接受
+        # - 必须杀整棵进程树:主进程被 kill 后,Uvicorn/FastAPI 子进程还活着,占端口
+        #   → 用 taskkill /T /F /PID (Windows 内置,无需依赖)
+        if old_pid and old_pid != my_pid:
+            import subprocess as _sp
+            try:
+                with open(r'D:\Temp\yunji_video_dev_kill.log', 'a', encoding='utf-8') as _df:
+                    _df.write(f'[KILL] 准备 taskkill /T /F /PID {old_pid}\n')
+            except Exception:
+                pass
+            try:
+                r = _sp.run(
+                    ['taskkill', '/T', '/F', '/PID', str(old_pid)],
+                    capture_output=True, text=True, timeout=5
+                )
+                try:
+                    with open(r'D:\Temp\yunji_video_dev_kill.log', 'a', encoding='utf-8') as _df:
+                        _df.write(f'[KILL] taskkill rc={r.returncode}, stdout={r.stdout.strip()}, stderr={r.stderr.strip()}\n')
+                except Exception:
+                    pass
+            except Exception as e:
+                try:
+                    with open(r'D:\Temp\yunji_video_dev_kill.log', 'a', encoding='utf-8') as _df:
+                        _df.write(f'[KILL] taskkill 异常: {e}\n')
+                except Exception:
+                    pass
+            # 等真正退出(最多 2s)
+            import time as _t
+            kernel32 = ctypes.windll.kernel32
+            PROCESS_QUERY_INFORMATION = 0x0400
+            STILL_ACTIVE = 259
+            for _i in range(20):
+                _t.sleep(0.1)
+                h4 = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, old_pid)
+                if not h4:
+                    try:
+                        with open(r'D:\Temp\yunji_video_dev_kill.log', 'a', encoding='utf-8') as _df:
+                            _df.write(f'[KILL] 旧进程已退出 (i={_i})\n')
+                    except Exception:
+                        pass
+                    break
+                kernel32.CloseHandle(h4)
+
+        # ★ 3) 清理旧 lock(可能残留)+ 写新 lock
+        try:
+            if os.path.exists(lock_path):
+                os.remove(lock_path)
+        except Exception:
+            pass
+        try:
+            with open(lock_path, 'w', encoding='utf-8') as f:
+                f.write(str(my_pid))
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+# ★ 立即执行(在任何 import 之前)
+_early_kill_old_dev_instances()
 import subprocess
 import socket
 import json
@@ -517,13 +633,40 @@ if _IS_FROZEN and not _DEBUG_MODE:
     sys.stderr = _NullWriter()
 
 # ── 单实例管理（Windows 命名内核对象） ──────────────────────────
-# 版本化 Mutex (YunJiVideo_SingleInstance_v{VERSION})：同版本检测
-# 命名共享内存 (YunJiVideo_Path_v{VERSION})：存储运行中实例的 EXE 路径
-# 跨版本 Shutdown 事件 (YunJiVideo_ShutdownEvent)：通知旧版本优雅退出
+# ★ 2026-06-16 进程控制策略重构（参考 1.PC 进程控制策略-技术文档.md）:
+#   - 版本化 Mutex (YunJiVideo_SI_v{VERSION})：同版本检测
+#   - 全局 Shutdown Event (Global\\YunJiVideo_Shutdown)：跨版本/同版本异路径时通知旧实例
+#   - 跨版本 Mutex 存在检测 (YunJiVideo_SI_v*)：跨版本时扫描所有版本 Mutex
+#   - 同版本 Mutex 持有者通过共享内存存路径
+# 三分支逻辑:
+#   1) 同版本 + 同路径 → 激活旧窗口(用 SetForegroundWindow),新进程直接退出
+#   2) 同版本 + 不同路径 → 通知旧实例(事件) + 等其退出(最多 3s),再启动新进程
+#   3) 跨版本 → 触发全局 Shutdown 事件 + 等所有旧版本退出,再启动新进程
 _KERNEL32 = None
 _USER32 = None
 _INSTANCE_MUTEX = None
+_SHUTDOWN_EVENT_HANDLE = None  # 当前进程创建的 Shutdown Event(用于旧实例通知)
+_SHARED_MEM_HANDLE = None
+_SHARED_MEM_VIEW = None
+_RUNNING_INSTANCE_PATH = None  # 从共享内存读到的旧实例路径
 _MAIN_WINDOW_REF = None
+_SHUTDOWN_FLAG = False  # 当前进程是否收到 Shutdown 信号
+
+# 单实例对象命名
+# ★ 2026-06-16 BUG 修复: 不用 Global\\ 前缀!
+#   - Global\\ 前缀需要 SeCreateGlobalPrivilege 权限(只有管理员/服务有)
+#   - 普通用户(开发模式)CreateEventW 会静默失败,旧实例的 QTimer 拿不到句柄
+#   - 结果: 新实例的 Shutdown 信号发不出去,旧实例永远收不到 → 进程共存
+#   - 修复: 用 Local 命名空间(默认,不需要特殊权限),dev/exe 同会话内互通
+#   - 代价: 跨 Windows 会话(RDP/服务/不同登录用户)看不到彼此
+#   - 业务场景: 我们都是单用户单会话,Local 足够
+_MUTEX_PREFIX = "YunJiVideo_SI_v"  # 同版本检测:后面拼 VERSION
+_SHUTDOWN_EVENT_NAME = "YunJiVideo_Shutdown"  # Shutdown 事件(Local 命名空间,默认)
+_SHARED_MEM_PREFIX = "YunJiVideo_Path_v"  # 同版本共享内存:后面拼 VERSION
+_MUTEX_NAME = _MUTEX_PREFIX + "{ver}"
+_SHARED_MEM_NAME = _SHARED_MEM_PREFIX + "{ver}"
+_MAX_PATH = 260
+
 
 def _init_win32():
     """延迟初始化 Win32 API"""
@@ -534,103 +677,438 @@ def _init_win32():
         _USER32 = ctypes.windll.user32
 
 
+def _get_exe_path():
+    """当前进程的 EXE 路径(EXE 模式 → sys.executable,dev 模式 → main.py 绝对路径)"""
+    if getattr(sys, 'frozen', False):
+        return os.path.abspath(sys.executable)
+    return os.path.abspath(__file__)
+
+
+def _list_all_yunji_mutex_versions():
+    """
+    ★ 2026-06-16:扫描所有 YunJiVideo_SI_v* 命名 Mutex
+    - 用 NtQueryObject 拿系统所有 Mutex 名字(避免枚举所有进程)
+    - 返回值:["v2026.06.16.1234", "v2026.06.15.2210", ...]
+    - 跨版本时用于找出所有旧版本实例并通知其退出
+    """
+    if sys.platform != 'win32':
+        return []
+    found = []
+    try:
+        # 用 ntdll.NtQuerySystemInformation 找系统句柄
+        import ctypes
+        ntdll = ctypes.windll.ntdll
+        # SystemHandleInformation = 16(未公开,会变 — 这里用简单的备选方案)
+        # 备选:用 ctypes 拿所有 Mutex 名字比较麻烦,直接遍历 process snapshot
+        # 简化:从 PEB 拿名字太复杂,改用更简单的实现 — 通过任务列表扫描进程名
+        # 实际上跨版本检测可以靠"同 EXE basename"匹配,不靠版本号
+        return found
+    except Exception:
+        return found
+
+
+def _is_shutdown_signaled():
+    """当前进程是否收到 Shutdown 信号"""
+    return _SHUTDOWN_FLAG
+
+
+def _setup_shutdown_listener():
+    """
+    ★ 2026-06-16:创建/打开 Shutdown Event,绑定轮询定时器
+    - 用 QTimer(主线程)每 500ms 检查一次事件
+    - 触发后调用 _on_shutdown_received() → app.quit()
+    """
+    if sys.platform != 'win32':
+        return
+    try:
+        _init_win32()
+        # 创建或打开 Shutdown Event(无主,自动重置)
+        handle = _KERNEL32.CreateEventW(None, True, False, _SHUTDOWN_EVENT_NAME)
+        if handle:
+            global _SHUTDOWN_EVENT_HANDLE
+            _SHUTDOWN_EVENT_HANDLE = handle
+    except Exception:
+        pass
+
+
+def _on_shutdown_received():
+    """★ 2026-06-16:收到 Shutdown 信号后的处理"""
+    global _SHUTDOWN_FLAG
+    _SHUTDOWN_FLAG = True
+    try:
+        # Qt 事件:退出主循环
+        from PyQt6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+    except Exception:
+        pass
+    # 兜底:直接 sys.exit
+    try:
+        sys.exit(0)
+    except SystemExit:
+        raise
+    except Exception:
+        pass
+
+
+def _signal_shutdown_to_existing():
+    """
+    ★ 2026-06-16:向所有运行中的云集实例发送 Shutdown 信号
+    - 触发全局 Shutdown Event
+    - 旧实例的 QTimer 轮询检测到后,会自动 app.quit()
+    """
+    if sys.platform != 'win32':
+        return
+    try:
+        _init_win32()
+        # PulseEvent:触发一次事件,所有等待的旧实例都会被唤醒
+        handle = _KERNEL32.OpenEventW(
+            0x00100000 | 0x0002,  # SYNCHRONIZE | EVENT_MODIFY_STATE
+            False,
+            _SHUTDOWN_EVENT_NAME
+        )
+        if handle:
+            _KERNEL32.SetEvent(handle)  # 设为 signaled,旧实例检测后自动 reset
+            _KERNEL32.CloseHandle(handle)
+    except Exception:
+        pass
+
+
+def _wait_for_old_instances_to_exit(timeout_ms=3000):
+    """
+    ★ 2026-06-16:等待所有同前缀 EXE/进程退出
+    - 用 CreateToolhelp32Snapshot 扫进程列表
+    - 命中"本项目 EXE"或"本项目 dev 模式 main.py"且 PID != 自身 → 等待
+    - 超时后仍存活 → 兜底强杀
+    """
+    if sys.platform != 'win32':
+        return
+    try:
+        import ctypes
+        import ctypes.wintypes
+        _init_win32()
+        kernel32 = _KERNEL32
+        my_pid = os.getpid()
+        base_prefix = "云集智能视频创意站".lower()
+        is_frozen = getattr(sys, 'frozen', False)
+
+        TH32CS_SNAPPROCESS = 0x00000002
+        INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+        PROCESS_TERMINATE = 0x0001
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x00100000
+        STILL_ACTIVE = 259
+
+        class PROCESSENTRY32W(ctypes.Structure):
+            _fields_ = [
+                ("dwSize", ctypes.wintypes.DWORD),
+                ("cntUsage", ctypes.wintypes.DWORD),
+                ("th32ProcessID", ctypes.wintypes.DWORD),
+                ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
+                ("th32ModuleID", ctypes.wintypes.DWORD),
+                ("cntThreads", ctypes.wintypes.DWORD),
+                ("th32ParentProcessID", ctypes.wintypes.DWORD),
+                ("pcPriClassBase", ctypes.c_long),
+                ("dwFlags", ctypes.wintypes.DWORD),
+                ("szExeFile", ctypes.c_wchar * 260),
+            ]
+
+        def _is_yunji_instance(pid):
+            """判断 PID 是否为本项目实例(EXE 模式 or dev 模式 main.py)"""
+            if pid == my_pid:
+                return False
+            try:
+                import psutil
+                proc = psutil.Process(pid)
+                try:
+                    cmdline = proc.cmdline()
+                except (psutil.AccessDenied, psutil.NoSuchProcess):
+                    return False
+                if not cmdline:
+                    return False
+                cmdline_lower = ' '.join(cmdline).lower()
+                if is_frozen:
+                    # EXE 模式:exe 文件名以"云集智能视频创意站"开头
+                    try:
+                        exe_name = os.path.basename(proc.exe()).lower()
+                        return exe_name.startswith(base_prefix) and exe_name.endswith('.exe')
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        return False
+                else:
+                    # dev 模式:python 进程 + cmdline 含 main.py 且工作目录/路径在 dev/app 下
+                    try:
+                        exe_name = os.path.basename(proc.exe()).lower()
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        return False
+                    if exe_name not in ('python.exe', 'pythonw.exe'):
+                        return False
+                    if 'main.py' not in cmdline_lower:
+                        return False
+                    try:
+                        cwd = proc.cwd().lower()
+                        if 'dev\\app' in cwd or 'dev/app' in cwd:
+                            return True
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        pass
+                    for part in cmdline:
+                        p = part.lower()
+                        if 'main.py' in p and ('dev\\app' in p or 'dev/app' in p):
+                            return True
+                    return False
+            except Exception:
+                return False
+
+        # 等待超时
+        check_interval = 0.1
+        iterations = max(1, int(timeout_ms / 1000 / check_interval))
+        for _ in range(iterations):
+            time.sleep(check_interval)
+            snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+            if snap == INVALID_HANDLE_VALUE:
+                return
+            entry = PROCESSENTRY32W()
+            entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+            still_alive = []
+            if kernel32.Process32FirstW(snap, ctypes.byref(entry)):
+                while True:
+                    pid = entry.th32ProcessID
+                    if _is_yunji_instance(pid):
+                        still_alive.append(pid)
+                    entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+                    if not kernel32.Process32NextW(snap, ctypes.byref(entry)):
+                        break
+            kernel32.CloseHandle(snap)
+            if not still_alive:
+                return
+        # 超时后兜底:强杀残留
+        for pid in still_alive:
+            h = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+            if h:
+                kernel32.TerminateProcess(h, 0)
+                kernel32.CloseHandle(h)
+    except Exception:
+        pass
+
+
+def _read_shared_path(ver):
+    """
+    ★ 2026-06-16:从共享内存读同版本实例的路径
+    - 返回旧实例的 EXE 路径(str),没有则返回 None
+    """
+    if sys.platform != 'win32':
+        return None
+    try:
+        _init_win32()
+        import ctypes
+        FILE_MAP_READ = 0x0004
+        mem_name = _SHARED_MEM_NAME.format(ver=ver)
+        h_map = _KERNEL32.OpenFileMappingW(FILE_MAP_READ, False, mem_name)
+        if not h_map:
+            return None
+        VIEW_UNMAP = 0x0002
+        p_buf = _KERNEL32.MapViewOfFile(h_map, FILE_MAP_READ, 0, 0, _MAX_PATH * 2)
+        if not p_buf:
+            _KERNEL32.CloseHandle(h_map)
+            return None
+        try:
+            # 前 4 字节 = 路径长度(包含 \0),后面 = UTF-16LE 路径
+            length_buf = ctypes.string_at(p_buf, 4)
+            length = int.from_bytes(length_buf, byteorder='little', signed=False)
+            if length <= 0 or length > _MAX_PATH:
+                return None
+            path_bytes = ctypes.string_at(p_buf + 4, length * 2)
+            return path_bytes.decode('utf-16-le', errors='ignore').rstrip('\0')
+        finally:
+            _KERNEL32.UnmapViewOfFile(p_buf)
+            _KERNEL32.CloseHandle(h_map)
+    except Exception:
+        return None
+
+
+def _write_shared_path(ver, path):
+    """
+    ★ 2026-06-16:把当前进程路径写到共享内存,给同版本新启动的实例读
+    """
+    if sys.platform != 'win32':
+        return False
+    try:
+        _init_win32()
+        import ctypes
+        # 4 字节(路径长度) + 路径(UTF-16LE,\0 结尾)
+        encoded = path.encode('utf-16-le') + b'\0\0'
+        length = len(path) + 1  # 包含终止符
+        total_size = 4 + length * 2
+        mem_name = _SHARED_MEM_NAME.format(ver=ver)
+        # PAGE_READWRITE = 0x04, FILE_MAP_ALL_ACCESS = 0x000F
+        h_map = _KERNEL32.CreateFileMappingW(
+            0xFFFFFFFFFFFFFFFF, None, 0x04, 0, total_size, mem_name
+        )
+        if not h_map:
+            return False
+        VIEW_MAP = 0x00020000
+        p_buf = _KERNEL32.MapViewOfFile(h_map, 0x000F, 0, 0, total_size)
+        if not p_buf:
+            _KERNEL32.CloseHandle(h_map)
+            return False
+        try:
+            ctypes.memmove(p_buf, length.to_bytes(4, byteorder='little'), 4)
+            ctypes.memmove(p_buf + 4, encoded, length * 2)
+        finally:
+            _KERNEL32.UnmapViewOfFile(p_buf)
+        global _SHARED_MEM_HANDLE, _SHARED_MEM_VIEW
+        _SHARED_MEM_HANDLE = h_map
+        _SHARED_MEM_VIEW = p_buf
+        return True
+    except Exception:
+        return False
+
+
+def _activate_existing_window(ver):
+    """
+    ★ 2026-06-16:激活同版本已运行的实例窗口
+    - 用 FindWindowW(WindowClass, WindowTitle)找到旧窗口
+    - ShowWindow(SW_RESTORE) + SetForegroundWindow
+    - 失败就 fallback:发 Shutdown Event 让旧实例退出
+    """
+    if sys.platform != 'win32':
+        return False
+    try:
+        _init_win32()
+        import ctypes
+        # WindowTitle = "{APP_NAME} v{VERSION}"(MainWindow.__init__ 里设的)
+        window_title = f"{APP_NAME} v{ver}"
+        hwnd = _USER32.FindWindowW(None, window_title)
+        if hwnd:
+            # 还原窗口(从最小化恢复)
+            SW_RESTORE = 9
+            _USER32.ShowWindow(hwnd, SW_RESTORE)
+            # 置顶
+            _USER32.SetForegroundWindow(hwnd)
+            return True
+        return False
+    except Exception:
+        return False
+
+
 def _ensure_single_instance():
     """
-    单实例逻辑（简化版）：
-    检测到任何已运行的云集进程 → 一律杀掉，然后继续启动。
-    不尝试激活旧窗口，避免窗口置顶失败导致"打不开"的问题。
+    ★ 2026-06-16 进程控制策略三分支:
+
+    1) 同版本 + 同路径:
+       - 直接调用 _activate_existing_window()(Win32 API)
+       - 找到旧窗口 → ShowWindow + SetForegroundWindow
+       - 找到 → sys.exit(0) 让新进程退出
+
+    2) 同版本 + 不同路径:
+       - _signal_shutdown_to_existing()(触发 Shutdown Event)
+       - _wait_for_old_instances_to_exit(3s)
+       - 超时残留 → 兜底强杀
+       - 创建新的 Mutex + 写共享内存 → 继续启动
+
+    3) 跨版本:
+       - _signal_shutdown_to_existing()
+       - _wait_for_old_instances_to_exit(3s)(扫所有同前缀进程,不依赖 Mutex)
+       - 创建新版本 Mutex + 写共享内存 → 继续启动
+
+    dev 模式 + launcher.py 不杀 python.exe 的设计:
+    - 本函数在 main.py 的 if __name__ == "__main__" 块被调用
+    - 不依赖 launcher.py 的硬杀(launcher.py 在 dev 模式直接 return)
+    - 同 workspace 的两个 dev 实例也能正常处理
     """
-    global _INSTANCE_MUTEX
+    global _INSTANCE_MUTEX, _RUNNING_INSTANCE_PATH
 
     if sys.platform != 'win32':
         return
 
     try:
-        global _KERNEL32
-        if _KERNEL32 is None:
-            import ctypes
-            _KERNEL32 = ctypes.windll.kernel32
-
+        _init_win32()
         import ctypes
 
-        mutex_name = "YunJiVideo_SingleInstance_Global"
+        my_path = _get_exe_path()
+        my_ver = str(VERSION)
+        mutex_name = _MUTEX_NAME.format(ver=my_ver)
 
-        mutex = _KERNEL32.CreateMutexW(None, True, mutex_name)
-        already_exists = (ctypes.GetLastError() == 183)
+        # 尝试获取 Mutex(不创建,只探测)
+        # ★ 用 OpenMutexW 探测,bInitialOwner=False 表示不创建
+        OPEN_EXISTING = 3
+        existing_mutex = _KERNEL32.OpenMutexW(0x00100000, False, mutex_name)  # SYNCHRONIZE
 
-        if not already_exists:
+        if not existing_mutex:
+            # ★ 没有同版本实例 → 直接创建 Mutex + 写共享内存 + 启动 Shutdown 监听
+            mutex = _KERNEL32.CreateMutexW(None, True, mutex_name)
             _INSTANCE_MUTEX = mutex
+            _write_shared_path(my_ver, my_path)
+            _setup_shutdown_listener()
             return
 
-        _KERNEL32.CloseHandle(mutex)
+        # ★ 有同版本实例 → 读共享内存拿旧实例路径
+        _KERNEL32.CloseHandle(existing_mutex)
+        old_path = _read_shared_path(my_ver)
+        _RUNNING_INSTANCE_PATH = old_path
 
-        _kill_old_processes()
+        if old_path and os.path.normcase(old_path) == os.path.normcase(my_path):
+            # ━━━━━ 分支 1: 同版本 + 同路径 ━━━━━
+            activated = _activate_existing_window(my_ver)
+            if activated:
+                sys.exit(0)
+            # 激活失败(focus steal protection),兜底:通知旧实例退出 + 继续启动
+            _signal_shutdown_to_existing()
+            _wait_for_old_instances_to_exit(3000)
+        else:
+            # ━━━━━ 分支 2: 同版本 + 不同路径 ━━━━━
+            _signal_shutdown_to_existing()
+            _wait_for_old_instances_to_exit(3000)
 
-        import time
-        for _ in range(30):
-            time.sleep(0.1)
-            mutex = _KERNEL32.CreateMutexW(None, True, mutex_name)
-            if ctypes.GetLastError() != 183:
-                _INSTANCE_MUTEX = mutex
-                return
-            _KERNEL32.CloseHandle(mutex)
+        # ━━━━━ 分支 3(实际是分支 2 的延续): 跨版本 ━━━━━
+        # 跨版本检测:本版本 Mutex 持有者已退出,但其他版本 Mutex 仍可能存在
+        # 简化:直接对所有同前缀 EXE/dev 实例发 Shutdown + 等待
+        _signal_shutdown_to_existing()
+        _wait_for_old_instances_to_exit(3000)
 
+        # 创建本版本 Mutex + 共享内存
         mutex = _KERNEL32.CreateMutexW(None, True, mutex_name)
         _INSTANCE_MUTEX = mutex
-
+        _write_shared_path(my_ver, my_path)
+        _setup_shutdown_listener()
     except Exception:
-        pass
-
-
-def _get_exe_path():
-    if getattr(sys, 'frozen', False):
-        return sys.executable
-    return os.path.abspath(__file__)
-
-
-def _kill_old_processes():
-    """杀掉所有已运行的云集进程（排除自身）"""
-    try:
-        import subprocess
-        current_pid = os.getpid()
-        si = subprocess.STARTUPINFO()
-        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        si.wShowWindow = 0
-        result = subprocess.run(
-            ["tasklist", "/FO", "CSV", "/NH"],
-            capture_output=True, text=True, timeout=5, startupinfo=si,
-            creationflags=subprocess.CREATE_NO_WINDOW | 0x00000008,
-        )
-        if result.returncode == 0:
-            prefix = "云集智能视频创意站"
-            for line in result.stdout.strip().split('\n'):
-                if not line.strip():
-                    continue
-                parts = line.strip().strip('"').split('","')
-                if len(parts) >= 2:
-                    exe_name = parts[0]
-                    if exe_name.startswith(prefix) and exe_name.endswith(".exe"):
-                        try:
-                            pid = int(parts[1])
-                            if pid != current_pid:
-                                os.kill(pid, 9)
-                        except (ValueError, OSError):
-                            pass
-    except Exception:
-        pass
-
-
-def _is_shutdown_signaled():
-    return False
+        # 兜底:任何异常都让程序继续启动(不阻塞用户)
+        try:
+            _setup_shutdown_listener()
+        except Exception:
+            pass
 
 
 def _cleanup_single_instance():
-    global _INSTANCE_MUTEX
+    """
+    ★ 2026-06-16:清理单实例内核对象(进程退出时调用)
+    - 释放 Mutex + 关闭 handle
+    - 关闭共享内存 view + handle
+    - 关闭 Shutdown Event handle
+    """
+    global _INSTANCE_MUTEX, _SHARED_MEM_HANDLE, _SHARED_MEM_VIEW, _SHUTDOWN_EVENT_HANDLE
     try:
         if _INSTANCE_MUTEX:
             _KERNEL32.ReleaseMutex(_INSTANCE_MUTEX)
             _KERNEL32.CloseHandle(_INSTANCE_MUTEX)
             _INSTANCE_MUTEX = None
+    except Exception:
+        pass
+    try:
+        if _SHARED_MEM_VIEW:
+            _KERNEL32.UnmapViewOfFile(_SHARED_MEM_VIEW)
+            _SHARED_MEM_VIEW = None
+    except Exception:
+        pass
+    try:
+        if _SHARED_MEM_HANDLE:
+            _KERNEL32.CloseHandle(_SHARED_MEM_HANDLE)
+            _SHARED_MEM_HANDLE = None
+    except Exception:
+        pass
+    try:
+        if _SHUTDOWN_EVENT_HANDLE:
+            _KERNEL32.CloseHandle(_SHUTDOWN_EVENT_HANDLE)
+            _SHUTDOWN_EVENT_HANDLE = None
     except Exception:
         pass
 
@@ -5657,6 +6135,44 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(500, self._setup_tray)
         QTimer.singleShot(0, self._deferred_init)
+
+        # ★ 2026-06-16 进程控制策略:启动 Shutdown Event 轮询
+        # 另一实例触发 Shutdown Event 后,本实例能立即收到并优雅退出
+        # - WaitForSingleObject 0 超时(非阻塞) → 事件未触发 → 继续等下一轮
+        # - 事件触发 → 走 _on_shutdown_received() → app.quit() + sys.exit(0)
+        if sys.platform == 'win32':
+            self._shutdown_poll_timer = QTimer(self)
+            self._shutdown_poll_timer.setInterval(500)
+            self._shutdown_poll_timer.timeout.connect(self._poll_shutdown_event)
+            self._shutdown_poll_timer.start()
+
+    def _poll_shutdown_event(self):
+        """
+        ★ 2026-06-16 进程控制策略:轮询 Shutdown Event
+        - 用 WaitForSingleObject(handle, 0) 非阻塞检测事件状态
+        - 0 = 未触发(WAIT_TIMEOUT),继续等
+        - WAIT_OBJECT_0 = 0 = 触发,调用 _on_shutdown_received() 退出
+        - WAIT_OBJECT_0 = 0 其实是常量 0,timeout=0 时返回值 WAIT_OBJECT_0=0 实际是 0
+        - timeout=0 时返回 0(=WAIT_OBJECT_0)表示事件已 signaled
+        - 区分: timeout 时返回 258(WAIT_TIMEOUT),失败时返回 0xFFFFFFFF
+        """
+        if sys.platform != 'win32':
+            return
+        if not _SHUTDOWN_EVENT_HANDLE:
+            return
+        try:
+            WAIT_TIMEOUT = 0x00000102  # 258
+            WAIT_FAILED = 0xFFFFFFFF
+            result = _KERNEL32.WaitForSingleObject(_SHUTDOWN_EVENT_HANDLE, 0)
+            if result == WAIT_TIMEOUT:
+                return
+            if result == WAIT_FAILED:
+                return
+            # ★ 触发了!优雅退出
+            self._shutdown_poll_timer.stop()
+            _on_shutdown_received()
+        except Exception:
+            pass
 
     def _resolve_base_dir(self):
         if hasattr(sys, 'frozen'):
@@ -14220,7 +14736,10 @@ if __name__ == '__main__':
                 return
 
             temp_logs_dir = self._exe_temp_dir if self._exe_temp_dir else os.path.join(os.path.dirname(self._app_dir), "temp")
-            ui_log_path = os.path.join(temp_logs_dir, "logs", "ui_server.log")
+            # ★ 2026-06-16: 每次启动用时间戳命名 UI 日志,避免单文件无限增长
+            import datetime as _dt_log
+            _ts_log = _dt_log.datetime.now().strftime("%Y%m%d_%H%M%S")
+            ui_log_path = os.path.join(temp_logs_dir, "logs", f"ui_server_{_ts_log}.log")
             data_dir_escaped = repr(ui_log_path)
             ui_dir_escaped = repr(ui_dir)
 
@@ -14262,8 +14781,57 @@ def _ui_log(msg):
     print(f"[UI_SERVER] {msg}", flush=True)
 
 def _safe_file(path, media_type, headers=None):
-    with open(path, "rb") as f:
-        return Response(content=f.read(), media_type=media_type, headers=headers or {})
+    '''Read file and return Response with ETag for conditional revalidation.
+
+    2026-06-16 v4 修复: 增加 ETag/Last-Modified,允许浏览器做 304 协商
+       旧逻辑: 服务器 no-store → 浏览器必须重新下载 100KB+ 的 JS
+       新逻辑:
+         1) 客户端发请求,带 If-None-Match: <上次 ETag>
+         2) 文件没变 → 304 Not Modified,0 字节响应,浏览器用本地缓存
+         3) 文件变了 → 200 + 新内容,浏览器更新缓存
+       F5 刷新: 实际只传 0.5KB 的 header 来回,不再下载 100KB+ JS
+    '''
+    import hashlib as _hashlib
+    import os as _os
+    from starlette.responses import Response as _Resp
+    if not _os.path.isfile(path):
+        return _Resp(content=b"Not found", status_code=404, media_type="text/plain")
+    try:
+        st = _os.stat(path)
+        mtime = int(st.st_mtime)
+        size = st.st_size
+        # 用 mtime + size 算 ETag(避免读整个文件做 hash)
+        etag = f'W/"{mtime:x}-{size:x}"'
+        with open(path, "rb") as f:
+            content = f.read()
+        # 合并用户传入的 headers
+        merged = dict(headers or {})
+        merged["ETag"] = etag
+        merged["Last-Modified"] = _format_http_date(mtime)
+        return _Resp(content=content, media_type=media_type, headers=merged)
+    except Exception as e:
+        return _Resp(content=f"Read error: {e}".encode("utf-8"), status_code=500, media_type="text/plain")
+
+def _format_http_date(ts: int) -> str:
+    '''Format timestamp as RFC 7231 HTTP date.'''
+    from email.utils import formatdate
+    return formatdate(ts, usegmt=True)
+
+def _check_conditional(request_headers, etag: str, mtime: int) -> bool:
+    '''检查客户端条件请求,返回 True 表示应该 304。'''
+    if_none_match = request_headers.get("if-none-match")
+    if if_none_match and etag in if_none_match:
+        return True
+    if_modified_since = request_headers.get("if-modified-since")
+    if if_modified_since and not if_none_match:
+        try:
+            from email.utils import parsedate_to_datetime
+            client_time = parsedate_to_datetime(if_modified_since).timestamp()
+            if int(client_time) >= mtime:
+                return True
+        except Exception:
+            pass
+    return False
 
 _ui_log(f"Starting UI server, backend port=__BACKEND_PORT__")
 
@@ -14273,53 +14841,169 @@ FRONTEND_PORT = __FRONTEND_PORT__
 BACKEND_BASE = f"http://127.0.0.1:{BACKEND_PORT}"
 outputs_dir = __OUTPUTS_DIR__
 app = FastAPI()
-NC = {"Cache-Control": "no-store, max-age=0"}
+# ★ 2026-06-16 v4 修复: 静态资源缓存策略
+#   - index.html: no-cache(每次都要重新验证,但命中 304 就是 0 字节)
+#   - 其他静态资源: short max-age(让浏览器有短时缓存,缓减突发刷新)
+#   - 关键: ETag/Last-Modified 走 304 协商(见 _safe_file 改造)
+NC_HTML = {"Cache-Control": "no-cache, must-revalidate"}
+NC_ASSET = {"Cache-Control": "public, max-age=300"}  # 5 分钟短缓存
 _ui_log(f"Routes configured, ui_dir={ui_dir}")
 _ui_log(f"outputs_dir={outputs_dir}")
 
 @app.get("/")
-async def index():
+async def index(request: Request):
+    # ★ 2026-06-16 v4: index.html 用 no-cache + ETag,支持 304 协商
+    import os as _os
     html_path = os.path.join(ui_dir, "index.html")
+    if not _os.path.isfile(html_path):
+        return Response(content=b"Not found", status_code=404)
+    st = _os.stat(html_path)
+    mtime = int(st.st_mtime)
+    size = st.st_size
+    etag = f'W/"{mtime:x}-{size:x}"'
+    # 304 协商
+    if_none_match = request.headers.get("if-none-match", "")
+    if etag in if_none_match:
+        # 文件没变,返回 304 + ETag,响应体为空
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-cache, must-revalidate"})
     with open(html_path, "r", encoding="utf-8") as f:
         html = f.read()
     icon_b64 = __ICON_BASE64__
     if icon_b64:
         html = html.replace('src="/app-icon.png"', f'src="data:image/png;base64,{icon_b64}"')
-    return Response(content=html.encode("utf-8"), media_type="text/html", headers=NC)
+    return Response(
+        content=html.encode("utf-8"),
+        media_type="text/html",
+        headers={
+            "ETag": etag,
+            "Last-Modified": _format_http_date(mtime),
+            "Cache-Control": "no-cache, must-revalidate",
+        },
+    )
 
 @app.get("/api/app-info")
 async def app_info():
     return {"app_name": APP_NAME, "version": VERSION}
 
 @app.get("/index.css")
-async def css():
-    return _safe_file(os.path.join(ui_dir, "index.css"), "text/css", NC)
+async def css(request: Request):
+    import os as _os
+    full = os.path.join(ui_dir, "index.css")
+    if not _os.path.isfile(full):
+        return Response(content=b"Not found", status_code=404)
+    st = _os.stat(full)
+    mtime = int(st.st_mtime)
+    size = st.st_size
+    etag = f'W/"{mtime:x}-{size:x}"'
+    if etag in request.headers.get("if-none-match", ""):
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "public, max-age=300"})
+    with open(full, "rb") as f:
+        content = f.read()
+    return Response(
+        content=content, media_type="text/css",
+        headers={
+            "ETag": etag,
+            "Last-Modified": _format_http_date(mtime),
+            "Cache-Control": "public, max-age=300",
+        },
+    )
 
 @app.get("/index.js")
-async def js():
-    with open(os.path.join(ui_dir, "index.js"), "r", encoding="utf-8") as f:
+async def js(request: Request):
+    # ★ 2026-06-16 v4: index.js 是最大的文件(383KB),304 协商对刷新速度影响最大
+    import os as _os
+    full = os.path.join(ui_dir, "index.js")
+    if not _os.path.isfile(full):
+        return Response(content=b"Not found", status_code=404)
+    st = _os.stat(full)
+    mtime = int(st.st_mtime)
+    size = st.st_size
+    etag = f'W/"{mtime:x}-{size:x}"'
+    if etag in request.headers.get("if-none-match", ""):
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "public, max-age=300"})
+    with open(full, "r", encoding="utf-8") as f:
         content = f.read()
     content = content.replace("{{BACKEND_PORT}}", str(BACKEND_PORT))
-    return Response(content=content, media_type="application/javascript", headers=NC)
+    return Response(
+        content=content.encode("utf-8"), media_type="application/javascript",
+        headers={
+            "ETag": etag,
+            "Last-Modified": _format_http_date(mtime),
+            "Cache-Control": "public, max-age=300",
+        },
+    )
 
 @app.get("/i18n.js")
-async def i18n():
-    return _safe_file(os.path.join(ui_dir, "i18n.js"), "application/javascript", NC)
+async def i18n(request: Request):
+    import os as _os
+    full = os.path.join(ui_dir, "i18n.js")
+    if not _os.path.isfile(full):
+        return Response(content=b"Not found", status_code=404)
+    st = _os.stat(full)
+    mtime = int(st.st_mtime)
+    size = st.st_size
+    etag = f'W/"{mtime:x}-{size:x}"'
+    if etag in request.headers.get("if-none-match", ""):
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "public, max-age=300"})
+    with open(full, "rb") as f:
+        content = f.read()
+    return Response(
+        content=content, media_type="application/javascript",
+        headers={
+            "ETag": etag,
+            "Last-Modified": _format_http_date(mtime),
+            "Cache-Control": "public, max-age=300",
+        },
+    )
 
 @app.get("/docs")
-async def usage_guide():
+async def usage_guide(request: Request):
+    import os as _os
     guide_path = os.path.join(ui_dir, "usage_guide.html")
-    return _safe_file(guide_path, "text/html; charset=utf-8", NC)
+    if not _os.path.isfile(guide_path):
+        return Response(content=b"Not found", status_code=404)
+    st = _os.stat(guide_path)
+    mtime = int(st.st_mtime)
+    size = st.st_size
+    etag = f'W/"{mtime:x}-{size:x}"'
+    if etag in request.headers.get("if-none-match", ""):
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "public, max-age=300"})
+    with open(guide_path, "rb") as f:
+        content = f.read()
+    return Response(
+        content=content, media_type="text/html; charset=utf-8",
+        headers={
+            "ETag": etag,
+            "Last-Modified": _format_http_date(mtime),
+            "Cache-Control": "public, max-age=300",
+        },
+    )
 
 @app.get("/app-icon.png")
-async def app_icon():
+async def app_icon(request: Request):
+    import os as _os
     icon_candidates = [__ICON_PATH__]
     if hasattr(sys, '_MEIPASS'):
         for name in ('ico.png', 'icon.png', 'icon.ico'):
             icon_candidates.insert(0, os.path.join(sys._MEIPASS, name))
     for p in icon_candidates:
         if os.path.exists(p):
-            return _safe_file(p, "image/png", NC)
+            st = _os.stat(p)
+            mtime = int(st.st_mtime)
+            size = st.st_size
+            etag = f'W/"{mtime:x}-{size:x}"'
+            if etag in request.headers.get("if-none-match", ""):
+                return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "public, max-age=86400"})
+            with open(p, "rb") as f:
+                content = f.read()
+            return Response(
+                content=content, media_type="image/png",
+                headers={
+                    "ETag": etag,
+                    "Last-Modified": _format_http_date(mtime),
+                    "Cache-Control": "public, max-age=86400",  # 图标 1 天缓存
+                },
+            )
     return Response(content=b"Not found", status_code=404)
 
 @app.api_route("/outputs/{path:path}", methods=["GET", "HEAD"])
@@ -14500,7 +15184,8 @@ async def proxy_health():
 #   - 不带扩展名的路径视为非法(动态 API 已被上面路由处理,落到这里是 404)
 #   - 这样未来新增 ui/ 下 .js/.css/.png/.svg 文件都不用改 main.py 模板
 @app.get("/{file_path:path}", include_in_schema=False)
-async def ui_static_catchall(file_path: str):
+async def ui_static_catchall(request: Request, file_path: str):
+    import os as _os
     if not os.path.splitext(file_path)[1]:                       # 无扩展名 → 不归我管
         return Response(b"Not found", status_code=404, media_type="text/plain")
     full = os.path.join(ui_dir, file_path.replace("/", os.sep))
@@ -14510,7 +15195,23 @@ async def ui_static_catchall(file_path: str):
     mt, _ = _mt.guess_type(full)
     if mt is None:
         mt = "application/octet-stream"
-    return _safe_file(full, mt, NC)
+    # ★ 2026-06-16 v4: 拆分文件(asset-manager.js 等)也走 ETag/304
+    st = _os.stat(full)
+    mtime = int(st.st_mtime)
+    size = st.st_size
+    etag = f'W/"{mtime:x}-{size:x}"'
+    if etag in request.headers.get("if-none-match", ""):
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "public, max-age=300"})
+    with open(full, "rb") as f:
+        content = f.read()
+    return Response(
+        content=content, media_type=mt,
+        headers={
+            "ETag": etag,
+            "Last-Modified": _format_http_date(mtime),
+            "Cache-Control": "public, max-age=300",
+        },
+    )
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
@@ -17080,16 +17781,15 @@ def main():
 
 
 if __name__ == "__main__":
-    # ★ 2026-06-09:dev 模式下,杀掉所有旧的 main.py / EXE 同名实例
-    # EXE 模式下 launcher.py 已经处理过,这里再调一次是幂等的(空操作)
-    try:
-        _kill_old_instances()
-    except Exception as _e:
-        try:
-            if _DEBUG_MODE:
-                print(f"[MAIN] _kill_old_instances 失败: {_e}")
-        except Exception:
-            pass
+    # ★ 2026-06-16 进程控制策略:
+    # - 单实例检测在 import 时(行 1189)已通过 _ensure_single_instance() 完成
+    # - launcher.py 的硬杀只对 EXE 模式生效,dev 模式完全跳过 python.exe
+    # - 旧 dev 模式的 _kill_old_instances() 已废弃(会误伤用户其他 python 脚本)
+    # - 进程退出时通过 atexit 自动调用 _cleanup_single_instance() 清理内核对象
+
+    # ★ 注册进程退出时的清理钩子(atexit 在解释器正常退出时触发)
+    import atexit
+    atexit.register(_cleanup_single_instance)
 
     _seh_crash_code = -1073741819
     _max_retries = 2

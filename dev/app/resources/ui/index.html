@@ -3,9 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0D0D0D">
     <title>LTX-2 | Multi-GPU Cinematic Studio</title>
+    <!-- ★ 2026-06-16 v5 提速: 内联脱遮罩脚本 — 跟 HTML 一起 parse,DOM 一出来就执行
+         比外链 JS index.js(363KB) 早几十毫秒,实现"瞬间显示"
+         读 localStorage('__yunji_user_lc') 有没有,没有就走原本的"等 JS 跑完才出"
+         (F5 不清 localStorage,只在用户主动登出时清,所以命中率高) -->
+    <script>
+    (function() {
+        try {
+            var c = localStorage.getItem('__yunji_user_lc');
+            if (c) {
+                // 不解析内容,只验证一下 base64 头 5 个字符是不是 { , 防止脏数据导致脱了又跳
+                if (c.indexOf('ey') === 0) {
+                    document.documentElement.classList.add('yunji-logged-in');
+                }
+            }
+        } catch (e) {}
+    })();
+    </script>
+    <style>
+        /* 当 <html> 有 yunji-logged-in 类时,立即把遮罩藏起来 — CSS 比 JS 更快生效 */
+        html.yunji-logged-in #yunji-login-veil { display: none !important; }
+    </style>
+    <!-- ★ 2026-06-16 v4 提速: 预连接到 CDN(留作 fallback),但主资源已本地化 -->
+    <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
     <link rel="stylesheet" href="index.css?v=fix-replay-progress">
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/plyr/3.7.8/plyr.css" media="print" onload="this.media='all'" />
+    <!-- ★ 2026-06-16 v4 提速: Plyr 改本地(原 cdnjs 32KB+113KB,外网抖动会拖慢首屏)
+         原 media="print" hack 已废弃:某些浏览器按 print 渲染触发 FOUC
+         现在走标准 <link> + 同源 304 缓存(见 _ui_server.py 的 ETag 协商) -->
+    <link rel="stylesheet" href="plyr.css?v=3.7.8">
     <!-- ★ 2026-06-09: 登录门控遮罩(收敛:splash 风格大LOGO 100px + 下方一个细环转圈替代进度条) -->
     <style>
         #yunji-login-veil {
@@ -99,6 +126,52 @@
         }
 
         #yunji-login-veil.hide { opacity: 0; pointer-events: none; }
+
+        /* ★ 2026-06-16: 登录超时回退面板 */
+        #yunji-login-veil .veil-fallback {
+            margin-top: 22px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 14px;
+            max-width: 360px;
+        }
+        #yunji-login-veil .veil-fallback-msg {
+            color: #c8a070;
+            font-size: 14px;
+            line-height: 1.5;
+            text-align: center;
+        }
+        #yunji-login-veil .veil-fallback-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        #yunji-login-veil .veil-fallback-btn {
+            background: rgba(255, 255, 255, 0.06);
+            color: #e6e6e6;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 6px;
+            padding: 9px 18px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background .15s, border-color .15s;
+            font-family: inherit;
+        }
+        #yunji-login-veil .veil-fallback-btn:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+        #yunji-login-veil .veil-fallback-primary {
+            background: rgba(200, 160, 112, 0.18);
+            border-color: rgba(200, 160, 112, 0.5);
+            color: #f3d9ad;
+        }
+        #yunji-login-veil .veil-fallback-primary:hover {
+            background: rgba(200, 160, 112, 0.32);
+            border-color: rgba(200, 160, 112, 0.8);
+        }
     </style>
 </head>
 <body>
@@ -129,6 +202,14 @@
             </g>
         </svg>
         <div class="veil-sub">正在准备登录环境…</div>
+        <!-- ★ 2026-06-16: 登录检测超时回退 (checkIsLogin 5s 无响应时显示) -->
+        <div id="yunji-veil-fallback" class="veil-fallback" style="display:none">
+            <div class="veil-fallback-msg">登录服务连接超时,可能是网络问题</div>
+            <div class="veil-fallback-row">
+                <button type="button" class="veil-fallback-btn veil-fallback-primary" id="yunji-veil-skip">跳过登录 · 进入本地模式</button>
+                <button type="button" class="veil-fallback-btn" id="yunji-veil-retry">重试登录</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -173,7 +254,7 @@
         
         <div class="top-status" style="margin-bottom: 20px;">
             <div style="display: flex; align-items: center; gap: 8px;">
-                <span id="sys-status" style="font-weight:bold; color: var(--text-dim); font-size: 12px;" data-i18n="sysScanning">正在扫描 GPU...</span>
+                <span id="sys-status" style="font-weight:bold; color: var(--text-dim); font-size: 12px; min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" data-i18n="sysScanning">正在扫描 GPU...</span>
                 <div class="vram-bar" style="width: 120px; min-width: 120px; margin-top: 0;"><div class="vram-used" id="vram-fill"></div></div>
                 <span id="vram-text" style="font-variant-numeric: tabular-nums; flex-shrink: 0; font-size: 11px; color: var(--text-dim);">0/32 GB</span>
                 <span id="gpu-name" style="display: none;"></span>
@@ -268,7 +349,9 @@
                 <div style="font-size:12px; font-weight:800; color:var(--text-main);" data-i18n="queueTitle">任务队列</div>
                 <div id="queue-summary" style="font-size:10px; color:var(--text-dim);" data-i18n="queueIdle">空闲</div>
             </div>
-            <div id="queue-list" style="display:flex; flex-direction:column; gap:6px;"></div>
+            <div id="queue-list" style="display:flex; flex-direction:column; gap:6px;">
+                <div style="font-size:11px;color:var(--text-dim);padding:6px 0;">等待后端连接...</div>
+            </div>
         </div>
     </div>
 
@@ -1098,9 +1181,14 @@
                 <button type="button" onclick="loadCurrentPreviewParams()" style="background:var(--accent);border:1px solid var(--accent);color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;font-weight:600;" data-i18n="previewLoadParams">载入参数</button>
             </div>
             <div id="loading-txt" data-i18n="waitingTask">等待分配渲染任务...</div>
-            <img id="res-img" src="">
+            <!-- ★ 2026-06-16 v3 修复: 不要加 loading="lazy"
+                 res-img 默认是 display:none,lazy 加载判定为"不在视口",永远不会触发 load,
+                 → img.onload 永不执行 → display 永远不切到 block → 大图永远不显示
+                 这里用户点了才加载,本身就是"按需",不需要 lazy
+                 decoding="async" 保留:不阻塞 UI 线程解码 -->
+            <img id="res-img" src="" decoding="async" alt="">
             <div id="video-wrapper" style="width:100%; height:100%; display:none; max-height:100%; align-items:center; justify-content:center;">
-                <video id="res-video" controls autoplay loop playsinline preload="auto"></video>
+                <video id="res-video" controls autoplay loop playsinline preload="none"></video>
             </div>
             <div id="audio-wrapper">
                 <div class="audio-preview-art" id="audio-preview-art" role="button" tabindex="0">
@@ -1136,7 +1224,7 @@
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
                     </button>
                 </div>
-                <button type="button" onclick="fetchHistory(currentHistoryPage)" style="background: var(--accent); border: 1px solid var(--accent); border-radius: 6px; color: #fff; font-size: 11px; padding: 4px 10px; cursor: pointer; font-weight: 600;" data-i18n="refresh">刷新</button>
+                <button type="button" onclick="resetHistoryAndReload()" style="background: var(--accent); border: 1px solid var(--accent); border-radius: 6px; color: #fff; font-size: 11px; padding: 4px 10px; cursor: pointer; font-weight: 600;" data-i18n="refresh">刷新</button>
             </div>
         </div>
         
@@ -1150,12 +1238,16 @@
         <div id="pagination-bar" style="display:none;"></div>
     </section>
 </main>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/plyr/3.7.8/plyr.min.js" async></script>
-    <script src="i18n.js?v=en-tabs-1"></script>
+<!-- ★ 2026-06-16 v4: Plyr 改本地(同源 304 缓存) + defer 加载 -->
+<script src="plyr.min.js?v=3.7.8" defer></script>
+    <!-- ★ 2026-06-16 v2 提速: 加 defer,让 i18n.js / index.js 不阻塞首屏 HTML 解析
+         (defer + body 底部 = 等价于 DOMContentLoaded 前执行,但不会卡住 HTML 流式解析)
+         i18n.js 必须在 index.js 之前完成(后者要用 window.i18n) -->
+    <script src="i18n.js?v=en-tabs-1" defer></script>
     <script>
     window.__jsDiag = { errors: [], milestones: [] };
     window.addEventListener('error', function(e) {
-        window.__jsDiag.errors.push({ msg: e.message, file: e.filename, line: e.lineno, col: e.colno });
+        window.__jsDiag.errors.push({ msg: e.message, file: e.filename, line: e.lineno, col: e.lineno });
         console.error('[DIAG] JS Error:', e.message, e.filename, e.lineno);
     });
     window.addEventListener('unhandledrejection', function(e) {
@@ -1163,10 +1255,15 @@
         console.error('[DIAG] Unhandled Rejection:', e.reason);
     });
     </script>
-    <script src="index.js?v=progress-ui-v5"></script>
+    <!-- ★ 2026-06-16 v3 修复: 版本号 v5→v6,强制浏览器重新加载 index.js
+         (旧版本因为哨兵在 wrapper 外面 + 每次翻页都清 cache buster,导致图片一直加载不完) -->
+    <script src="index.js?v=progress-ui-v6" defer></script>
     <script>
-    (function() {
+    // ★ 2026-06-16 v2 提速: index.js 加了 defer,这个内联脚本必须等 DOMContentLoaded
+    //                  (defer 脚本在 DOMContentLoaded 前按顺序执行完),否则检测不到 window.switchMode 等
+    function _diagRunAfterIndex() {
         var d = window.__jsDiag;
+        if (!d) return;
         d.milestones.push('post-indexjs');
         var fns = ['switchMode','loadModelCheckpoints','loadModelRegistry','run','clearGpu','scanLoras','loadLoraDir','listGpus','switchLibTab','checkStatus'];
         var missing = fns.filter(function(n) { return typeof window[n] !== 'function'; });
@@ -1190,7 +1287,13 @@
                 try { window.loadModelRegistry(); } catch(e) { console.error('[DIAG] loadModelRegistry fallback failed:', e); }
             }
         }
-    })();
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _diagRunAfterIndex);
+    } else {
+        // defer 脚本的微任务在 readyState=interactive 之前完成,直接跑即可
+        _diagRunAfterIndex();
+    }
     </script>
 
 </body>

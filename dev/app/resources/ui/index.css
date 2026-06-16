@@ -525,6 +525,36 @@
         #pagination-bar {
             display: none;
         }
+        /* ★ 2026-06-16 v2: 触底加载哨兵 + 末页提示
+           - hs-loading: 转圈 + "加载中..."
+           - hs-end: 静态文字 "已加载全部"
+           - 默认(hs-done): 仅占位 1px,触发 IntersectionObserver 后由 JS 切换 */
+        #history-sentinel {
+            grid-column: 1 / -1;     /* 跨整行(grid 模式) */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            min-height: 28px;
+            padding: 10px 0 4px 0;
+            color: var(--text-dim);
+            font-size: 11px;
+            user-select: none;
+        }
+        #history-sentinel .hs-spinner {
+            display: none;
+            width: 12px; height: 12px;
+            border: 2px solid rgba(255,255,255,0.15);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: hs-spin 0.8s linear infinite;
+        }
+        #history-sentinel.hs-loading .hs-spinner { display: inline-block; }
+        #history-sentinel.hs-done .hs-text,
+        #history-sentinel.hs-done .hs-spinner { display: none; }
+        #history-sentinel.hs-end { opacity: 0.55; }
+        #history-sentinel:not(.hs-loading):not(.hs-end) { min-height: 4px; padding: 0; }
+        @keyframes hs-spin { to { transform: rotate(360deg); } }
 
         .history-card {
             width: 100%; max-width: 240px;
@@ -1238,7 +1268,8 @@
         .indicator-offline { background: #636366 !important; box-shadow: none !important; animation: none !important; transition: all 0.3s; }
 
         
-        .top-status { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-dim); margin-bottom: 8px; align-items: center; }
+        .top-status { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-dim); margin-bottom: 8px; align-items: center; min-width: 0; }
+        .top-status > div { min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px; }
         .checkbox-container { display: flex; align-items: center; gap: 8px; cursor: pointer; background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid var(--border-2); }
         .checkbox-container input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; margin: 0; }
         .checkbox-container label { margin-bottom: 0; cursor: pointer; text-transform: none; color: var(--text); }

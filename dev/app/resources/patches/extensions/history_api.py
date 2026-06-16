@@ -12,12 +12,59 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from extensions._context import ExtensionContext
+
+
+# ★ 2026-06-16 v3: 服务端文件列表缓存(纯 stat,不含 replay 内容)
+#   理由: 翻页时同一个目录被扫 N 次,纯 stat 也得 50-100ms(目录里有几百个文件)
+#   做法: 缓存 (dir_mtime, dir_size) → meta_list,目录变更自动失效
+#   缓存时间: 5 分钟(用户可能删除/新增文件,太久不刷新会错过)
+_HISTORY_META_CACHE: dict = {
+    "dir_mtime": 0.0,
+    "dir_size": 0,
+    "meta": None,
+    "cached_at": 0.0,
+}
+_HISTORY_META_TTL = 300.0  # 5 分钟
+_HISTORY_PERSIST_FILE = "_history_meta_cache.json"  # 进程重启后命中
+
+
+def _load_persistent_cache(output_path: Path):
+    """从 _history_meta_cache.json 加载历史列表,冷启动也能秒开。"""
+    try:
+        cache_file = output_path.parent / _HISTORY_PERSIST_FILE
+        if not cache_file.is_file():
+            return None
+        import json as _json
+        data = _json.loads(cache_file.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return None
+        return data
+    except Exception:
+        return None
+
+
+def _save_persistent_cache(output_path: Path):
+    """持久化缓存到磁盘,下次冷启动直接读。"""
+    try:
+        if _HISTORY_META_CACHE["meta"] is None:
+            return
+        import json as _json
+        cache_file = output_path.parent / _HISTORY_PERSIST_FILE
+        payload = {
+            "dir_mtime": _HISTORY_META_CACHE["dir_mtime"],
+            "dir_size": _HISTORY_META_CACHE["dir_size"],
+            "meta": _HISTORY_META_CACHE["meta"],
+        }
+        cache_file.write_text(_json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def install(app: FastAPI, ctx: ExtensionContext) -> None:
@@ -212,22 +259,66 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
         try:
             page = max(1, int(request.query_params.get("page", 1)))
             limit = max(1, min(int(request.query_params.get("limit", 20)), 500))
-            history = []
             dyn_path = ctx.get_output_path()
-            if dyn_path.exists():
-                for entry in os.scandir(dyn_path):
-                    filename = entry.name
-                    if filename == "uploads":
-                        continue
-                    full_path = Path(entry.path)
-                    lower_name = filename.lower()
-                    if lower_name.startswith("_") or lower_name.startswith("tmp"):
-                        continue
-                    if lower_name.endswith(".replay.json"):
-                        continue
-                    if entry.is_file() and lower_name.endswith(
-                        (".mp4", ".png", ".jpg", ".jpeg", ".webp", ".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac")
-                    ):
+            if not dyn_path.exists():
+                return {
+                    "status": "success", "history": [],
+                    "total_pages": 0, "current_page": page, "total_items": 0,
+                }
+            # ★ 2026-06-16 v3 优化 1/3: 三级缓存(内存 + 磁盘 + 目录 stat)
+            #   L1 内存:进程内命中,5分钟内翻页零延迟
+            #   L2 磁盘:进程重启后,从 _history_meta_cache.json 命中(用户开新会话秒开)
+            #   L3 目录:不命中才扫,扫完自动写回 L2
+            #   失效条件:目录 mtime/size 变化 OR 缓存超过 5min OR delete-file
+            try:
+                dir_st = dyn_path.stat()
+                dir_mtime = dir_st.st_mtime
+                dir_size = dir_st.st_size
+            except OSError:
+                dir_mtime = 0.0
+                dir_size = 0
+            # L1: 内存缓存
+            l1_hit = (
+                _HISTORY_META_CACHE["meta"] is not None
+                and _HISTORY_META_CACHE["dir_mtime"] == dir_mtime
+                and _HISTORY_META_CACHE["dir_size"] == dir_size
+                and (time.time() - _HISTORY_META_CACHE["cached_at"]) < _HISTORY_META_TTL
+            )
+            if l1_hit:
+                meta = _HISTORY_META_CACHE["meta"]
+            else:
+                # L2: 磁盘缓存(冷启动加速)
+                l2_data = _load_persistent_cache(dyn_path)
+                if (
+                    l2_data is not None
+                    and l2_data.get("dir_mtime") == dir_mtime
+                    and l2_data.get("dir_size") == dir_size
+                    and isinstance(l2_data.get("meta"), list)
+                ):
+                    meta = l2_data["meta"]
+                    # 同步到 L1
+                    _HISTORY_META_CACHE["dir_mtime"] = dir_mtime
+                    _HISTORY_META_CACHE["dir_size"] = dir_size
+                    _HISTORY_META_CACHE["meta"] = meta
+                    _HISTORY_META_CACHE["cached_at"] = time.time()
+                else:
+                    # L3: 真实扫描(只有这条路径会触盘 stat)
+                    meta = []
+                    for entry in os.scandir(dyn_path):
+                        filename = entry.name
+                        if filename == "uploads" or filename == _HISTORY_PERSIST_FILE:
+                            continue
+                        lower_name = filename.lower()
+                        if lower_name.startswith("_") or lower_name.startswith("tmp"):
+                            continue
+                        if lower_name.endswith(".replay.json"):
+                            continue
+                        if not entry.is_file():
+                            continue
+                        if not lower_name.endswith(
+                            (".mp4", ".png", ".jpg", ".jpeg", ".webp", ".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac")
+                        ):
+                            continue
                         try:
                             st = entry.stat()
                             size = st.st_size
@@ -244,23 +335,88 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
                             item_type = "audio"
                         else:
                             item_type = "image"
-                        replay = _read_replay_sidecar(full_path)
-                        gen_info = _extract_gen_info(replay, item_type)
-                        history.append({
+                        full_path = Path(entry.path)
+                        meta.append({
                             "filename": filename, "type": item_type, "mtime": mtime,
                             "size": size, "fullpath": str(full_path),
-                            "replay": replay, "replay_available": replay is not None,
-                            "gen_info": gen_info,
                         })
-            history.sort(key=lambda x: x["mtime"], reverse=True)
-            total_items = len(history)
-            total_pages = (total_items + limit - 1) // limit
+                    # 按 mtime 倒序
+                    meta.sort(key=lambda x: x["mtime"], reverse=True)
+                    # 写 L1 + L2
+                    _HISTORY_META_CACHE["dir_mtime"] = dir_mtime
+                    _HISTORY_META_CACHE["dir_size"] = dir_size
+                    _HISTORY_META_CACHE["meta"] = meta
+                    _HISTORY_META_CACHE["cached_at"] = time.time()
+                    _save_persistent_cache(dyn_path)
+            total_items = len(meta)
+            total_pages = (total_items + limit - 1) // limit if total_items > 0 else 0
             start_idx = (page - 1) * limit
             end_idx = start_idx + limit
+            page_meta = meta[start_idx:end_idx]
+            # ★ 只为切片里的 N 个项目读 replay + 抽 gen_info
+            history = []
+            for item in page_meta:
+                full_path = Path(item["fullpath"])
+                replay = _read_replay_sidecar(full_path)
+                gen_info = _extract_gen_info(replay, item["type"])
+                history.append({
+                    "filename": item["filename"], "type": item["type"], "mtime": item["mtime"],
+                    "size": item["size"], "fullpath": item["fullpath"],
+                    "replay": replay, "replay_available": replay is not None,
+                    "gen_info": gen_info,
+                })
+
+            # ★ 2026-06-16 v4 提速: ETag + Last-Modified 协商
+            #   ETag 基于 (dir_mtime, dir_size, total_items, page, limit) 算
+            #   目录没变(没有新增/删除) + 翻页参数一致 → 浏览器拿到 304,0 字节响应
+            #   用户感受: F5 刷新历史列表从 1-2 秒变成 < 50ms(网络)
+            #   关键: 不影响生成后的"新增文件" — 一旦 dir_mtime 变化,ETag 立刻变 → 200 响应
+            import hashlib as _hashlib
+            etag_src = f"{dir_mtime:.3f}|{dir_size}|{total_items}|{page}|{limit}"
+            etag = 'W/"' + _hashlib.md5(etag_src.encode("utf-8")).hexdigest()[:16] + '"'
+            try:
+                from datetime import datetime as _dt, timezone as _tz
+                last_modified = _dt.fromtimestamp(dir_mtime, tz=_tz.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
+            except Exception:
+                last_modified = ""
+            if_none_match = request.headers.get("if-none-match", "")
+            if_modified_since = request.headers.get("if-modified-since", "")
+            if (if_none_match and etag in if_none_match) or \
+               (if_modified_since and last_modified and if_modified_since == last_modified):
+                # 客户端缓存仍然新鲜 → 304 + ETag/Last-Modified,响应体为空
+                from fastapi import Response as _Response
+                return _Response(
+                    status_code=304,
+                    headers={"ETag": etag, "Last-Modified": last_modified,
+                             "Cache-Control": "no-cache, must-revalidate"},
+                )
+
             return {
-                "status": "success", "history": history[start_idx:end_idx],
+                "status": "success", "history": history,
                 "total_pages": total_pages, "current_page": page, "total_items": total_items,
             }
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    @app.post("/api/system/delete-file")
+    async def route_delete_file(request: Request):
+        try:
+            data = await request.json()
+            filename = data.get("filename", "")
+            if not filename:
+                return JSONResponse(status_code=400, content={"error": "Filename is required"})
+            dyn_path = ctx.get_output_path()
+            file_path = dyn_path / filename
+            if file_path.exists() and file_path.is_file():
+                file_path.unlink()
+                replay_path = file_path.with_suffix(file_path.suffix + ".replay.json")
+                if replay_path.exists() and replay_path.is_file():
+                    replay_path.unlink()
+                # ★ 2026-06-16 v3: 删除文件后清掉元信息缓存,下次请求立即重新扫描
+                _HISTORY_META_CACHE["cached_at"] = 0.0
+                return {"status": "success", "message": "File deleted"}
+            else:
+                return JSONResponse(status_code=404, content={"error": "File not found"})
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -282,25 +438,5 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
             if not replay:
                 return {"status": "missing", "replay": None}
             return {"status": "success", "replay": replay}
-        except Exception as e:
-            return JSONResponse(status_code=500, content={"error": str(e)})
-
-    @app.post("/api/system/delete-file")
-    async def route_delete_file(request: Request):
-        try:
-            data = await request.json()
-            filename = data.get("filename", "")
-            if not filename:
-                return JSONResponse(status_code=400, content={"error": "Filename is required"})
-            dyn_path = ctx.get_output_path()
-            file_path = dyn_path / filename
-            if file_path.exists() and file_path.is_file():
-                file_path.unlink()
-                replay_path = file_path.with_suffix(file_path.suffix + ".replay.json")
-                if replay_path.exists() and replay_path.is_file():
-                    replay_path.unlink()
-                return {"status": "success", "message": "File deleted"}
-            else:
-                return JSONResponse(status_code=404, content={"error": "File not found"})
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})
