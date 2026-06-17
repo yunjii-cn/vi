@@ -7,7 +7,7 @@ import uvicorn
 APP_NAME = '云集智能视频创意站'
 VERSION = '2026.06.14.1438'
 
-_ui_log_path = 'E:\\软件开发\\云集智能视频创意站\\dev\\temp\\logs\\ui_server_20260617_024731.log'
+_ui_log_path = 'E:\\软件开发\\云集智能视频创意站\\dev\\temp\\logs\\ui_server_20260617_103212.log'
 os.makedirs(os.path.dirname(_ui_log_path), exist_ok=True)
 
 def _ui_log(msg):
