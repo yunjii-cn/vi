@@ -1166,6 +1166,7 @@ function addLoraSelection(containerId) {
     function _isImageModel(m) {
         const n = (m.name || '').toLowerCase();
         const dp = (m.dir_path || m.relative_path || '').toLowerCase();
+        const cat = (m.model_category || '').toLowerCase();
         // 2026-06-10 修复: 严格排除所有 lora(包括从 local_dirs 扫到的 model_type='lora' 和 registry 的 model_category='lora')
         if (m.model_category === 'lora' || m.model_type === 'lora') return false;
         if (m.model_category === 'image-lora' || m.model_category === 'video-lora') return false;
@@ -1173,7 +1174,8 @@ function addLoraSelection(containerId) {
         // lora 文件名中即使没有 'lora' 字样也走 lora 路径(防误判 zit-/zib- 前缀的 lora)
         if (m.model_category === 'upscaler' || m.model_type === 'upscaler') return false;
         // 2026-06-10 修复: 优先以 model_category / tags / variant / pipeline_mode 字段判断
-        if (m.model_category === 'image' || m.model_category === 'image-checkpoint') return true;
+        // 2026-07-03 修复: 兼容启动器里的中文分类「图像模型」
+        if (cat === 'image' || cat === 'image-checkpoint' || cat === '图像模型') return true;
         if (m.tags && Array.isArray(m.tags) && m.tags.includes('image-gen')) return true;
         if (m.variant === 'image-gen' || m.variant === 'image') return true;
         if (m.pipeline_mode === 'image-gen' || m.pipeline_mode === 'image') return true;
@@ -1206,7 +1208,13 @@ async function loadImgModelList() {
             const d = await r.json();
             const allModels = _collectLocalModelsFromRegistry(d);
             const imageModels = allModels.filter(_isImageModel);
-            select.innerHTML = '<option value="">' + (_t('imgModelDefault') || '默认 Z-Image-Turbo') + '</option>';
+            // 2026-07-03: 默认选项根据实际模型情况显示,不再写死 Z-Image-Turbo
+            select.innerHTML = '';
+            if (imageModels.length === 0) {
+                select.innerHTML = '<option value="">' + (_t('imgModelNoModels') || '未找到本地图像模型') + '</option>';
+            } else {
+                select.innerHTML = '<option value="">' + (_t('imgModelDefault') || '请选择图像模型') + '</option>';
+            }
             imageModels.forEach(m => {
                 const opt = document.createElement('option');
                 opt.value = m.path;
@@ -1217,7 +1225,7 @@ async function loadImgModelList() {
                 select.value = currentVal;
             }
         } catch (_) {}
-    
+
     }
     window.loadImgModelList = loadImgModelList;
 

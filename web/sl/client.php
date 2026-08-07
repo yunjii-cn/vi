@@ -207,7 +207,7 @@ if ($userinfo && isset($userinfo['token'])) {
             </script>
         <?php else: ?>
             <!-- 未登录 - 显示二维码 -->
-            <img src="/image/ico.png" alt="云集" class="login-logo">
+            <img src="../image/ico.png" alt="云集" class="login-logo">
             <div class="login-title">微信扫码登录</div>
             <div class="login-subtitle">打开微信扫一扫，快速登录</div>
             <div class="qrcode-wrap">

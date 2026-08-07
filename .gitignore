@@ -211,6 +211,9 @@ stable_*.py
 # ── .trae/ 规则 ──
 .trae/
 
+# ── WorkBuddy Agent 内部文件（不提交）──
+.workbuddy/
+
 # ── 根目录临时文件 ──
 /*.txt
 /*.py

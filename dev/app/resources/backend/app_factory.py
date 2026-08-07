@@ -42,6 +42,8 @@ def create_app(
     title: str = "LTX-2 Video Generation Server",
     auth_token: str = "",
     admin_token: str = "",
+    output_dir_override: str | Path | None = None,
+    allowed_file_roots: list[str | Path] | None = None,
 ) -> FastAPI:
     """Create a configured FastAPI app bound to the provided handler."""
     init_state_service(handler)
@@ -108,7 +110,10 @@ def create_app(
     app.add_exception_handler(HTTPError, _route_http_error_handler)
     app.add_exception_handler(Exception, _route_generic_error_handler)
 
-    output_dir = Path(__file__).parent.parent / "outputs"
+    # ★ 2026-07-26 fix: 使用调用方传入的输出目录(与运行时保持一致)
+    #    回退到相对于代码目录的路径(兼容旧行为)
+    output_dir = Path(output_dir_override) if output_dir_override else (Path(__file__).parent.parent / "outputs")
+    output_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/outputs", StaticFiles(directory=str(output_dir)), name="outputs")
 
     app.include_router(health_router)
@@ -121,5 +126,13 @@ def create_app(
     app.include_router(ic_lora_router)
     app.include_router(runtime_policy_router)
     app.include_router(system_router)
+
+    # ★ 配置路径遍历防护: 设置允许提供文件的根目录列表
+    if allowed_file_roots:
+        from _routes.system import configure_file_roots
+        configure_file_roots(allowed_file_roots)
+    elif output_dir_override:
+        from _routes.system import configure_file_roots
+        configure_file_roots([str(output_dir)])
 
     return app

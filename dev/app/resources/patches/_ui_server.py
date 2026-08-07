@@ -3,11 +3,145 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response, StreamingResponse
 from fastapi.middleware.gzip import GZipMiddleware
 import uvicorn
+import asyncio
+import socket
+
+def _get_lan_ip():
+    try:
+        _s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            _s.connect(("8.8.8.8", 80))
+            return _s.getsockname()[0]
+        finally:
+            _s.close()
+    except Exception:
+        return "127.0.0.1"
+
+def _local_host():
+    # 本机服务访问 host: 环回被拦截时回退 LAN IP(uvicorn 绑 0.0.0.0)
+    _cached = getattr(_local_host, "_cache", None)
+    if _cached is not None:
+        return _cached
+    for _h in ("127.0.0.1", "::1"):
+        try:
+            _c = socket.create_connection((_h, 1), timeout=0.4)
+            _c.close()
+            _local_host._cache = _h
+            return _h
+        except ConnectionRefusedError:
+            _local_host._cache = _h
+            return _h
+        except (TimeoutError, OSError):
+            continue
+    _ip = _get_lan_ip()
+    _local_host._cache = _ip
+    return _ip
+
+import socket as _sock
+import threading as _threading
+_orig_socketpair = _sock.socketpair
+def _sp_lan_ip():
+    try:
+        _s = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+        try:
+            _s.connect(("8.8.8.8", 80))
+            return _s.getsockname()[0]
+        finally:
+            _s.close()
+    except Exception:
+        return "127.0.0.1"
+def _try_tcp_pair(host, timeout=1.5):
+    _ls = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+    try:
+        _ls.bind((host, 0)); _ls.listen(1); _addr = _ls.getsockname()
+        _cs = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+        _err = [None]; _done = _threading.Event()
+        def _connect():
+            try:
+                _cs.connect(_addr)
+            except Exception as _e:
+                _err[0] = _e
+            finally:
+                _done.set()
+        _t = _threading.Thread(target=_connect, daemon=True); _t.start()
+        _ls.settimeout(timeout)
+        try:
+            _ss, _ = _ls.accept()
+        except OSError:
+            return None
+        _done.wait(timeout)
+        _ls.close()
+        if _err[0] is not None:
+            return None
+        _ss.setblocking(False); _cs.setblocking(False)
+        return (_cs, _ss)
+    except Exception:
+        return None
+    finally:
+        try:
+            _ls.close()
+        except Exception:
+            pass
+def _try_udp_pair(host):
+    _a = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+    _b = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+    try:
+        _a.bind((host, 0)); _b.bind((host, 0))
+        _a.connect(_b.getsockname()); _b.connect(_a.getsockname())
+        _a.settimeout(2.0); _b.settimeout(2.0)
+        _a.send(bytes([0])); _got = _b.recv(1)
+        if _got != bytes([0]):
+            return None
+        _a.setblocking(False); _b.setblocking(False)
+        return (_a, _b)
+    except Exception:
+        for _s in (_a, _b):
+            try:
+                _s.close()
+            except Exception:
+                pass
+        return None
+def _robust_self_pair():
+    # TCP 先试(若代理被关掉则秒过), 再退回 UDP 环回(不经 TCP 代理)
+    for _host in ("127.0.0.1", _sp_lan_ip()):
+        if not _host:
+            continue
+        _p = _try_tcp_pair(_host)
+        if _p:
+            return _p
+        _p = _try_udp_pair(_host)
+        if _p:
+            return _p
+    raise RuntimeError("all self-pair strategies failed (TCP+UDP loopback/LAN blocked)")
+def _patched_socketpair(family=_sock.AF_INET, type=_sock.SOCK_STREAM, proto=0):
+    if type != _sock.SOCK_STREAM:
+        return _orig_socketpair(family, type, proto)
+    try:
+        return _robust_self_pair()
+    except Exception as _e:
+        raise RuntimeError(
+            "socketpair fallback failed: %r - TCP+UDP loopback/LAN connect blocked "
+            "by proxy/VPN/AV. Add 127.0.0.1, ::1 and the LAN IP to the proxy/VPN "
+            "bypass list, or exit the filtering software." % (_e,)
+        )
+_sock.socketpair = _patched_socketpair
+try:
+    import asyncio.windows_utils as _wutils
+    _wutils.socketpair = _patched_socketpair
+except Exception:
+    pass
+if sys.platform == "win32":
+    def _selector_loop_factory(self):
+        return asyncio.SelectorEventLoop
+    uvicorn.Config.get_loop_factory = _selector_loop_factory
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    print("[LAUNCHER] patched socket.socketpair -> TCP+UDP self-pair; forcing SelectorEventLoop", flush=True)
+
 
 APP_NAME = '云集智能视频创意站'
-VERSION = '2026.06.14.1438'
+VERSION = '2026.06.17.1106'
 
-_ui_log_path = 'E:\\软件开发\\云集智能视频创意站\\dev\\temp\\logs\\ui_server_20260617_103212.log'
+_ui_log_path = 'E:\\软件开发\\云集智能视频创意站\\dev\\temp\\logs\\ui_server_20260804_062827.log'
 os.makedirs(os.path.dirname(_ui_log_path), exist_ok=True)
 
 def _ui_log(msg):
@@ -55,8 +189,11 @@ def _format_http_date(ts: int) -> str:
 def _check_conditional(request_headers, etag: str, mtime: int) -> bool:
     '''检查客户端条件请求,返回 True 表示应该 304。'''
     if_none_match = request_headers.get("if-none-match")
-    if if_none_match and etag in if_none_match:
-        return True
+    if if_none_match:
+        tags = [t.strip().strip('"').strip("'") for t in if_none_match.split(",")]
+        clean_etag = etag.strip('"').strip("'").strip()
+        if clean_etag in tags or etag in if_none_match.split(","):
+            return True
     if_modified_since = request_headers.get("if-modified-since")
     if if_modified_since and not if_none_match:
         try:
@@ -97,7 +234,7 @@ def _get_http_client(timeout: float) -> _httpx_global.AsyncClient:
 ui_dir = 'E:\\软件开发\\云集智能视频创意站\\dev\\app\\resources\\ui'
 BACKEND_PORT = 6000
 FRONTEND_PORT = 7000
-BACKEND_BASE = f"http://127.0.0.1:{BACKEND_PORT}"
+BACKEND_BASE = f"http://{_local_host()}:{BACKEND_PORT}"
 outputs_dir = 'E:\\软件开发\\云集智能视频创意站\\dev\\data\\outputs'
 app = FastAPI()
 # ★ 2026-06-17 提速 v2: GZip 中间件 — text/js/css/json 走压缩
@@ -125,9 +262,11 @@ async def index(request: Request):
     mtime = int(st.st_mtime)
     size = st.st_size
     etag = f'W/"{mtime:x}-{size:x}"'
-    # 304 协商
+    # 304 协商(精确比较 ETag,避免子串误匹配)
     if_none_match = request.headers.get("if-none-match", "")
-    if etag in if_none_match:
+    _if_none_tags = [t.strip().strip('"').strip("'") for t in if_none_match.split(",")]
+    _etag_clean = etag.strip('"').strip("'").strip()
+    if _etag_clean in _if_none_tags:
         # 文件没变,返回 304 + ETag,响应体为空
         return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-cache, must-revalidate"})
     with open(html_path, "r", encoding="utf-8") as f:

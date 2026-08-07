@@ -388,6 +388,7 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
             snapshot_download(
                 repo_id=_ASR_REPO_ID,
                 local_dir=str(target),
+                local_dir_use_symlinks=False,
                 endpoint=_HF_MIRROR,
                 # base 模型约 150MB,int8 量化后 ~75MB,允许较长超时
             )

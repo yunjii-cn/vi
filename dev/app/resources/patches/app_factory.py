@@ -72,6 +72,15 @@ def create_app(
     title: str = "LTX-2 Video Generation Server",
     auth_token: str = "",
     admin_token: str = "",
+    # ★ 2026-08-03 修复: ltx2_server.py(upstream 同步后)现在会传入这两个参数,
+    #   但本文件(app_factory 的 YunJi 定制层)此前签名未同步,导致
+    #   `TypeError: create_app() got an unexpected keyword argument 'output_dir_override'`,
+    #   后端(及整个启动器)无法启动。
+    #   实际输出目录已由 extensions.output_config 通过 LTX_APP_DATA_DIR + custom_dir.txt
+    #   解析(与 ltx2_server 的 OUTPUTS_DIR 完全一致),allowed_file_roots 的穿越防护
+    #   也由该扩展自行处理,因此这里只接受并忽略,保持与上游调用方签名兼容。
+    output_dir_override: str | Path | None = None,
+    allowed_file_roots: list[str | Path] | None = None,
 ) -> FastAPI:
     init_state_service(handler)
 
@@ -190,6 +199,7 @@ def create_app(
     from extensions.community_models import install as install_community_models
     from extensions.upscale_api import install as install_upscale_api
 
+    install_request_model()
     install_windows_fixes(app, ctx)
     install_output_config(app, ctx)
     install_low_vram_hooks(app, ctx)

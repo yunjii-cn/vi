@@ -46,6 +46,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -2157,13 +2158,67 @@ def _get_effective_models_dirs() -> list[Path]:
     return out
 
 
-def _read_launcher_config() -> dict:
-    """读取 launcher_config.json,兼容 _ctx.config_dir 和 _ctx.config_dir/config/ 两种位置。
-    任何 IO 错误都返回空 dict,不抛错。"""
-    if _ctx is None:
-        return {}
+def _get_install_dir() -> Path | None:
+    """推断软件安装目录(包含 data/ 和 resources/ 的那个目录)。
+
+    2026-07-03: 安装版启动器把 launcher_config.json 放在安装目录的 data\config\ 下,
+    但后端 _ctx.config_dir 默认指向 %LOCALAPPDATA%\LTXDesktop,两者可能不一致。
+    这里通过 sys.executable 路径向上查找,尽量定位到真实安装目录。
+    """
     try:
-        for base in (_ctx.config_dir, _ctx.config_dir / "config"):
+        exe = Path(sys.executable).resolve()
+        # 典型路径: D:\...\云集智能视频创意站\.venv\Scripts\python.exe
+        # 向上查找,直到找到 resources/ 或 app/ 目录,或找到 launcher_config.json
+        cur = exe.parent
+        for _ in range(6):
+            if (cur / "resources").is_dir() or (cur / "app" / "resources").is_dir():
+                return cur
+            if (cur / "data" / "config" / "launcher_config.json").is_file():
+                return cur
+            cur = cur.parent
+    except Exception:
+        pass
+
+    # 后备: 环境变量或固定路径
+    env_install = os.environ.get("LTX_INSTALL_DIR")
+    if env_install:
+        p = Path(env_install)
+        if p.is_dir():
+            return p
+
+    for base in [
+        r"D:\Program Files (x86)\云集智能视频创意站",
+        r"C:\Program Files (x86)\云集智能视频创意站",
+        r"D:\云集智能视频创意站",
+        r"C:\云集智能视频创意站",
+        r"E:\云集智能视频创意站",
+    ]:
+        p = Path(base)
+        if (p / "data" / "config" / "launcher_config.json").is_file():
+            return p
+    return None
+
+
+def _read_launcher_config() -> dict:
+    """读取 launcher_config.json,兼容多种位置。
+
+    2026-07-03: 安装版启动器把配置写在安装目录 data\config\launcher_config.json,
+    但后端 _ctx.config_dir 默认在 %LOCALAPPDATA%\LTXDesktop,优先从安装目录读取,
+    确保和启动器看到的是同一份配置。
+    任何 IO 错误都返回空 dict,不抛错。
+    """
+    candidates = []
+    if _ctx is not None:
+        candidates.extend([_ctx.config_dir, _ctx.config_dir / "config"])
+    install_dir = _get_install_dir()
+    if install_dir is not None:
+        candidates.extend([
+            install_dir / "data" / "config",
+            install_dir / "config",
+            install_dir,
+        ])
+    try:
+        for base in candidates:
             cfg_path = base / "launcher_config.json"
             if cfg_path.is_file():
                 with open(cfg_path, "r", encoding="utf-8") as f:
@@ -2339,22 +2394,17 @@ def _load_custom_dirs() -> list[Path]:
     if _custom_models_dirs:
         return _custom_models_dirs
     dirs: list[Path] = []
+    try:
+        cfg = _read_launcher_config()
+        for d in cfg.get("model_dirs", []):
+            p = d.get("path", "").strip().strip('"').strip("'")
+            if p:
+                pp = Path(p).expanduser()
+                if pp.is_dir() and pp not in dirs:
+                    dirs.append(pp)
+    except Exception:
+        pass
     if _ctx is not None:
-        try:
-            for candidate in [_ctx.config_dir, _ctx.config_dir / "config"]:
-                launcher_config = candidate / "launcher_config.json"
-                if launcher_config.is_file():
-                    with open(launcher_config, "r", encoding="utf-8") as f:
-                        cfg = json.load(f)
-                    for d in cfg.get("model_dirs", []):
-                        p = d.get("path", "").strip().strip('"').strip("'")
-                        if p:
-                            pp = Path(p).expanduser()
-                            if pp.is_dir() and pp not in dirs:
-                                dirs.append(pp)
-                    break
-        except Exception:
-            pass
         try:
             f = _ctx.config_dir / _CUSTOM_DIRS_FILE
             if f.is_file():
@@ -2384,12 +2434,73 @@ def _save_custom_dirs() -> None:
 
 # ── 2026-06-10: 目录→分类手动映射 ──
 
+# ── 2026-07-03: 启动器里用户选择的分类是中文,但后端/前端统一用英文 category ──
+_CN_TO_EN_CATEGORY = {
+    "图像模型": "image",
+    "图像lora": "image-lora",
+    "图像loras": "image-lora",
+    "图像loRA": "image-lora",
+    "图像LoRA": "image-lora",
+    "视频模型": "video",
+    "视频lora": "video-lora",
+    "视频loras": "video-lora",
+    "视频loRA": "video-lora",
+    "视频LoRA": "video-lora",
+    "高清放大": "upscaler",
+    "控制模型": "controlnet",
+    "辅助模型": "supporting",
+}
+
+
+def _normalize_category(cat: str) -> str:
+    """把启动器/用户配置里的中文分类统一转成后端/前端识别的英文分类。"""
+    if not cat:
+        return cat
+    cat = cat.strip()
+    # 直接查表(优先精确匹配,保留大小写语义)
+    if cat in _CN_TO_EN_CATEGORY:
+        return _CN_TO_EN_CATEGORY[cat]
+    # 小写兜底
+    return _CN_TO_EN_CATEGORY.get(cat.lower(), cat)
+
+
 def _load_dir_category_map() -> dict[str, str]:
-    """加载目录→分类手动映射,优先用户自定义,回退到官方默认"""
+    """加载目录→分类手动映射,优先用户自定义,回退到官方默认。
+
+    2026-07-03: 额外从 launcher_config.json 的 model_dirs 读取用户选择的 category,
+    解决启动器里选了「图像模型」但后端社区模型扩展未同步到的问题。
+    2026-07-03-update: 把启动器里的中文分类(如「图像模型」)转成英文(如 image),
+    确保前端 _isImageModel 等过滤逻辑能直接命中。
+    2026-07-03-update2: 统一使用 _read_launcher_config,从安装目录 data\config 读取,
+    避免启动器和后端使用的配置目录不一致导致分类不生效。
+    """
     global _dir_category_map
     if _dir_category_map is not None:
         return _dir_category_map
     result = dict(_DEFAULT_DIR_CATEGORY_MAP)
+
+    # 1) 从启动器配置读取模型目录分类(最权威,用户显式选择)
+    try:
+        cfg = _read_launcher_config()
+        for d in cfg.get("model_dirs", []):
+            p = d.get("path", "").strip().strip('"').strip("'")
+            cat = _normalize_category(d.get("category", ""))
+            if not p or not cat:
+                continue
+            p_norm = p.lower().replace("\\", "/").rstrip("/")
+            # 完整路径作为 key,便于精确匹配(包括 basename 相同的情况)
+            result[p_norm] = cat
+            # 同时保留 basename 作为 key,兼容旧逻辑
+            basename = os.path.basename(p_norm)
+            if basename:
+                result[basename] = cat
+            # 也存储去掉盘符后的路径,增加匹配成功率
+            if len(p_norm) >= 2 and p_norm[1] == ":":
+                result[p_norm[2:].lstrip("/")] = cat
+    except Exception:
+        pass
+
+    # 2) 用户自定义映射文件覆盖
     if _ctx is not None:
         try:
             f = _ctx.config_dir / _DIR_CATEGORY_FILE
@@ -2398,7 +2509,7 @@ def _load_dir_category_map() -> dict[str, str]:
                 if isinstance(user_map, dict):
                     # 用户映射覆盖默认(大小写不敏感存储,统一小写key)
                     for k, v in user_map.items():
-                        result[k.lower()] = v
+                        result[k.lower()] = _normalize_category(v)
         except Exception:
             pass
     _dir_category_map = result
@@ -2425,17 +2536,39 @@ def _save_dir_category_map(user_map: dict[str, str]) -> bool:
 
 
 def _classify_dirpath_by_map(dirpath: str) -> str | None:
-    """根据手动映射判断目录分类,未匹配返回 None"""
+    """根据手动映射判断目录分类,未匹配返回 None。
+
+    2026-07-03: 增加完整路径(及逐级父目录)优先匹配,避免 basename 冲突
+    导致用户选择的分类不生效。
+    """
     p = (dirpath or "").lower().replace("\\", "/")
     cat_map = _load_dir_category_map()
-    # 提取路径各段(包括末段),优先匹配更长的路径段
+
+    # 1) 完整路径精确匹配
+    if p in cat_map:
+        return cat_map[p]
+
+    # 2) 逐级父目录匹配(优先更长/更具体的路径)
+    parts = [s for s in p.split("/") if s]
+    for i in range(len(parts), 0, -1):
+        sub = "/".join(parts[:i])
+        if sub in cat_map:
+            return cat_map[sub]
+        # 也尝试去掉盘符的版本
+        if len(sub) >= 2 and sub[1] == ":":
+            sub_no_drive = sub[2:].lstrip("/")
+            if sub_no_drive in cat_map:
+                return cat_map[sub_no_drive]
+
+    # 3) 从末段开始匹配(兼容旧逻辑)
     segments = [s for s in p.split("/") if s]
     segments.reverse()  # 从末段开始匹配(更深层目录优先)
     for seg in segments:
         seg_lower = seg.lower()
         if seg_lower in cat_map:
             return cat_map[seg_lower]
-    # 也检查完整路径中的关键词
+
+    # 4) 也检查完整路径中的关键词(最后兜底)
     for key in cat_map:
         if key in p:
             return cat_map[key]
@@ -2572,26 +2705,101 @@ def _download_model_worker(entry: ModelRegistryEntry, models_dir: Path, use_mirr
     global _download_status
     try:
         from huggingface_hub import hf_hub_download, snapshot_download
+        import threading as _thr
 
         _download_status = {"active": True, "model_id": entry.model_id, "progress": 0.0, "error": None}
         logger.info("Downloading model %s from %s (mirror=%s)", entry.model_id, entry.repo_id, use_mirror)
 
         target_path = models_dir / entry.filename
-        mirror_kwargs = {"endpoint": HF_MIRROR_ENDPOINT} if use_mirror else {}
-
-        if entry.is_folder:
-            snapshot_download(
-                repo_id=entry.repo_id,
-                local_dir=str(target_path),
-                **mirror_kwargs,
-            )
+        # 2026-07-12 修复(Bug1): 端点退避策略。
+        # 优先按 use_mirror 决定主端点;任一端点失败时自动退避到另一端点,
+        # 解决国内直连 huggingface.co 不可达、而默认又未勾镜像导致下载失败的问题。
+        _endpoints: list = []
+        if use_mirror:
+            _endpoints.append(HF_MIRROR_ENDPOINT)  # 主: 国内镜像
+            _endpoints.append(None)               # 退避: 默认(huggingface_hub 读 HF_ENDPOINT 环境变量)
         else:
-            hf_hub_download(
-                repo_id=entry.repo_id,
-                filename=entry.filename,
-                local_dir=str(models_dir),
-                **mirror_kwargs,
-            )
+            _endpoints.append(None)               # 主: 默认(尊重 HF_ENDPOINT)
+            _endpoints.append(HF_MIRROR_ENDPOINT) # 退避: 国内镜像
+        # 2026-07-28 修复: ModelRegistryEntry 是 frozen+slots dataclass,只有 size_gb 字段,
+        # 没有 size_bytes。原代码 entry.size_bytes 在 slots=True 下会抛 AttributeError,
+        # 被外层 except 吞掉导致每个模型下载都走错误分支、进度条永远不出来。
+        # 改为由 size_gb(GB) 推算字节数作为进度上界;size_gb 缺失时回退为 0(进度按已下载字节显示)。
+        expected_bytes = int(entry.size_gb * (1024 ** 3)) if entry.size_gb else 0
+
+        # 后台线程: 每隔 2 秒检查目标文件大小,推算下载进度
+        _progress_stop = threading.Event()
+
+        def _track_progress():
+            while not _progress_stop.is_set():
+                _progress_stop.wait(2)
+                if _progress_stop.is_set():
+                    break
+                downloaded = 0
+                try:
+                    if entry.is_folder and target_path.is_dir():
+                        for f in target_path.rglob("*"):
+                            if f.is_file():
+                                downloaded += f.stat().st_size
+                    elif target_path.is_file():
+                        downloaded = target_path.stat().st_size
+                    elif not entry.is_folder:
+                        # 有时 hf_hub_download 先写到临时文件
+                        temp_candidates = list(models_dir.glob(f"*.incomplete*")) + \
+                                           list(models_dir.glob(f".*{entry.filename}*")) + \
+                                           list(models_dir.glob(f"*.lock"))
+                        for tc in temp_candidates:
+                            downloaded = max(downloaded, tc.stat().st_size)
+                except OSError:
+                    continue
+                if expected_bytes > 0:
+                    pct = min(99.0, downloaded / expected_bytes * 100)
+                    _download_status["progress"] = round(pct, 1)
+                _download_status["downloaded_bytes"] = downloaded
+
+        tracker = _thr.Thread(target=_track_progress, daemon=True)
+        tracker.start()
+
+        # 2026-08-04 修复(Bug): Windows 上 snapshot_download 默认用符号链接指向 HF 缓存,
+        # 非开发者模式/无权限时链接失效,或缓存清理后模型"消失",表现为下载完却检测不到/不完整。
+        # 强制 local_dir_use_symlinks=False 落盘真实文件(与 main.py 直接下载路径保持一致)。
+        # gated 模型(LTX-2 / Z-Image 等)需 HF token,从环境变量读取(有则自动生效)。
+        _hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or None
+        _common = {"local_dir_use_symlinks": False, "token": _hf_token}
+        _last_err: Exception | None = None
+        for _ep in _endpoints:
+            try:
+                logger.info("Downloading model %s via endpoint=%s", entry.model_id, _ep or "<default/HF_ENDPOINT>")
+                if entry.is_folder:
+                    snapshot_download(
+                        repo_id=entry.repo_id,
+                        local_dir=str(target_path),
+                        **_common,
+                        **({"endpoint": _ep} if _ep else {}),
+                    )
+                else:
+                    hf_hub_download(
+                        repo_id=entry.repo_id,
+                        filename=entry.filename,
+                        local_dir=str(models_dir),
+                        **_common,
+                        **({"endpoint": _ep} if _ep else {}),
+                    )
+                _last_err = None
+                break
+            except Exception as _e:  # noqa: BLE001 - 退避重试,吞掉单次失败
+                _last_err = _e
+                logger.warning("Download endpoint %s failed: %s; trying next fallback", _ep, _e)
+                continue
+        if _last_err is not None:
+            # gated 模型常见 401/403: 给出明确指引,避免用户误以为网络/代码问题
+            _msg = str(_last_err)
+            if "401" in _msg or "403" in _msg:
+                _msg += " | gated 模型需设置环境变量 HF_TOKEN(HuggingFace 访问令牌)后重试"
+            raise RuntimeError(_msg)
+
+        _progress_stop.set()
+        tracker.join(timeout=3)
 
         _download_status = {
             "active": False,
@@ -2602,6 +2810,8 @@ def _download_model_worker(entry: ModelRegistryEntry, models_dir: Path, use_mirr
         logger.info("Model %s downloaded successfully", entry.model_id)
 
     except Exception as e:
+        if '_progress_stop' in dir():
+            _progress_stop.set()
         logger.exception("Model download failed: %s", entry.model_id)
         _download_status = {
             "active": False,
@@ -2658,6 +2868,37 @@ def _beautify_model_name(fn: str) -> str:
     n = Path(fn).stem
     n = n.replace("-", " ").replace("_", " ").strip()
     return n or fn
+
+
+# 2026-07-12 修复(Bug2): 通用目录(无手动分类、目录名无图像/视频关键词)下,
+# 按文件名关键词推断 checkpoint 是图像还是视频,避免自定义图片模型目录被误判为
+# checkpoint 而隐藏在图像模型下拉框之外。
+_INFER_IMAGE_TOKENS = (
+    "z-image", "zimage", "zit", "zib",
+    "sdxl", "sd_xl", "sd1", "sd15", "sd1.5", "sd2", "sd21", "sd2.1", "sd3", "sd35",
+    "stable-diffusion", "stable_diffusion", "flux", "flux1", "pony", "illustrious",
+    "animagine", "dreamshaper", "realistic", "epicrealism", "deliberate", "anything",
+    "counterfeit", "majicmix", "chilloutmix", "revanimated", "abyssorange", "pastel",
+    "moxin", "gufeng", "guofeng", "meina", "ghostmix", "perfectworld", "toony",
+    "juggernaut", "protogen", "dreamlike", "epicphotogasm", "chinese",
+)
+_INFER_VIDEO_TOKENS = (
+    "ltx", "lightricks", "wan", "hunyuan", "hunyuandiffusion", "cogvideox", "mochi",
+    "vchitect", "open-sora", "sora", "animatediff", "i2v", "t2v", "video",
+)
+
+
+def _infer_checkpoint_category_from_name(filename: str) -> str | None:
+    """按文件名关键词推断 checkpoint 类别;无法判断返回 None(保持原分类)。
+
+    仅用于目录级分类为通用 'checkpoint' 时的兜底,不覆盖显式分类与目录关键词分类。
+    """
+    n = (filename or "").lower()
+    if any(tok in n for tok in _INFER_VIDEO_TOKENS):
+        return "video"
+    if any(tok in n for tok in _INFER_IMAGE_TOKENS):
+        return "image"
+    return None
 
 
 def _classify_dirpath(dirpath: str, default_category: str = "checkpoint") -> str:
@@ -2739,7 +2980,7 @@ def _scan_dir_for_models(root: Path) -> list[dict[str, Any]]:
     try:
         for dirpath, _dirnames, filenames in os.walk(root):
             # 2026-06-10: 在循环外就计算目录分类(一次扫描,所有文件共享)
-            category = _classify_dirpath(dirpath, "checkpoint")
+            dir_category = _classify_dirpath(dirpath, "checkpoint")
             for fn in filenames:
                 suf = Path(fn).suffix.lower()
                 if suf in _MODEL_SCAN_SUFFIXES:
@@ -2763,7 +3004,14 @@ def _scan_dir_for_models(root: Path) -> list[dict[str, Any]]:
                             "size_bytes": size,
                             "model_type": model_type,
                             # 2026-06-10: 同步输出 model_category 与 model_type 镜像字段,便于前端与 registry 输出统一
-                            "model_category": _classify_lora_dirpath(dirpath) if is_lora else category,
+                            # 2026-07-12 修复(Bug2): 目录级为通用 checkpoint 时,按文件名兜底推断图像/视频
+                            "model_category": (
+                                _classify_lora_dirpath(dirpath)
+                                if is_lora
+                                else (_infer_checkpoint_category_from_name(fn) or dir_category)
+                                if dir_category == "checkpoint"
+                                else dir_category
+                            ),
                             "dir_path": str(Path(dirpath).resolve()),
                         }
                         if is_lora and suf == ".safetensors":
@@ -3004,9 +3252,11 @@ def install(app: FastAPI, ctx: ExtensionContext) -> None:
 
     @app.post("/api/models/registry/refresh-dirs")
     async def route_refresh_dirs():
-        global _custom_models_dirs
+        global _custom_models_dirs, _dir_category_map
         _custom_models_dirs = []
+        _dir_category_map = None  # 清除目录分类缓存,使新分类立即生效
         _load_custom_dirs()
+        invalidate_registry_cache()  # 清除 registry 扫描缓存
         return {"status": "ok"}
 
     @app.post("/api/models/registry/download")

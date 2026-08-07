@@ -204,6 +204,9 @@ class IcLoraHandler(StateHandlerBase):
         print(f"[ic-lora] Generation started (conditioning={req.conditioning_type}, video={video_path})", flush=True)
         logger.info("[ic-lora] Generation started (conditioning=%s)", req.conditioning_type)
 
+        # 预初始化finally需要的变量，防止异常发生在赋值前导致UnboundLocalError掩盖原始异常
+        control_video_path: str | None = None
+
         try:
             t_load_start = time.perf_counter()
             ic_state = self._pipelines.load_ic_lora(
@@ -331,7 +334,7 @@ class IcLoraHandler(StateHandlerBase):
                     try:
                         import cv2 as _cv2_cache
                         import numpy as _np_cache
-                        _cap_check = _cv2.VideoCapture(str(cached_file))
+                        _cap_check = _cv2_cache.VideoCapture(str(cached_file))
                         _ret, _frame_check = _cap_check.read()
                         _cap_check.release()
                         if _ret and _frame_check is not None and _np_cache.mean(_frame_check) < 30:
@@ -574,18 +577,14 @@ class IcLoraHandler(StateHandlerBase):
             raise HTTPError(500, f"Generation error: {exc}") from exc
         finally:
             self._text.clear_api_embeddings()
-            try:
-                if control_video_path and Path(control_video_path).exists():
-                    Path(control_video_path).unlink()
-            except OSError:
-                pass
-            try:
-                if _diag_original_path and Path(_diag_original_path).exists():
-                    Path(_diag_original_path).unlink()
-            except OSError:
-                pass
-            try:
-                if _diag_conditioning_path and Path(_diag_conditioning_path).exists():
-                    Path(_diag_conditioning_path).unlink()
-            except OSError:
-                pass
+            _cleanup_vars = {
+                'control_video_path': control_video_path,
+                '_diag_original_path': locals().get('_diag_original_path'),
+                '_diag_conditioning_path': locals().get('_diag_conditioning_path'),
+            }
+            for _name, _val in _cleanup_vars.items():
+                if _val and Path(_val).exists():
+                    try:
+                        Path(_val).unlink()
+                    except OSError:
+                        pass

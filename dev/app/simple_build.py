@@ -127,16 +127,29 @@ def main():
         shutil.copytree(str(internal_src), str(internal_dst))
         print("    ✓ _internal")
     
-    # 复制 app 资源到 dev/app/resources
+    # ⚠️ 复制 app 资源到 dev/app/resources
+    # 注意：这会覆盖 dev/app/resources 目录的源代码！
+    # PyInstaller 构建产物中的 resources 应与源代码一致，
+    # 但建议使用 build-version.py 进行正式发布，本脚本仅用于快速调试。
     app_resources_src = release_dir / "app" / "resources"
     app_resources_dst = DEV_DIR / "app" / "resources"
-    
+
     if app_resources_dst.exists():
-        shutil.rmtree(str(app_resources_dst), ignore_errors=True)
-    
-    if app_resources_src.exists():
-        shutil.copytree(str(app_resources_src), str(app_resources_dst))
-        print("    ✓ app/resources")
+        print("    ⚠️ 警告: 即将覆盖 dev/app/resources 源代码！")
+        print("      建议使用 build-version.py 进行正式构建")
+        # 只复制不存在的或更新的文件，避免覆盖源码的修改
+        _copied, _skipped = 0, 0
+        for src_file in app_resources_src.rglob("*"):
+            if src_file.is_file():
+                rel = src_file.relative_to(app_resources_src)
+                dst_file = app_resources_dst / rel
+                if not dst_file.exists() or src_file.stat().st_mtime > dst_file.stat().st_mtime:
+                    dst_file.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(src_file), str(dst_file))
+                    _copied += 1
+                else:
+                    _skipped += 1
+        print(f"    ✓ app/resources: 复制 {_copied}, 跳过 {_skipped}")
     
     # 确保 data 和 temp 在 dev
     for dir_name in ("data", "temp"):

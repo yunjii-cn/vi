@@ -213,6 +213,7 @@ import time
 import re
 import webbrowser
 import threading
+import queue
 import shutil
 import urllib.request
 import zipfile
@@ -1103,24 +1104,27 @@ def _ensure_single_instance():
         old_path = _read_shared_path(my_ver)
         _RUNNING_INSTANCE_PATH = old_path
 
+        _shutdown_sent = False
         if old_path and os.path.normcase(old_path) == os.path.normcase(my_path):
-            # ━━━━━ 分支 1: 同版本 + 同路径 ━━━━━
+            # ━━━━━ 分支 1: 同版本 + 同路径 → 激活旧窗口或通知退出 ━━━━━
             activated = _activate_existing_window(my_ver)
             if activated:
                 sys.exit(0)
             # 激活失败(focus steal protection),兜底:通知旧实例退出 + 继续启动
             _signal_shutdown_to_existing()
             _wait_for_old_instances_to_exit(3000)
+            _shutdown_sent = True
         else:
-            # ━━━━━ 分支 2: 同版本 + 不同路径 ━━━━━
+            # ━━━━━ 分支 2: 同版本 + 不同路径 → 通知旧实例退出 ━━━━━
             _signal_shutdown_to_existing()
             _wait_for_old_instances_to_exit(3000)
+            _shutdown_sent = True
 
-        # ━━━━━ 分支 3(实际是分支 2 的延续): 跨版本 ━━━━━
-        # 跨版本检测:本版本 Mutex 持有者已退出,但其他版本 Mutex 仍可能存在
-        # 简化:直接对所有同前缀 EXE/dev 实例发 Shutdown + 等待
-        _signal_shutdown_to_existing()
-        _wait_for_old_instances_to_exit(3000)
+        # ━━━━━ 分支 3: 跨版本兜底 ━━━━━
+        # 只有在分支1/2未执行 shutdown 时才执行(避免重复等待造成启动延迟)
+        if not _shutdown_sent:
+            _signal_shutdown_to_existing()
+            _wait_for_old_instances_to_exit(3000)
 
         # 创建本版本 Mutex + 共享内存
         mutex = _KERNEL32.CreateMutexW(None, True, mutex_name)
@@ -1408,6 +1412,43 @@ def _red_check_checkbox_style():
         }}
     """
 
+def _get_lan_ip():
+    import socket as _s
+    try:
+        _sock = _s.socket(_s.AF_INET, _s.SOCK_DGRAM)
+        try:
+            _sock.connect(("8.8.8.8", 80))
+            return _sock.getsockname()[0]
+        finally:
+            _sock.close()
+    except Exception:
+        return "127.0.0.1"
+
+
+def _local_host():
+    # 返回本机服务访问用的 host。
+    # 部分机器(VPN/代理/带网络过滤的杀软)会拦截 TCP 环回(127.0.0.1 / ::1),
+    # 导致 socket.create_connection((_local_host(), port)) 超时、浏览器也打不开
+    # http://127.0.0.1:port。uvicorn 绑定 0.0.0.0(所有网卡), 故改用本机 LAN IP
+    # 仍可访问同一服务。探测环回是否可用, 可用则用 127.0.0.1, 否则回退 LAN IP。
+    _cached = getattr(_local_host, "_cache", None)
+    if _cached is not None:
+        return _cached
+    import socket as _s
+    for _h in ("127.0.0.1", "::1"):
+        try:
+            _c = _s.create_connection((_h, 1), timeout=0.4)
+            _c.close()
+            _local_host._cache = _h
+            return _h
+        except ConnectionRefusedError:
+            _local_host._cache = _h
+            return _h
+        except (TimeoutError, OSError):
+            continue
+    _ip = _get_lan_ip()
+    _local_host._cache = _ip
+    return _ip
 DEFAULT_BACKEND_PORT = 3000
 DEFAULT_FRONTEND_PORT = 4000
 
@@ -1415,7 +1456,7 @@ SERVICES = {
     "backend": {
         "name": "核心引擎",
         "port": DEFAULT_BACKEND_PORT,
-        "url": f"http://127.0.0.1:{DEFAULT_BACKEND_PORT}",
+        "url": f"http://{_local_host()}:{DEFAULT_BACKEND_PORT}",
         "icon": "⚙️",
         "color": "#43A047",          # ★ 2026-06-09: 与"打开工作台"互换(信息按钮用静默绿)
         "desc": "LTX-2.3 视频生成引擎",
@@ -1423,7 +1464,7 @@ SERVICES = {
     "frontend": {
         "name": "AI视频工作站",
         "port": DEFAULT_FRONTEND_PORT,
-        "url": f"http://127.0.0.1:{DEFAULT_FRONTEND_PORT}",
+        "url": f"http://{_local_host()}:{DEFAULT_FRONTEND_PORT}",
         "icon": "🖥️",
         "color": "#FF0000",          # ★ 2026-06-09: 与"引擎详情"互换(主操作按钮用品牌红)
         "desc": "AI视频创意工作站界面",
@@ -1526,6 +1567,8 @@ QMenu::separator {
 """
 
 
+
+
 class ServiceMonitor(QObject):
     status_changed = pyqtSignal(str, bool)
 
@@ -1565,7 +1608,7 @@ class ServiceMonitor(QObject):
 
     def _check_port(self, port):
         try:
-            conn = socket.create_connection(('127.0.0.1', port), timeout=1)
+            conn = socket.create_connection((_local_host(), port), timeout=1)
             conn.close()
             return True
         except Exception:
@@ -1654,7 +1697,7 @@ class _VirtualServiceProcess:
 
     def isRunning(self):
         try:
-            conn = socket.create_connection(('127.0.0.1', self._port), timeout=0.5)
+            conn = socket.create_connection((_local_host(), self._port), timeout=0.5)
             conn.close()
             return True
         except Exception:
@@ -1670,19 +1713,11 @@ class _VirtualServiceProcess:
             try:
                 import urllib.request
                 urllib.request.urlopen(
-                    f"http://127.0.0.1:{self._port}/api/system/shutdown",
+                    f"http://{_local_host()}:{self._port}/api/system/shutdown",
                     timeout=2
                 )
             except Exception:
                 pass
-        # taskkill 端口进程(无 /T,只杀主进程)
-        try:
-            hidden_run(
-                ['netstat', '-aon', '-p', 'TCP'],
-                capture_output=True, text=True, timeout=3
-            )
-        except Exception:
-            pass
         # 调用 _kill_specific_port 风格的逻辑
         try:
             from subprocess import run as _r
@@ -1949,7 +1984,7 @@ def main():
             try:
                 if mode == "file":
                     from huggingface_hub import hf_hub_download
-                    result = hf_hub_download(repo_id=repo, filename=filename, local_dir=local_dir)
+                    result = hf_hub_download(repo_id=repo, filename=filename, local_dir=local_dir, local_dir_use_symlinks=False)
                 else:
                     from huggingface_hub import snapshot_download
                     result = snapshot_download(repo_id=repo, local_dir=local_dir, local_dir_use_symlinks=False)
@@ -2111,7 +2146,7 @@ LTX_MODELS = {
         "recommended": True,
         "desc": "Z-Image-Turbo BF16 (图像生成基础模型，8步高质量生成)",
         "category": "图像模型",
-        "modelscope_id": "ByteDance/Z-Image-Turbo",
+        "modelscope_id": "Tongyi-MAI/Z-Image-Turbo",
     },
     "90sAnimationStyle": {
         "repo": "ByteDance/Z-Image-Loras",
@@ -3914,7 +3949,8 @@ class DeployWorker(QThread):
                 capture_output=True, text=True, timeout=10
             )
             return result.returncode == 0
-        except:
+        except Exception as e:
+            self.log.emit(f"  △ 检查 uv 版本异常: {e}", "warn")
             return False
 
     def _check_python_ok(self):
@@ -3927,7 +3963,8 @@ class DeployWorker(QThread):
                 capture_output=True, text=True, timeout=10
             )
             return result.returncode == 0 and "3." in result.stdout
-        except:
+        except Exception as e:
+            self.log.emit(f"  △ 检查 Python 可用异常: {e}", "warn")
             return False
 
     def _check_torch_ok(self):
@@ -3956,6 +3993,7 @@ class DeployWorker(QThread):
         key_deps = ["torch", "fastapi", "uvicorn", "safetensors", "diffusers", "transformers",
                      "accelerate", "PIL", "sentencepiece", "huggingface_hub",
                      "ltx_core", "ltx_pipelines"]
+        all_ok = True
         for dep in key_deps:
             try:
                 result = hidden_run(
@@ -3963,10 +4001,12 @@ class DeployWorker(QThread):
                     capture_output=True, text=True, timeout=5
                 )
                 if result.returncode != 0:
-                    return False
-            except:
-                return False
-        return True
+                    self.log.emit(f"  △ 核心依赖缺失: {dep}", "warn")
+                    all_ok = False
+            except Exception as e:
+                self.log.emit(f"  △ 检查依赖 {dep} 时异常: {e}", "warn")
+                all_ok = False
+        return all_ok
 
     def _check_extensions_ok(self):
         python_exe = self._venv_python
@@ -3981,7 +4021,8 @@ class DeployWorker(QThread):
                 )
                 if result.returncode != 0:
                     return False
-            except:
+            except Exception as e:
+                self.log.emit(f"  △ 检查扩展依赖异常: {e}", "warn")
                 return False
         return True
 
@@ -4734,6 +4775,40 @@ for d in deps:
         except:
             pass
 
+    def _install_ltx_packages_from_local(self, python_exe, patch_dir):
+        """从本地补丁目录复制 ltx_core / ltx_pipelines 到 venv。"""
+        if not patch_dir or not os.path.isdir(patch_dir):
+            return False
+
+        # 根据 python.exe 路径推断 venv 的 site-packages 路径
+        # python.exe 通常位于 venv/Scripts/python.exe，site-packages 在 venv/Lib/site-packages
+        site_packages = os.path.normpath(
+            os.path.join(os.path.dirname(python_exe), "..", "Lib", "site-packages")
+        )
+        if not os.path.isdir(site_packages):
+            return False
+
+        packages = ["ltx_core", "ltx_core-1.1.0.dist-info", "ltx_pipelines", "ltx_pipelines-1.1.0.dist-info"]
+        copied = 0
+        try:
+            for pkg in packages:
+                src = os.path.join(patch_dir, pkg)
+                dst = os.path.join(site_packages, pkg)
+                if not os.path.exists(src):
+                    continue
+                if os.path.exists(dst):
+                    self.log.emit(f"  ✓ {pkg} 已存在，跳过", "ok")
+                    continue
+                self.log.emit(f"  从本地补丁复制 {pkg}...", "info")
+                shutil.copytree(src, dst)
+                copied += 1
+            if copied > 0:
+                self.log.emit(f"  ✓ 已从本地补丁安装 {copied} 个 LTX 包", "ok")
+                return True
+        except Exception as e:
+            self.log.emit(f"  △ 本地补丁安装失败: {e}", "warn")
+        return False
+
     def _install_ltx_packages(self, python_exe, uv_exe, env):
         try:
             result = hidden_run(
@@ -4743,8 +4818,17 @@ for d in deps:
             if result.returncode == 0:
                 self.log.emit("  ✓ ltx_core 已安装", "ok")
                 return
-        except:
-            pass
+        except Exception as e:
+            self.log.emit(f"  △ 检查 ltx_core 异常: {e}", "warn")
+
+        # 优先从本地补丁包安装（无需网络，无需参考环境）
+        local_patch_dirs = [
+            os.path.join(self._data_dir, "ltx_patches", "site-packages"),
+            os.path.join(self.app_res, "ltx_patches", "site-packages"),
+        ]
+        for patch_dir in local_patch_dirs:
+            if self._install_ltx_packages_from_local(python_exe, patch_dir):
+                return
 
         self.log.emit("  安装 LTX 核心包 (ltx-core, ltx-pipelines)...", "info")
         ltx2_urls = self._resolved_mirrors.get("ltx2_urls", [])
@@ -4836,8 +4920,8 @@ for d in deps:
                 self.log.emit("  ✓ SageAttention 已安装", "ok")
                 self.env_update.emit("sageattention", "√ 已安装", "ok", False)
                 return
-        except:
-            pass
+        except Exception as e:
+            self.log.emit(f"  △ 检查 SageAttention 异常: {e}", "warn")
 
         self.log.emit("  安装 SageAttention (性能加速)...", "info")
 
@@ -5158,8 +5242,8 @@ for d in deps:
                 capture_output=True, text=True, timeout=10
             )
             has_hf_hub = result.returncode == 0
-        except:
-            pass
+        except Exception as e:
+            self.log.emit(f"  △ 检查 huggingface_hub 异常: {e}", "warn")
 
         if not has_hf_hub:
             self.log.emit("  安装 huggingface_hub...", "info")
@@ -6245,9 +6329,9 @@ class MainWindow(QMainWindow):
         self._backend_port = self.config.get("ports.backend", DEFAULT_BACKEND_PORT)
         self._frontend_port = self.config.get("ports.frontend", DEFAULT_FRONTEND_PORT)
         SERVICES["backend"]["port"] = self._backend_port
-        SERVICES["backend"]["url"] = f"http://127.0.0.1:{self._backend_port}"
+        SERVICES["backend"]["url"] = f"http://{_local_host()}:{self._backend_port}"
         SERVICES["frontend"]["port"] = self._frontend_port
-        SERVICES["frontend"]["url"] = f"http://127.0.0.1:{self._frontend_port}"
+        SERVICES["frontend"]["url"] = f"http://{_local_host()}:{self._frontend_port}"
 
         self.monitor = ServiceMonitor()
         self.monitor.status_changed.connect(self._on_status_changed)
@@ -7510,7 +7594,6 @@ class MainWindow(QMainWindow):
         """)
         self._model_table.horizontalHeader().setSectionsMovable(False)
         self._model_table.horizontalHeader().setStretchLastSection(False)
-        # 宽度策略: 全部Fixed,总宽=窗口宽。描述列占最大(42%),模型名称次之(22%),其余合理紧凑
         self._model_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self._model_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         self._model_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
@@ -7519,15 +7602,18 @@ class MainWindow(QMainWindow):
         self._model_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         self._model_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         self._model_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        # 合理宽度分配: 总宽1160px
-        self._model_table.setColumnWidth(0, 35)   # 复选框
-        self._model_table.setColumnWidth(1, 200)  # 模型名称
-        self._model_table.setColumnWidth(2, 450)  # 描述
-        self._model_table.setColumnWidth(3, 80)   # 分类
-        self._model_table.setColumnWidth(4, 45)   # 标签
-        self._model_table.setColumnWidth(5, 75)   # 大小
-        self._model_table.setColumnWidth(6, 70)   # 状态
-        self._model_table.setColumnWidth(7, 80)   # 操作
+        # 默认列宽（固定）：与原始样式完全一致，保证默认(非全屏)显示不变
+        self._model_table.setColumnWidth(0, 35)
+        self._model_table.setColumnWidth(1, 200)
+        self._model_table.setColumnWidth(2, 450)
+        self._model_table.setColumnWidth(3, 80)
+        self._model_table.setColumnWidth(4, 45)
+        self._model_table.setColumnWidth(5, 75)
+        self._model_table.setColumnWidth(6, 70)
+        self._model_table.setColumnWidth(7, 80)
+        # 默认最大宽度与原始一致（非全屏不超宽）；仅在窗口放大到全屏时，
+        # 由 _resize_model_table_columns / eventFilter 解除上限并按默认比例放大铺满全屏
+        self._model_table.setMaximumWidth(1054)
         self._model_table.verticalHeader().setVisible(False)
         self._model_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._model_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -7552,10 +7638,9 @@ class MainWindow(QMainWindow):
         self._model_table.setHorizontalHeaderItem(0, QTableWidgetItem(""))
         self._model_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
 
-        # 限制表格最大宽度,防止Stretch导致溢出(总宽800=描述列最大份额+其他列固定宽)
-        self._model_table.setMaximumWidth(1054)
-
         content_layout.addWidget(self._model_table, 1)
+        # 首屏布局完成后按比例重算列宽（此时表格才有真实宽度）
+        QTimer.singleShot(50, self._resize_model_table_columns)
 
         self._populate_model_table()
 
@@ -8083,7 +8168,7 @@ class MainWindow(QMainWindow):
         try:
             import httpx, json as _json
             with httpx.Client(timeout=httpx.Timeout(5.0)) as client:
-                resp = client.get(f"http://127.0.0.1:{self._backend_port}/api/models/registry")
+                resp = client.get(f"http://{_local_host()}:{self._backend_port}/api/models/registry")
                 if resp.status_code == 200:
                     data = resp.json()
                     for rm in data.get("models", []):
@@ -8091,18 +8176,14 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # 文件索引(用于检测文件是否存在)
-        file_index = {}
-        if self._models_dir and os.path.isdir(self._models_dir):
-            for dp, _dn, files in os.walk(self._models_dir):
-                for f in files:
-                    if f not in file_index:
-                        file_index[f] = os.path.join(dp, f)
+        # 文件索引(用于检测文件是否存在)：扫描主模型目录 + 所有自定义 model_dirs
+        index = self._build_model_file_index()
 
         # 处理 LTX_MODELS 硬编码基础模型
         for model_id, info in LTX_MODELS.items():
             fname = info.get("file", "")
-            if fname in seen_filenames:
+            norm = fname.lower().replace("-", "").replace("_", "")
+            if any(x.lower().replace("-", "").replace("_", "") == norm for x in seen_filenames):
                 continue
             seen_filenames.add(fname)
 
@@ -8152,11 +8233,8 @@ class MainWindow(QMainWindow):
             tag = "必需" if info.get("required") else "推荐" if info.get("recommended") else "可选"
             size_gb = info["size_bytes"] / 1024 / 1024 / 1024
 
-            model_path = os.path.join(self._models_dir, info["file"]) if self._models_dir else ""
-            exists = os.path.exists(model_path)
-            if not exists and fname in file_index:
-                model_path = file_index[fname]
-                exists = True
+            model_path, _found_complete = self._resolve_existing_model_path(info, index)
+            exists = model_path is not None
 
             expected_bytes = info["size_bytes"]
             if info.get("is_folder", False):
@@ -8229,12 +8307,9 @@ class MainWindow(QMainWindow):
             tag = "必需" if info.get("required") else "推荐" if info.get("recommended") else "可选"
             size_gb = info["size_bytes"] / 1024 / 1024 / 1024
 
-            # 先检查顶层，再查递归索引
-            model_path = os.path.join(self._models_dir, info["file"]) if self._models_dir else ""
-            exists = os.path.exists(model_path)
-            if not exists and fname in file_index:
-                model_path = file_index[fname]
-                exists = True
+            # 先检查顶层，再查递归索引（含自定义 model_dirs）
+            model_path, _found_complete = self._resolve_existing_model_path(info)
+            exists = model_path is not None
 
             expected_bytes = info["size_bytes"]
             if info.get("is_folder", False):
@@ -8411,6 +8486,55 @@ class MainWindow(QMainWindow):
             self._model_sort_asc = True
         self._apply_model_sort_and_render()
 
+    def _resize_model_table_columns(self):
+        """模型管理表格列宽策略（参考云集智能音乐创意台做法）：
+
+        - 默认(非全屏)：保持原始固定列宽不变，且限制最大宽度 1054 —— 与改动前完全一致。
+        - 仅当窗口放大到「全屏/最大化」时：解除最大宽度上限，按默认各列的原始比例(权重)
+          放大，使表格铺满全屏宽度，不再右侧留白。
+        """
+        if not hasattr(self, '_model_table'):
+            return
+        tbl = self._model_table
+        n = tbl.columnCount()
+        if n <= 0:
+            return
+        # 原始固定列宽（即默认比例权重）
+        # 顺序: 复选框 / 模型名称 / 描述 / 分类 / 标签 / 大小 / 状态 / 操作
+        weights = [35, 200, 450, 80, 45, 75, 70, 80]
+        default_total = float(sum(weights[:n]))
+
+        win = self.window()
+        maximized = bool(win is not None and (
+            win.windowState() & (Qt.WindowState.WindowMaximized | Qt.WindowState.WindowFullScreen)))
+
+        if maximized:
+            # 解除默认上限，允许铺满全屏
+            tbl.setMaximumWidth(16777215)
+            # 可用宽度 = 表格视口宽度（减去可见的纵向滚动条宽度）
+            avail = tbl.viewport().width() if tbl.viewport() else tbl.width()
+            vbar = tbl.verticalScrollBar()
+            if vbar is not None and vbar.isVisible():
+                avail -= vbar.width()
+            if avail <= default_total:
+                # 尚未超过默认总宽，先按默认固定宽度铺（避免过窄时放大反而错位）
+                for i in range(n):
+                    tbl.setColumnWidth(i, weights[i] if i < len(weights) else 80)
+                return
+            ratio = avail / default_total
+            widths = [max(20, int(w * ratio)) for w in weights[:n]]
+            for i in range(n):
+                tbl.setColumnWidth(i, widths[i])
+            # 把舍入/取整造成的剩余像素补到"描述"列(索引2)，避免右侧留白
+            used = sum(widths)
+            if used < avail and n > 2:
+                tbl.setColumnWidth(2, widths[2] + (avail - used))
+        else:
+            # 恢复默认固定列宽与上限，保证默认(非全屏)显示与原始完全一致
+            tbl.setMaximumWidth(1054)
+            for i in range(n):
+                tbl.setColumnWidth(i, weights[i] if i < len(weights) else 80)
+
     def _apply_model_sort_and_render(self):
         if self._model_sort_col >= 0 and hasattr(self, '_model_rows') and self._model_rows:
             col = self._model_sort_col
@@ -8496,14 +8620,8 @@ class MainWindow(QMainWindow):
         self._model_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         self._model_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         self._model_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        self._model_table.setColumnWidth(0, 35)
-        self._model_table.setColumnWidth(1, 200)
-        self._model_table.setColumnWidth(2, 450)
-        self._model_table.setColumnWidth(3, 80)
-        self._model_table.setColumnWidth(4, 45)
-        self._model_table.setColumnWidth(5, 75)
-        self._model_table.setColumnWidth(6, 70)
-        self._model_table.setColumnWidth(7, 80)
+        # 全屏自适应：按窗口宽度比例重算各列宽（与初始布局保持一致）
+        self._resize_model_table_columns()
 
         for row, r in enumerate(filtered_rows):
             self._model_table.insertRow(row)
@@ -8608,6 +8726,10 @@ class MainWindow(QMainWindow):
         for r in range(self._model_table.rowCount()):
             self._model_table.setRowHeight(r, 32)
 
+        # 建立 model_id -> 表格行号 映射：供下载进度/控制按行定位，
+        # 兼容筛选/搜索/分类导致的行序变化（参考云集智能音乐创意台按 model_name 路由进度条）
+        self._model_row_by_id = {r.get("model_id"): ridx for ridx, r in enumerate(filtered_rows)}
+
         # 必需/推荐模型行高亮背景
         required_bg = QColor(204, 0, 0, 25)
         recommended_bg = QColor(255, 152, 0, 20)
@@ -8656,7 +8778,10 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, event):
         if obj is getattr(self, '_model_table', None):
-            if event.type() == event.Type.Leave:
+            if event.type() == event.Type.Resize:
+                # 窗口缩放/最大化时按原比例重算列宽，使表格铺满宽度
+                self._resize_model_table_columns()
+            elif event.type() == event.Type.Leave:
                 if self._hover_row >= 0:
                     old = self._hover_row
                     self._hover_row = -1
@@ -9059,12 +9184,12 @@ class MainWindow(QMainWindow):
                 dir_name = os.path.basename(removed_path)
                 import urllib.request, json
                 port = getattr(self, '_backend_port', 3000)
-                url_get = f"http://127.0.0.1:{port}/api/models/dir-categories"
+                url_get = f"http://{_local_host()}:{port}/api/models/dir-categories"
                 req = urllib.request.Request(url_get)
                 with urllib.request.urlopen(req, timeout=3) as resp:
                     current = json.loads(resp.read().decode()).get("categories", {})
                 current.pop(dir_name, None)
-                url_post = f"http://127.0.0.1:{port}/api/models/dir-categories"
+                url_post = f"http://{_local_host()}:{port}/api/models/dir-categories"
                 req2 = urllib.request.Request(
                     url_post, data=json.dumps({"categories": current}).encode(),
                     headers={"Content-Type": "application/json"}, method="POST")
@@ -9270,14 +9395,14 @@ class MainWindow(QMainWindow):
             import urllib.request, json
             port = getattr(self, '_backend_port', 3000)
             # 先获取当前映射
-            url_get = f"http://127.0.0.1:{port}/api/models/dir-categories"
+            url_get = f"http://{_local_host()}:{port}/api/models/dir-categories"
             req = urllib.request.Request(url_get)
             with urllib.request.urlopen(req, timeout=3) as resp:
                 current = json.loads(resp.read().decode()).get("categories", {})
             # 追加新映射
             current[dir_name] = category
             # 保存
-            url_post = f"http://127.0.0.1:{port}/api/models/dir-categories"
+            url_post = f"http://{_local_host()}:{port}/api/models/dir-categories"
             req2 = urllib.request.Request(
                 url_post,
                 data=json.dumps({"categories": current}).encode(),
@@ -9303,7 +9428,7 @@ class MainWindow(QMainWindow):
         try:
             import httpx
             with httpx.Client(timeout=httpx.Timeout(5.0)) as client:
-                client.post(f"http://127.0.0.1:{self._backend_port}/api/models/registry/refresh-dirs")
+                client.post(f"http://{_local_host()}:{self._backend_port}/api/models/registry/refresh-dirs")
         except Exception:
             pass
 
@@ -9329,10 +9454,10 @@ class MainWindow(QMainWindow):
             import httpx
             with httpx.Client(timeout=httpx.Timeout(30.0)) as client:
                 try:
-                    client.post(f"http://127.0.0.1:{self._backend_port}/api/models/registry/refresh-dirs")
+                    client.post(f"http://{_local_host()}:{self._backend_port}/api/models/registry/refresh-dirs")
                 except Exception:
                     pass
-                resp = client.post(f"http://127.0.0.1:{self._backend_port}/api/models/registry/sync")
+                resp = client.post(f"http://{_local_host()}:{self._backend_port}/api/models/registry/sync")
                 data = resp.json()
             if data.get("success"):
                 added = data.get("added", 0)
@@ -11393,10 +11518,396 @@ class MainWindow(QMainWindow):
         dlg_layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignRight)
         dlg.exec()
 
-    def _download_model(self, model_id):
+# ─────────────────────────────────────────────────────────────────────────────
+# 模型下载内联脚本（自包含）：参照「云集智能音乐创意台」model_downloader 的做法，
+# 通过 huggingface_hub 的 progress_callback 输出 [DLPROGRESS]/[DLDESC]，
+# 并起一个磁盘监控线程输出 [DLPROGRESS]/[DLSIZE]，使进度条能真实爬升（而非卡 0%）。
+# 动态参数全部走 sys.argv，避免 f-string 大括号冲突。
+#   argv: repo, target_path, is_folder(1/0), models_dir, est_bytes, filename
+# ─────────────────────────────────────────────────────────────────────────────
+    MODEL_DL_INLINE_SCRIPT = r'''
+import sys, os, time, threading
+
+_repo = sys.argv[1]
+_target_path = sys.argv[2]
+_is_folder = sys.argv[3] == "1"
+_models_dir = sys.argv[4]
+_est_bytes = int(sys.argv[5]) if len(sys.argv) > 5 and sys.argv[5].strip() else 0
+_filename = sys.argv[6] if len(sys.argv) > 6 else ""
+
+_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or None
+_local_dir = _target_path if _is_folder else _models_dir
+
+print("[DLTARGET] " + _local_dir, flush=True)
+
+_endpoint = os.environ.get("HF_ENDPOINT") or "https://huggingface.co"
+_est_gb = (_est_bytes / 1024.0 / 1024.0 / 1024.0) if _est_bytes else 0.0
+print("[DLLOG] 镜像源: %s" % _endpoint, flush=True)
+print("[DLLOG] 准备下载 %s (%.1fGB)，正在获取仓库元数据..." % (_filename or _repo, _est_gb), flush=True)
+
+# ---- 字节加权进度回调(reporter) ----
+_file_sizes = {}
+_total_bytes = 0
+_completed = 0
+_cur_desc = None
+_cur_pct = 0.0
+_cur_size = 0
+_meta_ready = False
+
+def _fetch_meta():
+    global _total_bytes, _meta_ready, _file_sizes
+    try:
+        from huggingface_hub import HfApi
+        try:
+            info = HfApi().repo_info(_repo, files_metadata=True, timeout=8)
+        except TypeError:
+            info = HfApi().repo_info(_repo, files_metadata=True)
+        sibs = getattr(info, "siblings", []) or []
+        t = 0
+        for s in sibs:
+            sz = getattr(s, "size", None) or 0
+            nm = getattr(s, "rfilename", "") or ""
+            if sz and sz > 0 and nm:
+                _file_sizes[nm] = sz
+                t += sz
+        _total_bytes = t
+        _meta_ready = True
+    except Exception:
+        _meta_ready = False
+
+threading.Thread(target=_fetch_meta, daemon=True).start()
+
+def _match(desc):
+    if not desc or not _meta_ready:
+        return 0
+    if desc in _file_sizes:
+        return _file_sizes[desc]
+    for p in ("Downloading ", "Download ", "Fetching "):
+        if desc.startswith(p):
+            n = desc[len(p):].strip()
+            if n in _file_sizes:
+                return _file_sizes[n]
+    for n, s in _file_sizes.items():
+        if desc in n or n in desc:
+            return s
+    return 0
+
+def _short(desc):
+    if not desc:
+        return ""
+    n = desc
+    for p in ("Downloading ", "Download ", "Fetching "):
+        if n.startswith(p):
+            n = n[len(p):].strip()
+            break
+    return n.split("/")[-1]
+
+def reporter(*args, **kwargs):
+    global _completed, _cur_desc, _cur_pct, _cur_size
+    progress = None
+    desc = None
+    if args and hasattr(args[0], "progress"):
+        info = args[0]
+        try:
+            progress = float(getattr(info, "progress", 0) or 0)
+        except Exception:
+            progress = None
+        try:
+            desc = str(getattr(info, "desc", "") or "")
+        except Exception:
+            desc = ""
+    elif args and isinstance(args[0], (int, float)) and len(args) >= 2:
+        try:
+            _t = float(args[1]) if args[1] else 0.0
+            progress = (float(args[0]) / _t * 100.0) if _t > 0 else 0.0
+        except Exception:
+            progress = None
+    if desc and desc != _cur_desc:
+        if _cur_desc is not None:
+            _completed += _cur_size
+        _cur_desc = desc
+        _cur_pct = 0.0
+        _cur_size = _match(desc)
+    if progress is not None:
+        _cur_pct = max(0.0, min(100.0, progress))
+    if _meta_ready and _total_bytes > 0:
+        if _cur_size > 0:
+            cur = _completed + _cur_size * _cur_pct / 100.0
+        else:
+            fc = max(1, len(_file_sizes))
+            cur = _completed + (_total_bytes / fc) * _cur_pct / 100.0
+        overall = cur / _total_bytes * 100.0
+    else:
+        overall = 0.0
+    overall = max(0.0, min(99.0, overall))
+    print("[DLPROGRESS] %.1f" % overall, flush=True)
+    if _cur_desc is not None:
+        nm = _short(_cur_desc)
+        if nm:
+            print("[DLDESC] %s %.0f%%" % (nm, _cur_pct), flush=True)
+
+# ---- 磁盘兜底监控（同时扫本地目标目录 + HF 缓存目录，取和） ----
+_stop = threading.Event()
+
+def _dir_size(p):
+    try:
+        tot = 0
+        for dp, dn, fns in os.walk(p):
+            for fn in fns:
+                try:
+                    tot += os.path.getsize(os.path.join(dp, fn))
+                except OSError:
+                    pass
+        return tot
+    except Exception:
+        return 0
+
+_repo_cache_dir = os.path.join(
+    os.environ.get("HF_HOME") or os.path.join(os.path.expanduser("~"), ".cache", "huggingface"),
+    "hub", "models--" + _repo.replace("/", "--"))
+
+def _disk_mon():
+    # 卡死检测：仅看「本仓库缓存子目录」的真实字节增长（忽略其他模型静态文件）。
+    # 超过 60s 无任何字节增长 -> 视为镜像无响应/被墙，主动报错退出，避免无限卡 0%。
+    # 状态变量必须声明 global，否则函数内赋值会创建局部变量导致 UnboundLocalError。
+    global last_repo, last_progress_ts, started_logged
+    last_repo = -1
+    last_progress_ts = time.time()
+    started_logged = False
+    while not _stop.is_set():
+        cur = 0
+        repo_cur = 0
+        try:
+            cache_home = os.environ.get("HF_HOME") or os.path.join(os.path.expanduser("~"), ".cache", "huggingface")
+            cache_dir = os.path.join(cache_home, "hub")
+            cur = _dir_size(_local_dir) + _dir_size(cache_dir)
+            repo_cur = _dir_size(_repo_cache_dir)
+            if repo_cur != last_repo:
+                last_repo = repo_cur
+                last_progress_ts = time.time()
+                if not started_logged and repo_cur > 0:
+                    started_logged = True
+                    print("[DLLOG] ✅ 已开始接收数据 (目标 %.1fGB)" % _est_gb, flush=True)
+        except Exception:
+            pass
+        # 卡死检测放在 try 之外，确保不会被磁盘扫描异常吞掉
+        if time.time() - last_progress_ts > 60:
+            print("[DLLOG] ⚠️ 60 秒内未收到任何数据，连接可能已死（镜像无响应/被墙）", flush=True)
+            print("[DLERROR] NETWORK 下载长时间无进度：可能 hf-mirror 连接中断或被墙，请切换为 ModelScope 源或检查网络后重试", flush=True)
+            sys.stdout.flush()
+            _stop.set()
+            os._exit(2)
+        est = max(_est_bytes, _total_bytes) if max(_est_bytes, _total_bytes) > 0 else (cur if cur > 0 else 1)
+        pct = (cur / est * 100.0) if est > 0 else 0.0
+        pct = max(0.0, min(99.0, pct))
+        print("[DLPROGRESS] %.1f" % pct, flush=True)
+        print("[DLSIZE] %d %d" % (int(cur), int(est)), flush=True)
+        time.sleep(1.0)
+
+threading.Thread(target=_disk_mon, daemon=True).start()
+
+print("[DLLOG] 开始下载 %s (%.1fGB) ..." % (_filename or _repo, _est_gb), flush=True)
+
+try:
+    if _is_folder:
+        from huggingface_hub import snapshot_download
+        kwargs = dict(repo_id=_repo, local_dir=_local_dir, local_dir_use_symlinks=False)
+        if _token:
+            kwargs["token"] = _token
+        try:
+            import inspect
+            if "progress_callback" in inspect.signature(snapshot_download).parameters:
+                kwargs["progress_callback"] = reporter
+        except Exception:
+            pass
+        snapshot_download(**kwargs)
+    else:
+        from huggingface_hub import hf_hub_download
+        kwargs = dict(repo_id=_repo, filename=_filename, local_dir=_models_dir, local_dir_use_symlinks=False)
+        if _token:
+            kwargs["token"] = _token
+        try:
+            import inspect
+            if "progress_callback" in inspect.signature(hf_hub_download).parameters:
+                kwargs["progress_callback"] = reporter
+        except Exception:
+            pass
+        hf_hub_download(**kwargs)
+    _stop.set()
+    print("[DLPROGRESS] 100", flush=True)
+    sys.stderr.write("SCRIPT_DONE\n")
+except Exception as e:
+    _stop.set()
+    msg = str(e)
+    cat = "OTHER"
+    ml = msg.lower()
+    if "401" in msg or "403" in msg or "unauthorized" in ml or "gated" in ml or "repositorynotfound" in ml:
+        cat = "GATED"
+    elif "404" in msg or "not found" in ml or "entrynotfound" in ml:
+        cat = "NOTFOUND"
+    elif "connection" in ml or "timeout" in ml or "getaddrinfo" in ml or "name or service not known" in ml:
+        cat = "NETWORK"
+    sys.stderr.write("SCRIPT_ERROR:%s\n" % msg)
+    # 结构化错误标签: 让启动器给出可操作的提示(参考音乐创意站的清晰报错)
+    print("[DLERROR] %s %s" % (cat, msg[:400]), flush=True)
+'''
+
+    # ModelScope 下载脚本（国内源、免 token）。复用与 HF 脚本相同的结构化进度协议
+    # [DLTARGET]/[DLPROGRESS]/[DLSIZE]/[DLDESC]/[DLERROR]，reader 线程逻辑保持一致。
+    # 单文件模型：整体 snapshot 到临时目录后按文件名（忽略大小写/连字符）匹配并落盘到 target_path，
+    # 以兼容 ModelScope 仓库内实际文件名与注册表 file 字段不一致的情况。
+    MODEL_DL_MS_SCRIPT = r'''
+import os, sys, time, threading, shutil
+
+_repo = sys.argv[1]
+_target_path = sys.argv[2]
+_is_folder = sys.argv[3] == "1"
+_models_dir = sys.argv[4]
+_est_bytes = int(sys.argv[5]) if len(sys.argv) > 5 and sys.argv[5].strip() else 0
+_filename = sys.argv[6] if len(sys.argv) > 6 else ""
+
+print("[DLTARGET] " + _target_path, flush=True)
+
+_est_gb = (_est_bytes / 1024.0 / 1024.0 / 1024.0) if _est_bytes else 0.0
+print("[DLLOG] 镜像源: ModelScope (国内)", flush=True)
+print("[DLLOG] 准备下载 %s (%.1fGB)，正在获取仓库元数据..." % (_filename or _repo, _est_gb), flush=True)
+
+def _dir_size(p):
+    try:
+        tot = 0
+        for dp, dn, fns in os.walk(p):
+            for fn in fns:
+                try:
+                    tot += os.path.getsize(os.path.join(dp, fn))
+                except OSError:
+                    pass
+        return tot
+    except Exception:
+        return 0
+
+_stop = threading.Event()
+
+def _ms_cache_dirs():
+    """ModelScope 缓存仓库专属子目录（blob 下载期间在此增长，而非 stage）。"""
+    dirs = []
+    ms_cache = (os.environ.get("MODELSCOPE_CACHE")
+                or os.environ.get("MODELSCOPE_CACHE_HOME")
+                or os.path.join(os.path.expanduser("~"), ".cache", "modelscope"))
+    safe = "models--" + _repo.replace("/", "--")
+    dirs.append(os.path.join(ms_cache, "hub", safe))
+    parts = _repo.split("/")
+    if len(parts) == 2:
+        dirs.append(os.path.join(ms_cache, parts[0], parts[1]))
+    return dirs
+
+def _disk_mon(monitor_dirs):
+    # 卡死检测：监控目录真实字节 90s 无增长 -> 视为连接死，主动报错退出
+    global last_total, last_progress_ts, started_logged
+    last_total = -1
+    last_progress_ts = time.time()
+    started_logged = False
+    while not _stop.is_set():
+        cur = 0
+        try:
+            for d in monitor_dirs:
+                if os.path.isfile(d):
+                    try:
+                        cur += os.path.getsize(d)
+                    except OSError:
+                        pass
+                elif os.path.isdir(d):
+                    cur += _dir_size(d)
+            if cur != last_total:
+                last_total = cur
+                last_progress_ts = time.time()
+                if not started_logged and cur > 0:
+                    started_logged = True
+                    print("[DLLOG] ✅ 已开始接收数据 (目标 %.1fGB)" % _est_gb, flush=True)
+        except Exception:
+            pass
+        if time.time() - last_progress_ts > 90:
+            print("[DLLOG] ⚠️ 90 秒内未收到任何数据，连接可能已死", flush=True)
+            print("[DLERROR] NETWORK 下载长时间无进度：ModelScope 连接中断，请检查网络或切换为 HF 源后重试", flush=True)
+            sys.stdout.flush()
+            _stop.set()
+            os._exit(2)
+        est = max(_est_bytes, 1)
+        pct = max(0.0, min(99.0, cur / est * 100.0)) if est > 0 else 0.0
+        print("[DLPROGRESS] %.1f" % pct, flush=True)
+        print("[DLSIZE] %d %d" % (int(cur), int(est)), flush=True)
+        time.sleep(1.0)
+
+print("[DLLOG] 开始下载 %s (%.1fGB) ..." % (_filename or _repo, _est_gb), flush=True)
+
+try:
+    from modelscope.hub.snapshot_download import snapshot_download
+    if _is_folder:
+        os.makedirs(_target_path, exist_ok=True)
+        mon = threading.Thread(target=_disk_mon, args=([_target_path] + _ms_cache_dirs(),), daemon=True)
+        mon.start()
+        snapshot_download(repo_id=_repo, local_dir=_target_path)
+        _stop.set()
+        print("[DLPROGRESS] 100", flush=True)
+        sys.stderr.write("SCRIPT_DONE\n")
+    else:
+        stage = os.path.join(_models_dir, ".ms_stage_" + os.path.basename(_target_path))
+        if os.path.exists(stage):
+            shutil.rmtree(stage, ignore_errors=True)
+        os.makedirs(stage, exist_ok=True)
+        mon = threading.Thread(target=_disk_mon, args=([stage] + _ms_cache_dirs(),), daemon=True)
+        mon.start()
+        snapshot_download(repo_id=_repo, local_dir=stage)
+        key = os.path.splitext(_filename)[0].lower().replace("-", "_").replace(" ", "")
+        candidates = []
+        for dp, dn, fns in os.walk(stage):
+            for fn in fns:
+                fp = os.path.join(dp, fn)
+                if fn.lower().endswith((".safetensors", ".bin", ".gguf", ".pt")):
+                    try:
+                        candidates.append((fp, os.path.getsize(fp)))
+                    except OSError:
+                        pass
+        chosen = None
+        if _filename and os.path.exists(os.path.join(stage, _filename)):
+            chosen = os.path.join(stage, _filename)
+        else:
+            for fp, sz in candidates:
+                bn = os.path.splitext(os.path.basename(fp))[0].lower().replace("-", "_").replace(" ", "")
+                if key and key in bn:
+                    chosen = fp
+                    break
+            if not chosen and candidates:
+                chosen = max(candidates, key=lambda x: x[1])[0]
+        if not chosen:
+            raise FileNotFoundError("ModelScope 下载完成但未在仓库中匹配到模型文件: " + _filename)
+        os.makedirs(os.path.dirname(_target_path) or ".", exist_ok=True)
+        shutil.copyfile(chosen, _target_path)
+        shutil.rmtree(stage, ignore_errors=True)
+        _stop.set()
+        print("[DLPROGRESS] 100", flush=True)
+        sys.stderr.write("SCRIPT_DONE\n")
+except Exception as e:
+    _stop.set()
+    msg = str(e)
+    ml = msg.lower()
+    cat = "OTHER"
+    if "401" in msg or "403" in msg or "unauthorized" in ml or "gated" in ml or "private" in ml:
+        cat = "GATED"
+    elif "404" in msg or "not found" in ml or "does not exist" in ml or "entry not found" in ml or "nosuch" in ml:
+        cat = "NOTFOUND"
+    elif "connection" in ml or "timeout" in ml or "getaddrinfo" in ml or "name or service not known" in ml or "network" in ml:
+        cat = "NETWORK"
+    sys.stderr.write("SCRIPT_ERROR:%s\n" % msg)
+    print("[DLERROR] %s %s" % (cat, msg[:400]), flush=True)
+'''
+
+    def _download_model(self, model_id, source=None):
         if not model_id:
             self._log("× 模型ID为空，无法下载", "err")
             return
+        # 用户手动发起（source=None）时，清空该模型已试源记录，允许完整重试
+        if source is None and hasattr(self, '_dl_tried_sources'):
+            self._dl_tried_sources.pop(model_id, None)
 
         info = LTX_MODELS.get(model_id)
         if not info:
@@ -11420,6 +11931,13 @@ class MainWindow(QMainWindow):
         models_dir = self._models_dir or os.path.join(self._data_dir or "", "models")
         os.makedirs(models_dir, exist_ok=True)
 
+        # 已存在于任意目录（主模型目录或自定义 model_dirs）且完整 → 无需重复下载，直接标记为已下载
+        existing, complete = self._resolve_existing_model_path(info)
+        if complete:
+            self._log(f"√ 模型 {info.get('file', model_id)} 已存在于 {existing}，无需重复下载", "ok")
+            self._refresh_model_status()
+            return
+
         python_exe = self._python_exe
         if not python_exe or not os.path.exists(python_exe):
             for candidate in [
@@ -11435,11 +11953,23 @@ class MainWindow(QMainWindow):
             self._log("× 找不到Python环境，无法下载", "err")
             return
 
-        source = self.model_source_combo.currentData() if hasattr(self, 'model_source_combo') else "hf_mirror"
+        # 手动点击(source=None)时清空该模型的回退记录，允许重新尝试所有源
+        if source is None:
+            if hasattr(self, '_dl_tried_sources'):
+                self._dl_tried_sources.pop(model_id, None)
+            source = self.model_source_combo.currentData() if hasattr(self, 'model_source_combo') else "hf_mirror"
         source_name = {"hf_mirror": "HF-Mirror", "hf_official": "HuggingFace", "modelscope": "ModelScope"}.get(source, source)
 
+        # 选择下载源：HF 使用 info['repo']，ModelScope 使用 info['modelscope_id']（国内源、免 token）
+        if source == "modelscope":
+            dl_repo = info.get("modelscope_id") or info["repo"]
+            dl_script = self.MODEL_DL_MS_SCRIPT
+        else:
+            dl_repo = info["repo"]
+            dl_script = self.MODEL_DL_INLINE_SCRIPT
+
         self._log(f"▼ 开始下载 {info['file']} ({info['size_bytes']/1024/1024/1024:.1f}GB) [{source_name}]", "info")
-        self._log(f"  [DBG] model_id={model_id}, repo={info['repo']}, is_folder={info.get('is_folder', False)}, size_bytes={info['size_bytes']}", "info")
+        self._log(f"  [DBG] model_id={model_id}, source={source}, repo={dl_repo}, is_folder={info.get('is_folder', False)}, size_bytes={info['size_bytes']}", "info")
         self._log(f"  [DBG] python_exe={python_exe}", "info")
         self._log(f"  [DBG] models_dir={models_dir}", "info")
 
@@ -11452,7 +11982,10 @@ class MainWindow(QMainWindow):
         env = os.environ.copy()
         env.pop("PYTHONHOME", None)
         env["PYTHONUNBUFFERED"] = "1"
-        if source == "hf_mirror" or source == "modelscope":
+        if source == "modelscope":
+            # ModelScope 不走 HuggingFace，清掉 HF_ENDPOINT 避免干扰
+            env.pop("HF_ENDPOINT", None)
+        elif source == "hf_mirror":
             deploy_source = self.deploy_source_combo.currentData() if hasattr(self, 'deploy_source_combo') else "tsinghua"
             if deploy_source in MIRROR_SOURCES:
                 env["HF_ENDPOINT"] = MIRROR_SOURCES[deploy_source]["hf_endpoint"]
@@ -11475,37 +12008,21 @@ class MainWindow(QMainWindow):
         if getattr(self, '_guide_active', False) and getattr(self, '_guide_step', 0) == 1:
             max_workers_arg = ", max_workers=1"
 
-        if is_folder:
-            dl_script = (
-                "import sys\n"
-                f"try:\n"
-                f"    from huggingface_hub import snapshot_download\n"
-                f"    snapshot_download(repo_id='{info['repo']}', local_dir=r'{target_path}', local_dir_use_symlinks=False{max_workers_arg})\n"
-                f"except Exception as e:\n"
-                f"    sys.stderr.write(f'SCRIPT_ERROR:{{e}}\\n')\n"
-            )
-        else:
-            dl_script = (
-                "import sys\n"
-                f"try:\n"
-                f"    from huggingface_hub import hf_hub_download\n"
-                f"    hf_hub_download(repo_id='{info['repo']}', filename='{info['file']}', local_dir=r'{models_dir}', resume_download=True)\n"
-                f"except Exception as e:\n"
-                f"    sys.stderr.write(f'SCRIPT_ERROR:{{e}}\\n')\n"
-            )
-
         script_path = os.path.join(models_dir, f".dl_script_{model_id}.py")
         with open(script_path, 'w', encoding='utf-8') as sf:
             sf.write(dl_script)
 
-        cmd = [python_exe, "-u", script_path]
+        est_bytes_arg = str(int(info.get("size_bytes") or 0))
+        # 动态参数全部走 sys.argv（repo, target_path, is_folder, models_dir, est_bytes, filename）
+        cmd = [python_exe, "-u", script_path, dl_repo, target_path,
+               "1" if is_folder else "0", models_dir, est_bytes_arg, info.get("file", "")]
 
         self._download_procs[model_id] = {
             "cmd": cmd, "env": env, "paused": False, "cancelled": False,
             "target_path": target_path, "is_folder": is_folder,
             "expected_bytes": info["size_bytes"],
             "progress_path": progress_path, "script_path": script_path,
-            "current_pct": 0,
+            "current_pct": 0, "repo": dl_repo, "source": source,
         }
 
         self._set_model_downloading(model_id, True)
@@ -11514,7 +12031,7 @@ class MainWindow(QMainWindow):
         def run_download():
             all_stderr = ""
             try:
-                proc = hidden_popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env)
+                proc = hidden_popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
             except Exception as e:
                 QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, False, source_name, f"启动失败: {e}"))
                 self._download_procs.pop(model_id, None)
@@ -11578,65 +12095,88 @@ class MainWindow(QMainWindow):
             drain_thread = threading.Thread(target=drain_stderr, daemon=True)
             drain_thread.start()
 
-            def progress_monitor():
+            # stdout 读取线程：解析子进程输出的结构化进度标签 [DLPROGRESS]/[DLSIZE]/[DLDESC]
+            # （参照云集智能音乐创意台 ModelDownloadThread 的 reader+queue 方案）。
+            # 进度值由下载器 progress_callback + 磁盘监控线程实时写入，避免死锁卡 0%。
+            def _parse_dl_line(line):
+                line = (line or "").strip()
+                if not line:
+                    return
                 try:
-                    expected = info["size_bytes"]
-                    last_pct = 0
+                    dl = self._download_procs[model_id]
+                except (KeyError, TypeError):
+                    return
+                m = re.match(r"\[DLPROGRESS\]\s*([\d.]+)", line)
+                if m:
+                    try:
+                        pct = max(0, min(100, float(m.group(1))))
+                        dl["current_pct"] = int(pct)
+                    except (ValueError, KeyError, TypeError):
+                        pass
+                    return
+                m = re.match(r"\[DLSIZE\]\s*(\d+)\s+(\d+)", line)
+                if m:
+                    try:
+                        dl["current_dl_bytes"] = int(m.group(1))
+                        total = int(m.group(2))
+                        if total > 0:
+                            dl["expected_bytes"] = total
+                    except (KeyError, TypeError):
+                        pass
+                    return
+                m = re.match(r"\[DLDESC\]\s*(\S+)\s*([\d.]+)%?", line)
+                if m:
+                    try:
+                        dl["current_desc"] = f"{m.group(1)} {m.group(2)}%"
+                    except (KeyError, TypeError):
+                        pass
+                    return
+                m = re.match(r"\[DLERROR\]\s*(\S+)\s*(.*)", line)
+                if m:
+                    try:
+                        dl["error_cat"] = m.group(1)
+                        dl["error_msg"] = (m.group(2) or "")[:300]
+                    except (KeyError, TypeError):
+                        pass
+                    return
+                m = re.match(r"\[DLLOG\]\s*(.*)", line)
+                if m:
+                    try:
+                        dl.setdefault("pending_logs", []).append(m.group(1))
+                    except (KeyError, TypeError):
+                        pass
+                    return
+
+            def stdout_reader():
+                try:
+                    for ln in proc.stdout:
+                        _parse_dl_line(ln)
+                except Exception:
+                    pass
+
+            stdout_thread = threading.Thread(target=stdout_reader, daemon=True)
+            stdout_thread.start()
+
+            def progress_monitor():
+                # 进度值已由 stdout_reader 从结构化标签实时写入 current_pct，
+                # 这里仅负责等待进程结束并在成功时把进度收尾到 100%。
+                try:
                     tick_count = 0
-                    dbg_log(f"START expected={expected} target_path={target_path} is_folder={is_folder}")
                     while proc.poll() is None:
                         tick_count += 1
                         if self._download_procs.get(model_id, {}).get("cancelled"):
                             dbg_log(f"tick={tick_count} CANCELLED")
                             break
-                        pct = 0
-                        downloaded_bytes = 0
-                        try:
-                            if is_folder:
-                                if os.path.isdir(target_path):
-                                    for dp, dn, fns in os.walk(target_path):
-                                        for fn in fns:
-                                            try:
-                                                downloaded_bytes += os.path.getsize(os.path.join(dp, fn))
-                                            except OSError:
-                                                pass
-                            else:
-                                cache_dir = os.path.join(models_dir, ".cache", "huggingface", "download")
-                                if os.path.isdir(cache_dir):
-                                    for dp, dn, fns in os.walk(cache_dir):
-                                        for fn in fns:
-                                            if fn.endswith(".incomplete"):
-                                                try:
-                                                    downloaded_bytes += os.path.getsize(os.path.join(dp, fn))
-                                                except OSError:
-                                                    pass
-                                if os.path.exists(target_path):
-                                    try:
-                                        downloaded_bytes += os.path.getsize(target_path)
-                                    except OSError:
-                                        pass
-                            if downloaded_bytes > 0 and expected > 0:
-                                pct = min(100, int(downloaded_bytes * 100 / expected))
-                        except Exception:
-                            pass
-                        if tick_count <= 5 or pct > last_pct:
-                            dbg_log(f"tick={tick_count} pct={pct} last_pct={last_pct} downloaded_bytes={downloaded_bytes if downloaded_bytes else 0}")
-                        if pct > last_pct:
-                            last_pct = pct
-                            try:
-                                self._download_procs[model_id]["current_pct"] = pct
-                            except (KeyError, TypeError):
-                                break
-                        time.sleep(1)
+                        time.sleep(0.3)
                     try:
-                        self._download_procs[model_id]["current_pct"] = 100
+                        if (proc.returncode == 0
+                                and not self._download_procs.get(model_id, {}).get("cancelled")):
+                            self._download_procs[model_id]["current_pct"] = 100
                     except (KeyError, TypeError):
                         pass
-                    dbg_log(f"LOOP_END proc_returncode={proc.poll()} tick_count={tick_count} last_pct={last_pct}")
+                    dbg_log(f"LOOP_END proc_returncode={proc.poll()} tick_count={tick_count}")
                 except Exception as e:
                     dbg_log(f"CRASH {e}")
-                    import traceback
-                    dbg_log(f"TRACEBACK {traceback.format_exc()}")
 
             pmon_thread = threading.Thread(target=progress_monitor, daemon=True)
             pmon_thread.start()
@@ -11647,6 +12187,11 @@ class MainWindow(QMainWindow):
                 pass
 
             drain_thread.join(timeout=5)
+
+            try:
+                stdout_thread.join(timeout=2)
+            except Exception:
+                pass
 
             for p in (progress_path, script_path):
                 try:
@@ -11661,81 +12206,120 @@ class MainWindow(QMainWindow):
                         proc.kill()
                     except Exception:
                         pass
-                QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, False, source_name, "已取消"))
+                QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, False, source_name, "已取消", source))
             elif proc.returncode == 0:
                 if is_folder or os.path.exists(target_path):
-                    QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, True, source_name))
+                    QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, True, source_name, source=source))
                 else:
-                    QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, False, source_name, "文件未找到"))
+                    QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, False, source_name, "文件未找到", source))
             else:
-                err_text = all_stderr[:500] if all_stderr else f"exit code {proc.returncode}"
+                dl = self._download_procs.get(model_id, {})
+                cat = dl.get("error_cat")
+                advice = {
+                    "GATED": "该模型为 Gated 仓库，需先在环境变量 HF_TOKEN 中填入已接受模型协议的 HuggingFace Token，或切换为 ModelScope 源后重试",
+                    "NOTFOUND": "仓库/文件在镜像源不可用（可能路径错误或该仓库为 Gated 且未授权）",
+                    "NETWORK": "网络或镜像源连接失败，请检查网络后重试",
+                }
+                if cat:
+                    err_text = f"[{cat}] {dl.get('error_msg', '')}"
+                    if advice.get(cat):
+                        err_text += f" —— {advice[cat]}"
+                else:
+                    err_text = all_stderr[:500] if all_stderr else f"exit code {proc.returncode}"
                 if all_stderr:
-                    self._log(f"  [DBG] subprocess stderr (first 300): {all_stderr[:300]}", "info")
-                QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, False, source_name, err_text))
+                    self._log(f"  [DBG] subprocess stderr: {all_stderr[:300]}", "info")
+                QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, False, source_name, err_text, source))
 
         threading.Thread(target=run_download, daemon=True).start()
+
+    def _find_model_row(self, model_id):
+        """按 model_id 定位模型在表格中的行号（兼容筛选/搜索导致的行序变化）。
+        优先用 _render_model_table 建立的 _model_row_by_id 映射，缺失时回退枚举。"""
+        if not model_id:
+            return -1
+        if hasattr(self, '_model_row_by_id') and model_id in self._model_row_by_id:
+            return self._model_row_by_id[model_id]
+        if hasattr(self, '_model_rows'):
+            for i, r in enumerate(self._model_rows):
+                if r.get("model_id") == model_id:
+                    return i
+        return -1
 
     def _set_model_downloading(self, model_id, downloading):
         if not hasattr(self, '_download_procs'):
             self._download_procs = {}
         if not hasattr(self, '_model_table'):
             return
-        for row in range(self._model_table.rowCount()):
-            ops_widget = self._model_table.cellWidget(row, 8)
-            if not ops_widget:
-                continue
-            if hasattr(self, '_model_rows') and row < len(self._model_rows):
-                r = self._model_rows[row]
-                if r.get("model_id") != model_id:
-                    continue
-            else:
-                continue
+        row = self._find_model_row(model_id)
+        if row < 0 or row >= self._model_table.rowCount():
+            return
+        ops_widget = self._model_table.cellWidget(row, 7)
+        if not ops_widget:
+            return
 
-            layout = ops_widget.layout()
-            if not layout:
-                continue
-            while layout.count():
-                item = layout.takeAt(0)
-                w = item.widget()
-                if w:
-                    w.hide()
-                    w.setParent(None)
-                    w.deleteLater()
+        layout = ops_widget.layout()
+        if not layout:
+            return
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.hide()
+                w.setParent(None)
+                w.deleteLater()
 
-            if downloading:
-                status_item = self._model_table.item(row, 6)
-                if status_item:
-                    status_item.setText("进度 0%")
-                    status_item.setForeground(QColor("#FFA726"))
+        if downloading:
+            # 状态列(6)放真实进度条（窄列仅显示百分比；文件名/单文件进度由 tooltip 展示）
+            bar = QProgressBar()
+            bar.setRange(0, 100)
+            bar.setValue(0)
+            bar.setTextVisible(True)
+            bar.setFormat("%p%")
+            bar.setFixedHeight(16)
+            bar.setStyleSheet(
+                "QProgressBar { background-color:#1a1a1a; border:1px solid #2a2a2a; border-radius:4px;"
+                " text-align:center; color:#FFA726; font-size:8pt; }"
+                "QProgressBar::chunk { background-color:#FFA726; border-radius:3px; }"
+            )
+            self._model_table.setCellWidget(row, 6, bar)
 
-                pause_btn = QPushButton("⏸ 暂停")
-                pause_btn.setObjectName(f"dl_pause_{model_id}")
-                pause_btn.setFixedHeight(24)
-                pause_btn.setStyleSheet("""
-                    QPushButton { background-color: #E65100; color: white; border: none; border-radius: 3px;
-                        padding: 3px 8px; font-size: 10px; }
-                    QPushButton:hover { background-color: #F57C00; }
-                    QPushButton:pressed { background-color: #BF360C; }
-                """)
-                pause_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                pause_btn.clicked.connect(lambda checked, mid=model_id: self._toggle_pause_download(mid))
-                layout.addWidget(pause_btn)
+            pause_btn = QPushButton("⏸ 暂停")
+            pause_btn.setObjectName(f"dl_pause_{model_id}")
+            pause_btn.setFixedHeight(24)
+            pause_btn.setStyleSheet("""
+                QPushButton { background-color: #E65100; color: white; border: none; border-radius: 3px;
+                    padding: 3px 8px; font-size: 10px; }
+                QPushButton:hover { background-color: #F57C00; }
+                QPushButton:pressed { background-color: #BF360C; }
+            """)
+            pause_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            pause_btn.clicked.connect(lambda checked, mid=model_id: self._toggle_pause_download(mid))
+            layout.addWidget(pause_btn)
 
-                cancel_btn = QPushButton("✖ 取消")
-                cancel_btn.setFixedHeight(24)
-                cancel_btn.setStyleSheet("""
-                    QPushButton { background-color: #CC0000; color: white; border: none; border-radius: 3px;
-                        padding: 3px 8px; font-size: 10px; }
-                    QPushButton:hover { background-color: #FF0000; }
-                    QPushButton:pressed { background-color: #DD0000; }
-                """)
-                cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                cancel_btn.clicked.connect(lambda checked, mid=model_id: self._cancel_download(mid))
-                layout.addWidget(cancel_btn)
-            else:
-                pass
+            cancel_btn = QPushButton("✖ 取消")
+            cancel_btn.setFixedHeight(24)
+            cancel_btn.setStyleSheet("""
+                QPushButton { background-color: #CC0000; color: white; border: none; border-radius: 3px;
+                    padding: 3px 8px; font-size: 10px; }
+                QPushButton:hover { background-color: #FF0000; }
+                QPushButton:pressed { background-color: #DD0000; }
+            """)
+            cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            cancel_btn.clicked.connect(lambda checked, mid=model_id: self._cancel_download(mid))
+            layout.addWidget(cancel_btn)
+        else:
+            # 下载结束/取消：若状态列仍是进度条控件则移除，恢复文本
+            old_bar = self._model_table.cellWidget(row, 6)
+            if isinstance(old_bar, QProgressBar):
+                self._model_table.setCellWidget(row, 6, None)
+            status_item = self._model_table.item(row, 6)
+            if status_item is None:
+                status_item = QTableWidgetItem()
+                self._model_table.setItem(row, 6, status_item)
+            status_item.setText("未下载")
+            status_item.setForeground(QColor("#888888"))
 
-            layout.addStretch()
+        layout.addStretch()
 
     def _start_download_progress_timer(self):
         if not hasattr(self, '_dl_progress_timer'):
@@ -11747,6 +12331,145 @@ class MainWindow(QMainWindow):
     def _stop_download_progress_timer(self):
         if hasattr(self, '_dl_progress_timer') and self._dl_progress_timer.isActive():
             self._dl_progress_timer.stop()
+
+    def _fs_dir_size(self, p):
+        """递归计算目录字节数（进度兜底用）。"""
+        try:
+            tot = 0
+            for dp, dn, fns in os.walk(p):
+                for fn in fns:
+                    try:
+                        tot += os.path.getsize(os.path.join(dp, fn))
+                    except OSError:
+                        pass
+            return tot
+        except Exception:
+            return 0
+
+    def _resolve_download_scan_dirs(self, dl):
+        """计算下载进度兜底要扫描的目录（GUI 侧，独立于子进程输出）。
+
+        参照云集智能音乐创意台 ModelDownloadThread._dir_progress：扫描最终落盘位置 +
+        各下载源缓存的「仓库专属子目录」，仅统计本仓库的字节，不会因其他模型已存在而虚高。
+        返回 (dirs, _)。
+        """
+        tgt = dl.get("target_path")
+        if not tgt:
+            return [], 0
+        models_dir = os.path.dirname(tgt)
+        # 单文件=文件本身(复制到目标后才出现)；文件夹=目录本身
+        dirs = [tgt]
+        # MS 单文件中转 stage 目录（落盘前文件先下到这里）
+        stage = os.path.join(models_dir, ".ms_stage_" + os.path.basename(tgt))
+        if os.path.isdir(stage):
+            dirs.append(stage)
+        repo = dl.get("repo")
+        if repo:
+            safe = "models--" + repo.replace("/", "--")
+            # HuggingFace 缓存仓库专属子目录（blob 下载期间在此增长）
+            hf_home = os.environ.get("HF_HOME") or os.path.join(
+                os.path.expanduser("~"), ".cache", "huggingface")
+            dirs.append(os.path.join(hf_home, "hub", safe))
+            # ModelScope 缓存：新版 models-- 布局 + 旧版 namespace/name 布局
+            ms_cache = (os.environ.get("MODELSCOPE_CACHE")
+                        or os.environ.get("MODELSCOPE_CACHE_HOME")
+                        or os.path.join(os.path.expanduser("~"), ".cache", "modelscope"))
+            dirs.append(os.path.join(ms_cache, "hub", safe))
+            parts = repo.split("/")
+            if len(parts) == 2:
+                dirs.append(os.path.join(ms_cache, parts[0], parts[1]))
+        return dirs, 0
+
+    def _gui_disk_progress(self, dl):
+        """GUI 侧磁盘兜底进度：扫描落盘目录 + 缓存仓库子目录的真实字节数。
+
+        与音乐创意站一致：子进程 stdout 被缓冲或下载前期无标签输出时，
+        仍能用磁盘真实字节驱动进度条，杜绝「全程卡 0% / 结束时跳 99%」。
+        返回 (pct_or_None, cur_bytes)。
+        """
+        try:
+            dirs, _ = self._resolve_download_scan_dirs(dl)
+            cur = 0
+            for d in dirs:
+                if os.path.isfile(d):
+                    try:
+                        cur += os.path.getsize(d)
+                    except OSError:
+                        pass
+                elif os.path.isdir(d):
+                    cur += self._fs_dir_size(d)
+            exp = dl.get("expected_bytes") or 0
+            if exp > 0 and cur > 0:
+                pct = int(min(99, cur / exp * 100))
+                return pct, cur
+        except Exception:
+            pass
+        return None, 0
+
+    def _build_model_file_index(self):
+        """扫描主模型目录 + 所有自定义 model_dirs，返回 {归一化文件名: 完整路径}。
+
+        归一化：小写并去掉 '-' 与 '_'，用于容忍自定义目录中文件名大小写/连字符差异。
+        这样放在「新增目录」里的完整模型也能被正确识别为已下载。
+        """
+        index = {}
+        candidates = []
+        md = getattr(self, '_models_dir', '')
+        if md and os.path.isdir(md):
+            candidates.append(md)
+        for d in self.config.get("model_dirs", []):
+            p = d.get("path", "") if isinstance(d, dict) else d
+            if p and os.path.isdir(p) and p not in candidates:
+                candidates.append(p)
+        for base in candidates:
+            try:
+                for dp, dn, files in os.walk(base):
+                    for fn in files:
+                        norm = fn.lower().replace("-", "").replace("_", "")
+                        if norm not in index:
+                            index[norm] = os.path.join(dp, fn)
+                    # 同时登记目录名，支持 is_folder 模型(如 Gemma 文本编码器)
+                    for d in dn:
+                        norm = d.lower().replace("-", "").replace("_", "")
+                        if norm not in index:
+                            index[norm] = os.path.join(dp, d)
+            except OSError:
+                pass
+        return index
+
+    def _resolve_existing_model_path(self, info, index=None):
+        """在 self._models_dir 与自定义 model_dirs 中查找模型文件/文件夹是否已存在。
+
+        返回 (path_or_None, is_complete)。兼容文件名大小写/连字符差异（如
+        Z-Image-Turbo-BF16.safetensors 与 z_image_turbo_bf16.safetensors 视为同一文件）。
+        """
+        if index is None:
+            index = self._build_model_file_index()
+        fname = info.get("file", "")
+        if not fname:
+            return None, False
+        expected = info.get("size_bytes", 0) or 0
+        is_folder = info.get("is_folder", False)
+        norm_target = fname.lower().replace("-", "").replace("_", "")
+        path = index.get(norm_target)
+        if path is None:
+            return None, False
+        try:
+            if is_folder:
+                if os.path.isdir(path):
+                    sz = self._fs_dir_size(path)
+                    return path, (expected <= 0 or sz > expected * 0.5)
+                # 匹配到的是文件而非目录 -> 类型不符，视为未找到(避免误判)
+                return None, False
+            else:
+                if os.path.isfile(path):
+                    sz = os.path.getsize(path)
+                    return path, (expected <= 0 or sz > expected * 0.9)
+                # 匹配到的是目录而非文件 -> 类型不符，视为未找到
+                return None, False
+        except OSError:
+            pass
+        return None, False
 
     def _poll_download_progress(self):
         if not hasattr(self, '_download_procs') or not self._download_procs:
@@ -11761,59 +12484,135 @@ class MainWindow(QMainWindow):
             return
         done_ids = []
         for model_id, dl in list(self._download_procs.items()):
+            # 子进程阶段日志([DLLOG])冲刷到主日志面板（GUI 线程，安全）
+            try:
+                pls = dl.pop("pending_logs", None)
+                if pls:
+                    for _pl in pls:
+                        self._log("  " + _pl, "info")
+            except Exception:
+                pass
             pct = dl.get("current_pct", 0)
             proc = dl.get("proc")
             proc_done = proc is not None and proc.poll() is not None
             if proc_done:
                 done_ids.append(model_id)
                 continue
-            for row_idx, r in enumerate(self._model_rows):
-                if r.get("model_id") == model_id:
-                    if row_idx < row_count:
-                        try:
-                            status_item = self._model_table.item(row_idx, 6)
-                            if status_item:
-                                if pct >= 100:
-                                    status_item.setText("处理中…")
-                                    status_item.setForeground(QColor("#42A5F5"))
-                                else:
+            # GUI 侧磁盘兜底（参照音乐创意站 _dir_progress）：子进程标签未实时到达时，
+            # 用磁盘真实字节驱动进度条，解决 MS/HF 前期无输出导致「全程卡 0%」的问题。
+            try:
+                disk_pct, cur = self._gui_disk_progress(dl)
+                if disk_pct is not None and disk_pct > pct:
+                    pct = disk_pct
+                    if disk_pct > dl.get("current_pct", 0):
+                        dl["current_pct"] = disk_pct
+                    if cur > 0:
+                        dl["current_dl_bytes"] = cur
+            except Exception:
+                pass
+            row_idx = self._find_model_row(model_id)
+            # 实时进度日志(节流: 每5%或每10秒一条), 解决"日志到这里不动了"的观感问题
+            try:
+                now = time.time()
+                last_pct = dl.get("_last_log_pct", -1)
+                last_ts = dl.get("_last_log_ts", 0)
+                if pct - last_pct >= 5 or now - last_ts >= 10 or (pct >= 100 and last_pct < 100):
+                    self._log(f"  ⏳ {model_id}: 下载中 {pct}%  {dl.get('current_desc', '')}", "info")
+                    dl["_last_log_pct"] = pct
+                    dl["_last_log_ts"] = now
+            except Exception:
+                pass
+            if 0 <= row_idx < row_count:
+                try:
+                    desc = dl.get("current_desc", "")
+                    bar = self._model_table.cellWidget(row_idx, 6)
+                    if isinstance(bar, QProgressBar):
+                        bar.setValue(pct)
+                        if desc:
+                            bar.setToolTip(desc)
+                    else:
+                        # 行被中途重渲染(筛选/刷新)导致进度条控件缺失：回退为文本进度
+                        status_item = self._model_table.item(row_idx, 6)
+                        if status_item:
+                            if pct >= 100:
+                                status_item.setText("处理中…")
+                                status_item.setForeground(QColor("#42A5F5"))
+                            else:
+                                exp = dl.get("expected_bytes", 0)
+                                if exp and exp > 0:
                                     status_item.setText(f"进度 {pct}%")
                                     status_item.setForeground(QColor("#FFA726"))
-                        except RuntimeError:
-                            pass
-                    break
+                                    if desc:
+                                        status_item.setToolTip(desc)
+                                else:
+                                    # 总大小未知: 显示已下载 GB,避免一直卡在"进度 0%"
+                                    dl_bytes = dl.get("current_dl_bytes", 0)
+                                    gb = dl_bytes / 1024 / 1024 / 1024
+                                    status_item.setText(f"已下载 {gb:.1f}GB")
+                                    status_item.setForeground(QColor("#FFA726"))
+                except RuntimeError:
+                    pass
         for mid in done_ids:
-            for row_idx, r in enumerate(self._model_rows):
-                if r.get("model_id") == mid:
-                    if row_idx < row_count:
-                        try:
-                            status_item = self._model_table.item(row_idx, 6)
-                            if status_item:
-                                status_item.setText("已下载")
-                                status_item.setForeground(QColor("#66BB6A"))
-                            ops_widget = self._model_table.cellWidget(row_idx, 8)
-                            if ops_widget:
-                                layout = ops_widget.layout()
-                                if layout:
-                                    while layout.count():
-                                        item = layout.takeAt(0)
-                                        w = item.widget()
-                                        if w:
-                                            w.hide()
-                                            w.setParent(None)
-                                            w.deleteLater()
-                                    lp = r.get("local_path", "")
-                                    if lp:
-                                        rm_btn = QPushButton("🗑 删除")
-                                        rm_btn.setFixedHeight(24)
-                                        rm_btn.setStyleSheet("QPushButton { background-color: #1565C0; color: white; border: none; border-radius: 3px; padding: 3px 8px; font-size: 10px; } QPushButton:hover { background-color: #1976D2; } QPushButton:pressed { background-color: #0D47A1; }")
-                                        rm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                                        rm_btn.clicked.connect(lambda checked, p=lp: self._delete_local_model_file(p))
-                                        layout.addWidget(rm_btn)
-                                    layout.addStretch()
-                        except RuntimeError:
-                            pass
-                    break
+            dl = self._download_procs.get(mid, {})
+            # 判定下载是否真正成功：目标文件存在且大小达标；捕获到错误类别则视为失败。
+            # 防止 Gated/网络失败时被误标为「已下载」(随后刷新又跳回「未下载」的闪烁)。
+            tgt = dl.get("target_path")
+            ok = False
+            if tgt and os.path.exists(tgt):
+                exp = dl.get("expected_bytes") or 0
+                try:
+                    if os.path.isfile(tgt):
+                        sz = os.path.getsize(tgt)
+                    else:
+                        sz = self._fs_dir_size(tgt)
+                    ok = (exp <= 0) or (sz > exp * 0.9)
+                except OSError:
+                    ok = False
+            if dl.get("error_cat"):
+                ok = False
+            row_idx = self._find_model_row(mid)
+            if 0 <= row_idx < row_count:
+                try:
+                    # 先移除状态列可能存在的进度条控件
+                    old_bar = self._model_table.cellWidget(row_idx, 6)
+                    if isinstance(old_bar, QProgressBar):
+                        self._model_table.setCellWidget(row_idx, 6, None)
+                    status_item = self._model_table.item(row_idx, 6)
+                    if status_item is None:
+                        status_item = QTableWidgetItem()
+                        self._model_table.setItem(row_idx, 6, status_item)
+                    if ok:
+                        status_item.setText("已下载")
+                        status_item.setForeground(QColor("#66BB6A"))
+                    else:
+                        status_item.setText("未下载")
+                        status_item.setForeground(QColor("#FF0000"))
+                    ops_widget = self._model_table.cellWidget(row_idx, 7)
+                    if ops_widget:
+                        layout = ops_widget.layout()
+                        if layout:
+                            while layout.count():
+                                item = layout.takeAt(0)
+                                w = item.widget()
+                                if w:
+                                    w.hide()
+                                    w.setParent(None)
+                                    w.deleteLater()
+                            lp = ""
+                            for x in getattr(self, '_model_rows', []):
+                                if x.get("model_id") == mid:
+                                    lp = x.get("local_path", "")
+                                    break
+                            if lp:
+                                rm_btn = QPushButton("🗑 删除")
+                                rm_btn.setFixedHeight(24)
+                                rm_btn.setStyleSheet("QPushButton { background-color: #1565C0; color: white; border: none; border-radius: 3px; padding: 3px 8px; font-size: 10px; } QPushButton:hover { background-color: #1976D2; } QPushButton:pressed { background-color: #0D47A1; }")
+                                rm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                                rm_btn.clicked.connect(lambda checked, p=lp: self._delete_local_model_file(p))
+                                layout.addWidget(rm_btn)
+                            layout.addStretch()
+                except RuntimeError:
+                    pass
             if hasattr(self, '_download_procs'):
                 self._download_procs.pop(mid, None)
         if not self._download_procs:
@@ -11851,7 +12650,7 @@ class MainWindow(QMainWindow):
             dl["paused"] = False
             if hasattr(self, '_model_table'):
                 for row in range(self._model_table.rowCount()):
-                    ops_widget = self._model_table.cellWidget(row, 8)
+                    ops_widget = self._model_table.cellWidget(row, 7)
                     if not ops_widget:
                         continue
                     btn = ops_widget.findChild(QPushButton, pause_btn_name)
@@ -11865,20 +12664,18 @@ class MainWindow(QMainWindow):
                         """)
                         btn.setCursor(Qt.CursorShape.PointingHandCursor)
                         break
-            if hasattr(self, '_model_rows'):
-                for row_idx, r in enumerate(self._model_rows):
-                    if r.get("model_id") == model_id:
-                        status_item = self._model_table.item(row_idx, 6)
-                        if status_item:
-                            status_item.setText(f"进度 {dl.get('current_pct', 0)}%")
-                            status_item.setForeground(QColor("#FFA726"))
-                        break
+            row_idx = self._find_model_row(model_id)
+            if row_idx >= 0:
+                status_item = self._model_table.item(row_idx, 6)
+                if status_item:
+                    status_item.setText(f"进度 {dl.get('current_pct', 0)}%")
+                    status_item.setForeground(QColor("#FFA726"))
         else:
             self._suspend_process_threads(proc.pid)
             dl["paused"] = True
             if hasattr(self, '_model_table'):
                 for row in range(self._model_table.rowCount()):
-                    ops_widget = self._model_table.cellWidget(row, 8)
+                    ops_widget = self._model_table.cellWidget(row, 7)
                     if not ops_widget:
                         continue
                     btn = ops_widget.findChild(QPushButton, pause_btn_name)
@@ -11892,14 +12689,12 @@ class MainWindow(QMainWindow):
                         """)
                         btn.setCursor(Qt.CursorShape.PointingHandCursor)
                         break
-            if hasattr(self, '_model_rows'):
-                for row_idx, r in enumerate(self._model_rows):
-                    if r.get("model_id") == model_id:
-                        status_item = self._model_table.item(row_idx, 6)
-                        if status_item:
-                            status_item.setText(f"⏸ 进度 {dl.get('current_pct', 0)}%")
-                            status_item.setForeground(QColor("#FFB74D"))
-                        break
+            row_idx = self._find_model_row(model_id)
+            if row_idx >= 0:
+                status_item = self._model_table.item(row_idx, 6)
+                if status_item:
+                    status_item.setText(f"⏸ 进度 {dl.get('current_pct', 0)}%")
+                    status_item.setForeground(QColor("#FFB74D"))
 
     def _cancel_download(self, model_id):
         if not hasattr(self, '_download_procs') or model_id not in self._download_procs:
@@ -11970,7 +12765,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _on_model_download_done(self, model_id, success, source_name, error=""):
+    def _on_model_download_done(self, model_id, success, source_name, error="", source=None):
         info = LTX_MODELS.get(model_id)
         fname = info["file"] if info else model_id
         if not info and hasattr(self, '_model_rows'):
@@ -11982,6 +12777,9 @@ class MainWindow(QMainWindow):
             self._log(f"√ 模型 {fname} 下载完成 ({source_name})", "ok")
         else:
             self._log(f"× 模型 {fname} 下载失败 ({source_name}): {error}", "err")
+            # 自动回退：非用户主动取消的失败，自动切换其它源重试（HF→ModelScope 等）
+            if source is not None and "已取消" not in error:
+                self._maybe_fallback_download(model_id, source, source_name, fname, error)
         if hasattr(self, '_download_procs'):
             self._download_procs.pop(model_id, None)
             if not self._download_procs:
@@ -12008,6 +12806,28 @@ class MainWindow(QMainWindow):
                     self._guide_on_error()
                 # 步骤1时模型下载失败，不立即报错，等部署完成后再处理
 
+    def _maybe_fallback_download(self, model_id, failed_source, failed_name, fname, error):
+        """某源下载失败后，自动切换到其它可用源重试，免去手动反复切换。"""
+        if not hasattr(self, '_dl_tried_sources'):
+            self._dl_tried_sources = {}
+        tried = self._dl_tried_sources.setdefault(model_id, set())
+        if failed_source:
+            tried.add(failed_source)
+        # 候选源优先级：ModelScope（国内/免token）→ HF-Mirror → HuggingFace 官方
+        candidates = ["modelscope", "hf_mirror", "hf_official"]
+        alt_source = next((s for s in candidates if s not in tried), None)
+        if not alt_source:
+            self._log(f"✗ 模型 {fname} 已尝试所有可用源均失败，请检查网络或 HF_TOKEN 后手动重试", "err")
+            return
+        alt_name = {
+            "modelscope": "ModelScope (国内)",
+            "hf_mirror": "HF-Mirror",
+            "hf_official": "HuggingFace 官方",
+        }.get(alt_source, alt_source)
+        self._log(f"↻ 源 {failed_name} 下载失败，自动切换到 {alt_name} 重试 {fname}…", "info")
+        # 延迟启动，避免连续子进程抢占资源
+        QTimer.singleShot(400, lambda s=alt_source: self._download_model(model_id, source=s))
+
     def _uninstall_model(self, model_id):
         info = LTX_MODELS.get(model_id)
         if not info:
@@ -12027,17 +12847,9 @@ class MainWindow(QMainWindow):
         self._refresh_model_status()
 
     def _download_all_models(self):
+        index = self._build_model_file_index()
         for model_id, info in LTX_MODELS.items():
-            model_path = os.path.join(self._models_dir, info["file"])
-            expected_bytes = info["size_bytes"]
-            if info.get("is_folder", False):
-                if os.path.exists(model_path) and os.path.isdir(model_path):
-                    folder_size = sum(f.stat().st_size for f in __import__('pathlib').Path(model_path).rglob("*") if f.is_file())
-                    is_complete = folder_size > expected_bytes * 0.5
-                else:
-                    is_complete = False
-            else:
-                is_complete = os.path.exists(model_path) and os.path.getsize(model_path) > expected_bytes * 0.9
+            _p, is_complete = self._resolve_existing_model_path(info, index)
             if not is_complete:
                 self._download_model(model_id)
 
@@ -12072,7 +12884,7 @@ class MainWindow(QMainWindow):
         try:
             import httpx
             with httpx.Client(timeout=httpx.Timeout(8.0)) as client:
-                resp = client.get(f"http://127.0.0.1:{self._backend_port}/api/models/registry")
+                resp = client.get(f"http://{_local_host()}:{self._backend_port}/api/models/registry")
                 if resp.status_code == 200:
                     data = resp.json()
                 else:
@@ -12456,7 +13268,7 @@ class MainWindow(QMainWindow):
             try:
                 import httpx
                 with httpx.Client(timeout=httpx.Timeout(15.0)) as client:
-                    resp = client.post(f"http://127.0.0.1:{self._backend_port}/api/models/registry/sync")
+                    resp = client.post(f"http://{_local_host()}:{self._backend_port}/api/models/registry/sync")
                     if resp.status_code == 200:
                         result = resp.json()
                         success = result.get("success", False)
@@ -12500,7 +13312,7 @@ class MainWindow(QMainWindow):
             try:
                 import httpx
                 with httpx.Client(timeout=httpx.Timeout(2.5)) as client:
-                    resp = client.get(f"http://127.0.0.1:{self._backend_port}/api/models/registry/hf-status")
+                    resp = client.get(f"http://{_local_host()}:{self._backend_port}/api/models/registry/hf-status")
                     if resp.status_code == 200:
                         return resp.json()
             except Exception:
@@ -12605,7 +13417,7 @@ class MainWindow(QMainWindow):
             try:
                 import httpx
                 with httpx.Client(timeout=httpx.Timeout(5.0)) as client:
-                    resp = client.post(f"http://127.0.0.1:{self._backend_port}/api/models/registry/cancel-hf")
+                    resp = client.post(f"http://{_local_host()}:{self._backend_port}/api/models/registry/cancel-hf")
                     if resp.status_code == 200:
                         data = resp.json()
                         status = data.get("status", "")
@@ -13088,7 +13900,7 @@ class MainWindow(QMainWindow):
             use_mirror = (self.model_source_combo.currentData() == "hf_mirror") if hasattr(self, 'model_source_combo') else True
             with httpx.Client(timeout=httpx.Timeout(10.0)) as client:
                 resp = client.post(
-                    f"http://127.0.0.1:{self._backend_port}/api/models/registry/download",
+                    f"http://{_local_host()}:{self._backend_port}/api/models/registry/download",
                     json={"model_id": model_id, "use_mirror": use_mirror},
                 )
                 if resp.status_code == 200:
@@ -13107,11 +13919,12 @@ class MainWindow(QMainWindow):
 
     def _check_model_integrity(self):
         results = []
+        index = self._build_model_file_index()
         for model_id, info in LTX_MODELS.items():
-            model_path = os.path.join(self._models_dir, info["file"])
+            model_path, _complete = self._resolve_existing_model_path(info, index)
             expected_bytes = info["size_bytes"]
             expected_gb = expected_bytes / 1024 / 1024 / 1024
-            if not os.path.exists(model_path):
+            if not model_path or not os.path.exists(model_path):
                 results.append(f"× {info['file']}: 未下载 (官方 {expected_gb:.1f}GB)")
             else:
                 if info.get("is_folder", False):
@@ -13283,7 +14096,7 @@ class MainWindow(QMainWindow):
             if hasattr(self, '_open_ui'):
                 self._open_ui()
             else:
-                self._open_url_in_browser(f"http://127.0.0.1:{self._frontend_port}")
+                self._open_url_in_browser(f"http://{_local_host()}:{self._frontend_port}")
         except Exception:
             pass
 
@@ -14276,23 +15089,23 @@ for d in deps:
     def _detect_running_services(self):
         any_alive = False
         try:
-            conn = socket.create_connection(('127.0.0.1', self._backend_port), timeout=1)
+            conn = socket.create_connection((_local_host(), self._backend_port), timeout=1)
             conn.close()
             self._log(f"√ 检测到后端服务已在运行 (端口{self._backend_port})", "ok")
             any_alive = True
             for sid, card in self.service_cards.items():
                 if sid == "backend":
-                    card.set_status("running")
+                    card.update_status(True)
         except Exception:
             pass
         try:
-            conn = socket.create_connection(('127.0.0.1', self._frontend_port), timeout=1)
+            conn = socket.create_connection((_local_host(), self._frontend_port), timeout=1)
             conn.close()
             self._log(f"√ 检测到前端服务已在运行 (端口{self._frontend_port})", "ok")
             any_alive = True
             for sid, card in self.service_cards.items():
                 if sid == "frontend":
-                    card.set_status("running")
+                    card.update_status(True)
         except Exception:
             pass
         if any_alive:
@@ -14484,7 +15297,7 @@ for d in deps:
                 port = svc.get("port", 0)
                 if port:
                     try:
-                        conn = socket.create_connection(('127.0.0.1', port), timeout=0.5)
+                        conn = socket.create_connection((_local_host(), port), timeout=0.5)
                         conn.close()
                         _DBG.dbg("NETWORK", f"端口 {port} ({sid}): LISTENING")
                     except Exception:
@@ -14667,22 +15480,9 @@ for d in deps:
 
     def _poll_backend_port(self):
         self._wait_backend_count += 1
-        import threading
-        result = [False]
-
-        def _check():
-            try:
-                conn = socket.create_connection(('127.0.0.1', self._backend_port), timeout=1)
-                conn.close()
-                result[0] = True
-            except Exception:
-                pass
-
-        t = threading.Thread(target=_check, daemon=True)
-        t.start()
-        t.join(timeout=2)
-
-        if result[0]:
+        try:
+            conn = socket.create_connection((_local_host(), self._backend_port), timeout=1)
+            conn.close()
             self._wait_backend_timer.stop()
             self._log(f"核心引擎端口 {self._backend_port} 已就绪 (第{self._wait_backend_count}秒)", "ok")
             self._start_frontend()
@@ -14699,7 +15499,7 @@ for d in deps:
             # 引导步骤3：后端已就绪，启动浏览器检测
             if self._guide_active and self._guide_step == 3:
                 self._start_guide_browser_check()
-        else:
+        except Exception:
             if self._wait_backend_count >= 90:
                 self._wait_backend_timer.stop()
                 self._log(f"核心引擎端口 {self._backend_port} 等待超时", "err")
@@ -14710,25 +15510,12 @@ for d in deps:
 
     def _poll_frontend_port(self):
         self._wait_frontend_count += 1
-        import threading
-        result = [False]
-
-        def _check():
-            try:
-                conn = socket.create_connection(('127.0.0.1', self._frontend_port), timeout=1)
-                conn.close()
-                result[0] = True
-            except Exception:
-                pass
-
-        t = threading.Thread(target=_check, daemon=True)
-        t.start()
-        t.join(timeout=2)
-
-        if result[0]:
+        try:
+            conn = socket.create_connection((_local_host(), self._frontend_port), timeout=1)
+            conn.close()
             self._wait_frontend_timer.stop()
             self._open_ui()
-        else:
+        except Exception:
             if self._wait_frontend_count >= 30:
                 self._wait_frontend_timer.stop()
                 self._log(f"AI 视频工作站端口 {self._frontend_port} 等待超时", "err")
@@ -14738,7 +15525,7 @@ for d in deps:
 
     def _start_backend(self):
         try:
-            conn = socket.create_connection(('127.0.0.1', self._backend_port), timeout=1)
+            conn = socket.create_connection((_local_host(), self._backend_port), timeout=1)
             conn.close()
             is_own = "backend" in self.service_processes and self.service_processes["backend"].isRunning()
             if is_own:
@@ -14805,10 +15592,122 @@ sys.path = [p for p in sys.path if p and os.path.normpath(p) != os.path.normpath
 sys.path = [p for p in sys.path if p and p != "." and p != ""]
 sys.path.insert(0, patch_dir)
 sys.path.insert(1, backend_dir)
-import uvicorn
+import asyncio
+import sys
+import uvicorn, traceback, faulthandler
 from ltx2_server import app
+
+import socket as _sock
+import threading as _threading
+_orig_socketpair = _sock.socketpair
+def _sp_lan_ip():
+    try:
+        _s = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+        try:
+            _s.connect(("8.8.8.8", 80))
+            return _s.getsockname()[0]
+        finally:
+            _s.close()
+    except Exception:
+        return "127.0.0.1"
+def _try_tcp_pair(host, timeout=1.5):
+    _ls = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+    try:
+        _ls.bind((host, 0)); _ls.listen(1); _addr = _ls.getsockname()
+        _cs = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+        _err = [None]; _done = _threading.Event()
+        def _connect():
+            try:
+                _cs.connect(_addr)
+            except Exception as _e:
+                _err[0] = _e
+            finally:
+                _done.set()
+        _t = _threading.Thread(target=_connect, daemon=True); _t.start()
+        _ls.settimeout(timeout)
+        try:
+            _ss, _ = _ls.accept()
+        except OSError:
+            return None
+        _done.wait(timeout)
+        _ls.close()
+        if _err[0] is not None:
+            return None
+        _ss.setblocking(False); _cs.setblocking(False)
+        return (_cs, _ss)
+    except Exception:
+        return None
+    finally:
+        try:
+            _ls.close()
+        except Exception:
+            pass
+def _try_udp_pair(host):
+    _a = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+    _b = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+    try:
+        _a.bind((host, 0)); _b.bind((host, 0))
+        _a.connect(_b.getsockname()); _b.connect(_a.getsockname())
+        _a.settimeout(2.0); _b.settimeout(2.0)
+        _a.send(bytes([0])); _got = _b.recv(1)
+        if _got != bytes([0]):
+            return None
+        _a.setblocking(False); _b.setblocking(False)
+        return (_a, _b)
+    except Exception:
+        for _s in (_a, _b):
+            try:
+                _s.close()
+            except Exception:
+                pass
+        return None
+def _robust_self_pair():
+    # TCP 先试(若代理被关掉则秒过), 再退回 UDP 环回(不经 TCP 代理)
+    for _host in ("127.0.0.1", _sp_lan_ip()):
+        if not _host:
+            continue
+        _p = _try_tcp_pair(_host)
+        if _p:
+            return _p
+        _p = _try_udp_pair(_host)
+        if _p:
+            return _p
+    raise RuntimeError("all self-pair strategies failed (TCP+UDP loopback/LAN blocked)")
+def _patched_socketpair(family=_sock.AF_INET, type=_sock.SOCK_STREAM, proto=0):
+    if type != _sock.SOCK_STREAM:
+        return _orig_socketpair(family, type, proto)
+    try:
+        return _robust_self_pair()
+    except Exception as _e:
+        raise RuntimeError(
+            "socketpair fallback failed: %r - TCP+UDP loopback/LAN connect blocked "
+            "by proxy/VPN/AV. Add 127.0.0.1, ::1 and the LAN IP to the proxy/VPN "
+            "bypass list, or exit the filtering software." % (_e,)
+        )
+_sock.socketpair = _patched_socketpair
+try:
+    import asyncio.windows_utils as _wutils
+    _wutils.socketpair = _patched_socketpair
+except Exception:
+    pass
+if sys.platform == "win32":
+    def _selector_loop_factory(self):
+        return asyncio.SelectorEventLoop
+    uvicorn.Config.get_loop_factory = _selector_loop_factory
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    print("[LAUNCHER] patched socket.socketpair -> TCP+UDP self-pair; forcing SelectorEventLoop", flush=True)
+
+
 if __name__ == '__main__':
-    uvicorn.run(app, host="0.0.0.0", port={self._backend_port}, log_level="info", access_log=False)
+    faulthandler.dump_traceback_later(60, file=sys.stderr)
+    print("[LAUNCHER] reached uvicorn.run port={self._backend_port} routes=", len(getattr(app, 'routes', [])), flush=True)
+    try:
+        uvicorn.run(app, host="0.0.0.0", port={self._backend_port}, log_level="info", access_log=False)
+        print("[LAUNCHER] uvicorn.run returned normally", flush=True)
+    except Exception as _e:
+        print("[LAUNCHER-FATAL]", repr(_e), flush=True)
+        traceback.print_exc()
+        raise
 """
             launcher_path = os.path.join(patches_dir, "launcher.py")
             try:
@@ -14838,7 +15737,7 @@ if __name__ == '__main__':
     def _start_frontend(self):
         self._log("正在启动 AI视频工作站...", "info")
         try:
-            conn = socket.create_connection(('127.0.0.1', self._frontend_port), timeout=1)
+            conn = socket.create_connection((_local_host(), self._frontend_port), timeout=1)
             conn.close()
             is_own = "frontend" in self.service_processes and self.service_processes["frontend"].isRunning()
             if is_own:
@@ -14902,6 +15801,140 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response, StreamingResponse
 from fastapi.middleware.gzip import GZipMiddleware
 import uvicorn
+import asyncio
+import socket
+
+def _get_lan_ip():
+    try:
+        _s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            _s.connect(("8.8.8.8", 80))
+            return _s.getsockname()[0]
+        finally:
+            _s.close()
+    except Exception:
+        return "127.0.0.1"
+
+def _local_host():
+    # 本机服务访问 host: 环回被拦截时回退 LAN IP(uvicorn 绑 0.0.0.0)
+    _cached = getattr(_local_host, "_cache", None)
+    if _cached is not None:
+        return _cached
+    for _h in ("127.0.0.1", "::1"):
+        try:
+            _c = socket.create_connection((_h, 1), timeout=0.4)
+            _c.close()
+            _local_host._cache = _h
+            return _h
+        except ConnectionRefusedError:
+            _local_host._cache = _h
+            return _h
+        except (TimeoutError, OSError):
+            continue
+    _ip = _get_lan_ip()
+    _local_host._cache = _ip
+    return _ip
+
+import socket as _sock
+import threading as _threading
+_orig_socketpair = _sock.socketpair
+def _sp_lan_ip():
+    try:
+        _s = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+        try:
+            _s.connect(("8.8.8.8", 80))
+            return _s.getsockname()[0]
+        finally:
+            _s.close()
+    except Exception:
+        return "127.0.0.1"
+def _try_tcp_pair(host, timeout=1.5):
+    _ls = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+    try:
+        _ls.bind((host, 0)); _ls.listen(1); _addr = _ls.getsockname()
+        _cs = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+        _err = [None]; _done = _threading.Event()
+        def _connect():
+            try:
+                _cs.connect(_addr)
+            except Exception as _e:
+                _err[0] = _e
+            finally:
+                _done.set()
+        _t = _threading.Thread(target=_connect, daemon=True); _t.start()
+        _ls.settimeout(timeout)
+        try:
+            _ss, _ = _ls.accept()
+        except OSError:
+            return None
+        _done.wait(timeout)
+        _ls.close()
+        if _err[0] is not None:
+            return None
+        _ss.setblocking(False); _cs.setblocking(False)
+        return (_cs, _ss)
+    except Exception:
+        return None
+    finally:
+        try:
+            _ls.close()
+        except Exception:
+            pass
+def _try_udp_pair(host):
+    _a = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+    _b = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+    try:
+        _a.bind((host, 0)); _b.bind((host, 0))
+        _a.connect(_b.getsockname()); _b.connect(_a.getsockname())
+        _a.settimeout(2.0); _b.settimeout(2.0)
+        _a.send(bytes([0])); _got = _b.recv(1)
+        if _got != bytes([0]):
+            return None
+        _a.setblocking(False); _b.setblocking(False)
+        return (_a, _b)
+    except Exception:
+        for _s in (_a, _b):
+            try:
+                _s.close()
+            except Exception:
+                pass
+        return None
+def _robust_self_pair():
+    # TCP 先试(若代理被关掉则秒过), 再退回 UDP 环回(不经 TCP 代理)
+    for _host in ("127.0.0.1", _sp_lan_ip()):
+        if not _host:
+            continue
+        _p = _try_tcp_pair(_host)
+        if _p:
+            return _p
+        _p = _try_udp_pair(_host)
+        if _p:
+            return _p
+    raise RuntimeError("all self-pair strategies failed (TCP+UDP loopback/LAN blocked)")
+def _patched_socketpair(family=_sock.AF_INET, type=_sock.SOCK_STREAM, proto=0):
+    if type != _sock.SOCK_STREAM:
+        return _orig_socketpair(family, type, proto)
+    try:
+        return _robust_self_pair()
+    except Exception as _e:
+        raise RuntimeError(
+            "socketpair fallback failed: %r - TCP+UDP loopback/LAN connect blocked "
+            "by proxy/VPN/AV. Add 127.0.0.1, ::1 and the LAN IP to the proxy/VPN "
+            "bypass list, or exit the filtering software." % (_e,)
+        )
+_sock.socketpair = _patched_socketpair
+try:
+    import asyncio.windows_utils as _wutils
+    _wutils.socketpair = _patched_socketpair
+except Exception:
+    pass
+if sys.platform == "win32":
+    def _selector_loop_factory(self):
+        return asyncio.SelectorEventLoop
+    uvicorn.Config.get_loop_factory = _selector_loop_factory
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    print("[LAUNCHER] patched socket.socketpair -> TCP+UDP self-pair; forcing SelectorEventLoop", flush=True)
+
 
 APP_NAME = __APP_NAME__
 VERSION = __VERSION__
@@ -14954,8 +15987,11 @@ def _format_http_date(ts: int) -> str:
 def _check_conditional(request_headers, etag: str, mtime: int) -> bool:
     '''检查客户端条件请求,返回 True 表示应该 304。'''
     if_none_match = request_headers.get("if-none-match")
-    if if_none_match and etag in if_none_match:
-        return True
+    if if_none_match:
+        tags = [t.strip().strip('"').strip("'") for t in if_none_match.split(",")]
+        clean_etag = etag.strip('"').strip("'").strip()
+        if clean_etag in tags or etag in if_none_match.split(","):
+            return True
     if_modified_since = request_headers.get("if-modified-since")
     if if_modified_since and not if_none_match:
         try:
@@ -14996,7 +16032,7 @@ def _get_http_client(timeout: float) -> _httpx_global.AsyncClient:
 ui_dir = __UI_DIR__
 BACKEND_PORT = __BACKEND_PORT__
 FRONTEND_PORT = __FRONTEND_PORT__
-BACKEND_BASE = f"http://127.0.0.1:{BACKEND_PORT}"
+BACKEND_BASE = f"http://{_local_host()}:{BACKEND_PORT}"
 outputs_dir = __OUTPUTS_DIR__
 app = FastAPI()
 # ★ 2026-06-17 提速 v2: GZip 中间件 — text/js/css/json 走压缩
@@ -15024,9 +16060,11 @@ async def index(request: Request):
     mtime = int(st.st_mtime)
     size = st.st_size
     etag = f'W/"{mtime:x}-{size:x}"'
-    # 304 协商
+    # 304 协商(精确比较 ETag,避免子串误匹配)
     if_none_match = request.headers.get("if-none-match", "")
-    if etag in if_none_match:
+    _if_none_tags = [t.strip().strip('"').strip("'") for t in if_none_match.split(",")]
+    _etag_clean = etag.strip('"').strip("'").strip()
+    if _etag_clean in _if_none_tags:
         # 文件没变,返回 304 + ETag,响应体为空
         return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-cache, must-revalidate"})
     with open(html_path, "r", encoding="utf-8") as f:
@@ -15564,7 +16602,7 @@ if __name__ == '__main__':
 
         # ── 实时数据(状态/端口/版本/GPU/模型数) ──
         port = SERVICES.get("backend", {}).get("port", 3000)
-        api_url = f"http://127.0.0.1:{port}"
+        api_url = f"http://{_local_host()}:{port}"
         running = self.service_cards.get("backend").is_running if self.service_cards.get("backend") else False
         gpu_name = "—"
         vram_str = "—"
@@ -15720,7 +16758,7 @@ if __name__ == '__main__':
         dlg.exec()
 
     def _open_ui(self):
-        self._open_url_in_browser(f"http://127.0.0.1:{self._frontend_port}")
+        self._open_url_in_browser(f"http://{_local_host()}:{self._frontend_port}")
 
     def _detect_browsers(self):
         import winreg
@@ -15916,7 +16954,7 @@ if __name__ == '__main__':
             self._log(f"△ 不能与 {SERVICES[other_sid]['name']} 使用相同端口 ({new_port})", "warn")
             return
         try:
-            conn = socket.create_connection(('127.0.0.1', new_port), timeout=0.5)
+            conn = socket.create_connection((_local_host(), new_port), timeout=0.5)
             conn.close()
             self._log(f"△ 经检测端口 {new_port} 已被占用，请更改", "warn")
             return
@@ -15937,7 +16975,7 @@ if __name__ == '__main__':
         else:
             self._frontend_port = new_port
             self.config.set("ports.frontend", new_port)
-        SERVICES[sid]["url"] = f"http://127.0.0.1:{new_port}"
+        SERVICES[sid]["url"] = f"http://{_local_host()}:{new_port}"
         if was_running:
             self._log(f"正在以新端口 {new_port} 重启 {SERVICES[sid]['name']}...", "info")
             if sid == "backend":
@@ -15997,7 +17035,7 @@ if __name__ == '__main__':
         try:
             import urllib.request
             # 后端/前端都探测 /api/health(前端代理会把请求转发到后端)
-            url = f"http://127.0.0.1:{port}/api/health"
+            url = f"http://{_local_host()}:{port}/api/health"
             req = urllib.request.Request(url, headers={"User-Agent": "yunji-probe", "Accept": "*/*"})
             with urllib.request.urlopen(req, timeout=2) as resp:
                 if resp.status == 200:
@@ -16015,7 +17053,7 @@ if __name__ == '__main__':
         start = time.time()
         while time.time() - start < timeout:
             try:
-                conn = socket.create_connection(('127.0.0.1', port), timeout=0.5)
+                conn = socket.create_connection((_local_host(), port), timeout=0.5)
                 conn.close()
                 time.sleep(0.3)
             except Exception:
@@ -16025,7 +17063,7 @@ if __name__ == '__main__':
     def _on_port_change_backend_poll(self):
         self._port_change_wait_count += 1
         try:
-            conn = socket.create_connection(('127.0.0.1', self._backend_port), timeout=1)
+            conn = socket.create_connection((_local_host(), self._backend_port), timeout=1)
             conn.close()
             self._port_change_timer.stop()
             self._log(f"核心引擎已就绪 (端口{self._backend_port})，正在重启 AI视频工作站...", "ok")
@@ -16044,7 +17082,7 @@ if __name__ == '__main__':
     def _on_port_change_frontend_poll(self):
         self._port_change_fe_wait_count += 1
         try:
-            conn = socket.create_connection(('127.0.0.1', self._frontend_port), timeout=1)
+            conn = socket.create_connection((_local_host(), self._frontend_port), timeout=1)
             conn.close()
             self._port_change_fe_timer.stop()
             self._log(f"AI视频工作站已就绪 (端口{self._frontend_port})", "ok")
@@ -16929,7 +17967,7 @@ if __name__ == '__main__':
             result = [False]
             def _check():
                 try:
-                    conn = socket.create_connection(('127.0.0.1', self._frontend_port), timeout=1)
+                    conn = socket.create_connection((_local_host(), self._frontend_port), timeout=1)
                     conn.close()
                     result[0] = True
                 except Exception:
@@ -17275,7 +18313,7 @@ if __name__ == '__main__':
             port = self._backend_port
             if not port:
                 return
-            url = f"http://127.0.0.1:{port}/api/system/set-dir"
+            url = f"http://{_local_host()}:{port}/api/system/set-dir"
             data = json.dumps({"directory": dir_path}).encode("utf-8")
             req = urllib.request.Request(url, data=data, method="POST")
             req.add_header("Content-Type", "application/json")

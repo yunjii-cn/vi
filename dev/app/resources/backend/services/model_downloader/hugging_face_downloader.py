@@ -93,9 +93,12 @@ class HuggingFaceDownloader:
     ) -> Path:
         ctx = _patch_download_progress(on_progress) if on_progress is not None else contextlib.nullcontext()
         with ctx:
-            env = {**os.environ, "HF_ENDPOINT": HF_MIRROR_ENDPOINT} if use_mirror else None
+            # 2026-08-04 修复: Windows 上强制落盘真实文件(local_dir_use_symlinks=False),
+            # 避免符号链接指向缓存导致模型"消失";gated 模型自动读取 HF_TOKEN 环境变量。
+            _hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or None
             path: str = hf_hub_download(
                 repo_id=repo_id, filename=filename, local_dir=local_dir,
+                local_dir_use_symlinks=False, token=_hf_token,
                 **({"endpoint": HF_MIRROR_ENDPOINT} if use_mirror else {}),
             )
         return Path(path)
@@ -109,8 +112,11 @@ class HuggingFaceDownloader:
     ) -> Path:
         ctx = _patch_download_progress(on_progress) if on_progress is not None else contextlib.nullcontext()
         with ctx:
+            # 2026-08-04 修复: 同 download_file, 强制落盘真实文件 + 传递 gated 模型 token
+            _hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or None
             path: str = snapshot_download(
                 repo_id=repo_id, local_dir=local_dir,
+                local_dir_use_symlinks=False, token=_hf_token,
                 **({"endpoint": HF_MIRROR_ENDPOINT} if use_mirror else {}),
             )
         return Path(path)

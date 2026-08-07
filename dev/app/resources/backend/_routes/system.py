@@ -9,6 +9,31 @@ from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response as StarletteResponse
 
+# ★ 安全沙箱: 只允许从这些根目录提供文件
+#   后端启动时由 _routes/__init__.py 或 ltx2_server.py 设置
+_ALLOWED_FILE_ROOTS: list[Path] = []
+
+def configure_file_roots(roots: list[str | Path]) -> None:
+    """设置允许提供文件的根目录列表(路径遍历防护)。"""
+    global _ALLOWED_FILE_ROOTS
+    _ALLOWED_FILE_ROOTS = [Path(r).resolve() for r in roots]
+
+def _is_path_safe(requested_path: str) -> bool:
+    """检查请求路径是否在允许的根目录之下(路径遍历防护)。"""
+    if not _ALLOWED_FILE_ROOTS:
+        return True  # 未配置时宽松处理(兼容旧行为)
+    try:
+        resolved = Path(requested_path).resolve()
+        for root in _ALLOWED_FILE_ROOTS:
+            try:
+                resolved.relative_to(root)
+                return True
+            except ValueError:
+                continue
+        return False
+    except (OSError, ValueError):
+        return False
+
 def _dbg(msg):
     """Print debug message directly to stdout so the launcher can capture it."""
     print(f"[DEBUG][system] {msg}", flush=True)
@@ -57,7 +82,12 @@ async def serve_file(request: Request, path: str):
     if not file_path.is_file():
         _dbg(f"[serve_file] ERROR: Path is not a file: {path}")
         raise HTTPException(status_code=400, detail=f"Path is not a file: {path}")
-    
+
+    # ★ 路径遍历防护: 确保文件在允许的根目录下
+    if not _is_path_safe(path):
+        _dbg(f"[serve_file] SECURITY BLOCKED: Path outside allowed roots: {path}")
+        raise HTTPException(status_code=403, detail="Access denied: path outside allowed directories")
+
     # Determine content type based on file extension
     ext = file_path.suffix.lower()
     content_type_map = {
@@ -103,6 +133,11 @@ async def video_thumbnail(path: str):
         if not video_path.exists() or not video_path.is_file():
             _dbg(f"[video-thumbnail] ERROR: Video not found: {path}")
             raise HTTPException(status_code=404, detail="Video not found")
+
+        # ★ 路径遍历防护
+        if not _is_path_safe(path):
+            _dbg(f"[video-thumbnail] SECURITY BLOCKED: Path outside allowed roots: {path}")
+            raise HTTPException(status_code=403, detail="Access denied: path outside allowed directories")
 
         import cv2
 
@@ -169,7 +204,7 @@ async def video_thumbnail(path: str):
         return StarletteResponse(
             content=encoded.tobytes(),
             media_type="image/jpeg",
-            headers={"Cache-Control": "public, max-age=86400", "ETag": f'"{hash(str(video_path) + str(selected.shape))}"'},
+            headers={"Cache-Control": "public, max-age=86400", "ETag": f'"thumb_{video_path.stat().st_mtime_ns}_{selected.shape[0]}x{selected.shape[1]}"'},
         )
     except HTTPException:
         raise

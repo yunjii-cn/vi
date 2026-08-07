@@ -100,7 +100,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // --- 登录状态检测与UI更新 ---
 function checkLoginStatus() {
-    fetch('/sl/islogin.php', { credentials: 'include' })
+    fetch('./sl/islogin.php', { credentials: 'include' })
         .then(res => res.json())
         .then(data => {
             if (data.code === 1 && data.data) {
@@ -116,19 +116,19 @@ function updateNavToLoggedIn(user) {
 
     navLogin.outerHTML = `
         <div class="nav-user" id="navUser">
-            <img src="${user.avatar || '/image/ico.png'}" alt="${user.nickname}" class="nav-user-avatar" onclick="toggleUserMenu()">
+            <img src="${user.avatar || './image/ico.png'}" alt="${user.nickname}" class="nav-user-avatar" onclick="toggleUserMenu()">
             <span class="nav-user-name">${user.nickname}</span>
             <div class="nav-user-dropdown" id="userDropdown">
                 <div class="dropdown-header">
-                    <img src="${user.avatar || '/image/ico.png'}" alt="" class="dropdown-avatar">
+                    <img src="${user.avatar || './image/ico.png'}" alt="" class="dropdown-avatar">
                     <div class="dropdown-info">
                         <div class="dropdown-nickname">${user.nickname}</div>
                         <div class="dropdown-uid">${user.username || ''}</div>
                     </div>
                 </div>
                 <div class="dropdown-divider"></div>
-                <a href="/sl/index.php" class="dropdown-item">个人中心</a>
-                <a href="/sl/logout.php" class="dropdown-item dropdown-item-danger">退出登录</a>
+                <a href="./sl/index.php" class="dropdown-item">个人中心</a>
+                <a href="./sl/logout.php" class="dropdown-item dropdown-item-danger">退出登录</a>
             </div>
         </div>
     `;
@@ -237,7 +237,7 @@ function openLoginModal() {
 
     // 直接使用 iframe 加载二维码页面
     if (iframe) {
-        iframe.src = '/sl/connect.php?type=wx';
+        iframe.src = './sl/connect.php?type=wx';
         iframe.style.display = 'block';
     }
     if (qrcodeImg) {

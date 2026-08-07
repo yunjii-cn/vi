@@ -110,6 +110,7 @@ def git_commit_and_push(commit_message):
 
         print("  推送到远程仓库...")
         max_attempts = 3
+        push_ok = False
         for attempt in range(max_attempts):
             try:
                 result = subprocess.run(
@@ -119,6 +120,7 @@ def git_commit_and_push(commit_message):
                 )
                 if result.returncode == 0:
                     print("  ✓ 推送成功 (origin/main)")
+                    push_ok = True
                     break
                 else:
                     print(f"  警告：推送失败（第{attempt + 1}次尝试）：{result.stderr}")
@@ -128,6 +130,8 @@ def git_commit_and_push(commit_message):
                 print(f"  警告：推送超时（第{attempt + 1}次尝试）")
                 if attempt < max_attempts - 1:
                     time.sleep(2)
+        if not push_ok:
+            print("  ✗ 所有推送尝试均失败，请检查网络或远程仓库配置")
         # 推送到 Gitee
         try:
             result = subprocess.run(
@@ -142,7 +146,7 @@ def git_commit_and_push(commit_message):
         except subprocess.TimeoutExpired:
             print("  警告：Gitee推送超时")
 
-        return True
+        return push_ok
 
     except subprocess.CalledProcessError as e:
         print(f"  Git操作失败：{e}")
@@ -271,26 +275,28 @@ def validate_code_before_build():
         except SyntaxError as e:
             errors.append(f"语法错误 {rel}: {e}")
 
-    # 2. main.py 方法完整性检查
+    # 2. 入口文件(launcher.py)与核心模块(main.py)方法完整性检查
     main_py = ROOT_DIR / "main.py"
-    if main_py.exists():
-        source = main_py.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        defined = set()
-        called_private = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                for item in node.body:
-                    if isinstance(item, ast.FunctionDef):
-                        defined.add(item.name)
-            if isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Attribute) and node.func.attr.startswith("_"):
-                    if isinstance(node.func.value, ast.Name) and node.func.value.id == "self":
-                        called_private.add(node.func.attr)
-        missing = called_private - defined
-        if missing:
-            for m in sorted(missing):
-                errors.append(f"main.py 调用了未定义的方法: {m}")
+    launcher_py = ROOT_DIR / "launcher.py"
+    for entry_py in [main_py, launcher_py]:
+        if entry_py and entry_py.exists():
+            source = entry_py.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+            defined = set()
+            called_private = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef):
+                    for item in node.body:
+                        if isinstance(item, ast.FunctionDef):
+                            defined.add(item.name)
+                if isinstance(node, ast.Call):
+                    if isinstance(node.func, ast.Attribute) and node.func.attr.startswith("_"):
+                        if isinstance(node.func.value, ast.Name) and node.func.value.id == "self":
+                            called_private.add(node.func.attr)
+            missing = called_private - defined
+            if missing:
+                for m in sorted(missing):
+                    errors.append(f"{entry_py.name} 调用了未定义的方法: {m}")
 
     # 3. 关键方法存在性检查
     critical_methods = [

@@ -22,7 +22,13 @@ if (Test-Path $LockFile) {
     $oldPid = Get-Content $LockFile -ErrorAction SilentlyContinue
     if ($oldPid -match '^\d+$') {
         Write-Host "  Old launcher PID=$oldPid, running taskkill /F..."
+    # taskkill 在进程已不存在时会写 stderr 并返回非零码
+    # $ErrorActionPreference='Stop' 会把 stderr 当异常抛出导致闪退, 这里临时容错
+    try {
         $null = & taskkill.exe /F /PID $oldPid 2>&1
+    } catch {
+        Write-Host "  (PID $oldPid already gone, ignored)"
+    }
     }
     Write-Host '  Waiting 2 seconds for children to stabilize as orphans...'
     Start-Sleep -Seconds 2
