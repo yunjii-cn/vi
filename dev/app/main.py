@@ -12400,7 +12400,9 @@ except Exception as e:
                     cur += self._fs_dir_size(d)
             exp = dl.get("expected_bytes") or 0
             if exp > 0 and cur > 0:
-                pct = int(min(99, cur / exp * 100))
+                # 磁盘字节达到/超过预期即视为完成(100)，否则按真实比例(0-99)。
+                # 与音乐创意站 _dir_progress 一致：进度条直接反映缓存真实大小。
+                pct = 100 if cur >= exp else int(min(99, cur / exp * 100))
                 return pct, cur
         except Exception:
             pass
@@ -12498,14 +12500,17 @@ except Exception as e:
             if proc_done:
                 done_ids.append(model_id)
                 continue
-            # GUI 侧磁盘兜底（参照音乐创意站 _dir_progress）：子进程标签未实时到达时，
-            # 用磁盘真实字节驱动进度条，解决 MS/HF 前期无输出导致「全程卡 0%」的问题。
+            # ★ 进度条直接读取缓存/落盘的真实字节（参照云集智能音乐创意台 _dir_progress）：
+            # 以磁盘真实百分比为「主导源」，不再信任子进程 [DLPROGRESS] 标签的 0%。
+            # 只要缓存目录上有字节在增长，进度条就用磁盘进度驱动，杜绝任何「卡 0%」观感；
+            # 磁盘字节达到预期大小才到 100%。刚启动/真卡死(磁盘0字节)时保留子进程标签(0)，
+            # 交由 60s 卡死检测触发自动回退，避免误判为「已下载」。
             try:
                 disk_pct, cur = self._gui_disk_progress(dl)
-                if disk_pct is not None and disk_pct > pct:
-                    pct = disk_pct
-                    if disk_pct > dl.get("current_pct", 0):
-                        dl["current_pct"] = disk_pct
+                if disk_pct is not None:
+                    if disk_pct > pct and pct < 100:
+                        pct = disk_pct
+                    dl["current_pct"] = max(dl.get("current_pct", 0), disk_pct)
                     if cur > 0:
                         dl["current_dl_bytes"] = cur
             except Exception:
