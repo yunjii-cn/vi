@@ -11528,6 +11528,26 @@ class MainWindow(QMainWindow):
     MODEL_DL_INLINE_SCRIPT = r'''
 import sys, os, time, threading
 
+# ── 进度文件输出（参照音乐创意台）：print 同时写 stdout 与 .dl_progress_<model> 文件(UTF-8)。
+# 规避中文 Windows 下 subprocess 管道按 GBK 解码导致读取线程崩溃、进度卡 0% 的问题。
+_pf_path = os.environ.get("DL_PROGRESS_FILE") or ""
+_pf = None
+if _pf_path:
+    try:
+        _pf = open(_pf_path, "a", encoding="utf-8", buffering=1)
+    except Exception:
+        _pf = None
+import builtins as _builtins
+_orig_print = _builtins.print
+def print(*_a, **_k):
+    _orig_print(*_a, **_k)
+    if _pf is not None:
+        try:
+            _pf.write(" ".join(str(x) for x in _a) + "\n")
+            _pf.flush()
+        except Exception:
+            pass
+
 _repo = sys.argv[1]
 _target_path = sys.argv[2]
 _is_folder = sys.argv[3] == "1"
@@ -11662,9 +11682,14 @@ def _dir_size(p):
     except Exception:
         return 0
 
-_repo_cache_dir = os.path.join(
-    os.environ.get("HF_HOME") or os.path.join(os.path.expanduser("~"), ".cache", "huggingface"),
-    "hub", "models--" + _repo.replace("/", "--"))
+# 动态检测 huggingface_hub 真实缓存根（覆盖 HF_HOME / HF_HUB_CACHE / HUGGINGFACE_HUB_CACHE 优先级）
+try:
+    from huggingface_hub import constants as _hf_const
+    _hf_hub_cache = _hf_const.HF_HUB_CACHE
+except Exception:
+    _hf_hub_cache = os.path.join(
+        os.environ.get("HF_HOME") or os.path.join(os.path.expanduser("~"), ".cache", "huggingface"), "hub")
+_repo_cache_dir = os.path.join(_hf_hub_cache, "models--" + _repo.replace("/", "--"))
 
 def _disk_mon():
     # 卡死检测：仅看「本仓库缓存子目录」的真实字节增长（忽略其他模型静态文件）。
@@ -11678,8 +11703,7 @@ def _disk_mon():
         cur = 0
         repo_cur = 0
         try:
-            cache_home = os.environ.get("HF_HOME") or os.path.join(os.path.expanduser("~"), ".cache", "huggingface")
-            cache_dir = os.path.join(cache_home, "hub")
+            cache_dir = _hf_hub_cache
             cur = _dir_size(_local_dir) + _dir_size(cache_dir)
             repo_cur = _dir_size(_repo_cache_dir)
             if repo_cur != last_repo:
@@ -11758,6 +11782,25 @@ except Exception as e:
     # 以兼容 ModelScope 仓库内实际文件名与注册表 file 字段不一致的情况。
     MODEL_DL_MS_SCRIPT = r'''
 import os, sys, time, threading, shutil
+
+# ── 进度文件输出（同 HF 脚本）：print 同时写 stdout 与 .dl_progress_<model> 文件(UTF-8)。
+_pf_path = os.environ.get("DL_PROGRESS_FILE") or ""
+_pf = None
+if _pf_path:
+    try:
+        _pf = open(_pf_path, "a", encoding="utf-8", buffering=1)
+    except Exception:
+        _pf = None
+import builtins as _builtins
+_orig_print = _builtins.print
+def print(*_a, **_k):
+    _orig_print(*_a, **_k)
+    if _pf is not None:
+        try:
+            _pf.write(" ".join(str(x) for x in _a) + "\n")
+            _pf.flush()
+        except Exception:
+            pass
 
 _repo = sys.argv[1]
 _target_path = sys.argv[2]
@@ -12031,7 +12074,12 @@ except Exception as e:
         def run_download():
             all_stderr = ""
             try:
-                proc = hidden_popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+                # 把进度文件路径传给子进程，让它把 [DLPROGRESS] 等标签同时写进文件(UTF-8)
+                env["DL_PROGRESS_FILE"] = progress_path
+                # 子进程 stdout 强制 UTF-8，避免中文 Windows 管道按 GBK 解码崩溃
+                env["PYTHONIOENCODING"] = "utf-8"
+                proc = hidden_popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    encoding="utf-8", errors="replace", env=env)
             except Exception as e:
                 QTimer.singleShot(0, lambda: self._on_model_download_done(model_id, False, source_name, f"启动失败: {e}"))
                 self._download_procs.pop(model_id, None)
@@ -12078,7 +12126,7 @@ except Exception as e:
                         chunk = proc.stderr.read(4096)
                         if not chunk:
                             break
-                        text = chunk.decode("utf-8", errors="replace")
+                        text = chunk.decode("utf-8", errors="replace") if isinstance(chunk, bytes) else chunk
                         all_stderr += text
                         if len(first_lines) < 5:
                             for line in text.split("\n"):
@@ -12346,12 +12394,61 @@ except Exception as e:
         except Exception:
             return 0
 
+    def _hf_hub_cache_root(self):
+        """动态获取 huggingface_hub 真实缓存根（…/hub），结果缓存避免每轮轮询重复计算。
+
+        huggingface_hub 实际写入位置由 HF_HUB_CACHE 常量决定（内部综合 HF_HOME 等），
+        直接读取其常量可覆盖 HF_HOME / HF_HUB_CACHE / HUGGINGFACE_HUB_CACHE 各种情况。
+        """
+        if getattr(self, "_hf_cache_root_cached", None):
+            return self._hf_cache_root_cached
+        root = None
+        try:
+            from huggingface_hub import constants as _hc
+            root = getattr(_hc, "HF_HUB_CACHE", None)
+        except Exception:
+            pass
+        if not root:
+            for _k in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE"):
+                _v = os.environ.get(_k)
+                if _v:
+                    root = _v
+                    break
+        if not root:
+            _home = os.environ.get("HF_HOME")
+            root = os.path.join(_home, "hub") if _home else os.path.join(
+                os.path.expanduser("~"), ".cache", "huggingface", "hub")
+        self._hf_cache_root_cached = root
+        return root
+
+    def _ms_cache_root(self):
+        """动态获取 ModelScope 真实缓存根，结果缓存（modelscope 导入较重，避免每轮重复）。"""
+        if getattr(self, "_ms_cache_root_cached", None):
+            return self._ms_cache_root_cached
+        root = None
+        try:
+            from modelscope.hub.utils import get_cache_dir
+            root = get_cache_dir() or None
+        except Exception:
+            pass
+        if not root:
+            for _k in ("MODELSCOPE_CACHE", "MODELSCOPE_CACHE_HOME"):
+                _v = os.environ.get(_k)
+                if _v:
+                    root = _v
+                    break
+        if not root:
+            root = os.path.join(os.path.expanduser("~"), ".cache", "modelscope")
+        self._ms_cache_root_cached = root
+        return root
+
     def _resolve_download_scan_dirs(self, dl):
         """计算下载进度兜底要扫描的目录（GUI 侧，独立于子进程输出）。
 
         参照云集智能音乐创意台 ModelDownloadThread._dir_progress：扫描最终落盘位置 +
         各下载源缓存的「仓库专属子目录」，仅统计本仓库的字节，不会因其他模型已存在而虚高。
-        返回 (dirs, _)。
+        缓存根改用 huggingface_hub / modelscope 真实常量动态获取，避免环境变量优先级
+        不一致导致「扫错空目录 -> 永远 0%」。返回 (dirs, _)。
         """
         tgt = dl.get("target_path")
         if not tgt:
@@ -12365,16 +12462,21 @@ except Exception as e:
             dirs.append(stage)
         repo = dl.get("repo")
         if repo:
-            safe = "models--" + repo.replace("/", "--")
             # HuggingFace 缓存仓库专属子目录（blob 下载期间在此增长）
-            hf_home = os.environ.get("HF_HOME") or os.path.join(
-                os.path.expanduser("~"), ".cache", "huggingface")
-            dirs.append(os.path.join(hf_home, "hub", safe))
+            hf_root = self._hf_hub_cache_root()
+            exact = os.path.join(hf_root, "models--" + repo.replace("/", "--"))
+            dirs.append(exact)
+            # 兜底：扫描 hub 下所有 models--* 目录，匹配仓库名（防环境/大小写漂移导致精确路径落空）
+            if os.path.isdir(hf_root):
+                last = repo.split("/")[-1].lower()
+                for nm in os.listdir(hf_root):
+                    if nm.startswith("models--") and last and last in nm.lower():
+                        d = os.path.join(hf_root, nm)
+                        if d != exact and os.path.isdir(d) and self._fs_dir_size(d) > 0:
+                            dirs.append(d)
             # ModelScope 缓存：新版 models-- 布局 + 旧版 namespace/name 布局
-            ms_cache = (os.environ.get("MODELSCOPE_CACHE")
-                        or os.environ.get("MODELSCOPE_CACHE_HOME")
-                        or os.path.join(os.path.expanduser("~"), ".cache", "modelscope"))
-            dirs.append(os.path.join(ms_cache, "hub", safe))
+            ms_cache = self._ms_cache_root()
+            dirs.append(os.path.join(ms_cache, "hub", "models--" + repo.replace("/", "--")))
             parts = repo.split("/")
             if len(parts) == 2:
                 dirs.append(os.path.join(ms_cache, parts[0], parts[1]))
@@ -12500,6 +12602,38 @@ except Exception as e:
             if proc_done:
                 done_ids.append(model_id)
                 continue
+            # ★ 权威进度源：直接读取 .dl_progress 文件(UTF-8)，规避管道 GBK 解码崩溃导致进度卡 0%。
+            try:
+                _pp = dl.get("progress_path")
+                if _pp and os.path.isfile(_pp):
+                    with open(_pp, "r", encoding="utf-8", errors="replace") as _pfh:
+                        _plines = _pfh.read().splitlines()
+                    _p_prog = None
+                    _p_size = None
+                    for _ln in _plines:
+                        _m = re.match(r"\[DLPROGRESS\]\s*([\d.]+)", _ln)
+                        if _m:
+                            try:
+                                _p_prog = float(_m.group(1))
+                            except ValueError:
+                                _p_prog = None
+                        _m = re.match(r"\[DLSIZE\]\s*(\d+)\s+(\d+)", _ln)
+                        if _m:
+                            try:
+                                _p_size = (int(_m.group(1)), int(_m.group(2)))
+                            except ValueError:
+                                _p_size = None
+                    if _p_prog is not None:
+                        _fp = max(0, min(100, int(_p_prog)))
+                        if _fp > pct and pct < 100:
+                            pct = _fp
+                        dl["current_pct"] = max(dl.get("current_pct", 0), _fp)
+                        if _p_size:
+                            dl["current_dl_bytes"] = _p_size[0]
+                            if _p_size[1] > 0:
+                                dl["expected_bytes"] = _p_size[1]
+            except Exception:
+                pass
             # ★ 进度条直接读取缓存/落盘的真实字节（参照云集智能音乐创意台 _dir_progress）：
             # 以磁盘真实百分比为「主导源」，不再信任子进程 [DLPROGRESS] 标签的 0%。
             # 只要缓存目录上有字节在增长，进度条就用磁盘进度驱动，杜绝任何「卡 0%」观感；
@@ -12513,6 +12647,22 @@ except Exception as e:
                     dl["current_pct"] = max(dl.get("current_pct", 0), disk_pct)
                     if cur > 0:
                         dl["current_dl_bytes"] = cur
+                elif not dl.get("_scan_debug_logged"):
+                    # 磁盘扫描不到任何字节：打印实际扫描目录，便于确认缓存路径是否正确
+                    dl["_scan_debug_logged"] = True
+                    try:
+                        sdirs, _ = self._resolve_download_scan_dirs(dl)
+                        parts = []
+                        for d in sdirs:
+                            if os.path.isfile(d):
+                                parts.append(f"{d} (文件 {os.path.getsize(d)}B)")
+                            elif os.path.isdir(d):
+                                parts.append(f"{d} (目录 {self._fs_dir_size(d)}B)")
+                            else:
+                                parts.append(f"{d} (缺失)")
+                        self._log("[DBG] 磁盘进度扫描目录均无字节: " + " | ".join(parts), "warn")
+                    except Exception:
+                        pass
             except Exception:
                 pass
             row_idx = self._find_model_row(model_id)
