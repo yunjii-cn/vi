@@ -11703,9 +11703,18 @@ def _disk_mon():
         cur = 0
         repo_cur = 0
         try:
-            cache_dir = _hf_hub_cache
-            cur = _dir_size(_local_dir) + _dir_size(cache_dir)
+            # 只统计「本仓库」字节：绝不把整个 HF 缓存根(含其他模型)或整个 models
+            # 目录(含所有模型)的静态文件算进来，否则进度虚高(曾 0 字节却显示 99%)。
+            # 与 GUI 侧 _resolve_download_scan_dirs 一致，仅统计仓库专属子目录 + 目标文件。
             repo_cur = _dir_size(_repo_cache_dir)
+            cur = repo_cur
+            if _is_folder:
+                cur += _dir_size(_local_dir)
+            elif os.path.isfile(_target_path):
+                try:
+                    cur += os.path.getsize(_target_path)
+                except OSError:
+                    pass
             if repo_cur != last_repo:
                 last_repo = repo_cur
                 last_progress_ts = time.time()
