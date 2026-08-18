@@ -11724,8 +11724,8 @@ def _disk_mon():
         except Exception:
             pass
         # 卡死检测放在 try 之外，确保不会被磁盘扫描异常吞掉
-        if time.time() - last_progress_ts > 60:
-            print("[DLLOG] ⚠️ 60 秒内未收到任何数据，连接可能已死（镜像无响应/被墙）", flush=True)
+        if time.time() - last_progress_ts > 180:
+            print("[DLLOG] ⚠️ 180 秒内未收到任何数据，连接可能已死（镜像无响应/被墙），将自动回退其他源", flush=True)
             print("[DLERROR] NETWORK 下载长时间无进度：可能 hf-mirror 连接中断或被墙，请切换为 ModelScope 源或检查网络后重试", flush=True)
             sys.stdout.flush()
             _stop.set()
@@ -11877,8 +11877,8 @@ def _disk_mon(monitor_dirs):
                     print("[DLLOG] ✅ 已开始接收数据 (目标 %.1fGB)" % _est_gb, flush=True)
         except Exception:
             pass
-        if time.time() - last_progress_ts > 90:
-            print("[DLLOG] ⚠️ 90 秒内未收到任何数据，连接可能已死", flush=True)
+        if time.time() - last_progress_ts > 120:
+            print("[DLLOG] ⚠️ 120 秒内未收到任何数据，连接可能已死（ModelScope 镜像无响应）", flush=True)
             print("[DLERROR] NETWORK 下载长时间无进度：ModelScope 连接中断，请检查网络或切换为 HF 源后重试", flush=True)
             sys.stdout.flush()
             _stop.set()
@@ -11890,6 +11890,16 @@ def _disk_mon(monitor_dirs):
         time.sleep(1.0)
 
 print("[DLLOG] 开始下载 %s (%.1fGB) ..." % (_filename or _repo, _est_gb), flush=True)
+
+# 提前探测 modelscope 是否可导入：venv 中该包可能安装损坏(如缺失 upload_tracker 模块)，
+# 若不在下载前暴露，会在 snapshot_download 时才崩溃，导致回退链无声失败、用户只看到"无法下载"。
+try:
+    import modelscope  # noqa
+except Exception as _imp_e:
+    print("[DLERROR] OTHER ModelScope 源不可用：venv 内 modelscope 安装损坏（%s）。"
+          "请在 venv 执行 `python -m pip install --upgrade --force-reinstall modelscope` 修复后重试" % str(_imp_e)[:200], flush=True)
+    sys.stderr.write("SCRIPT_ERROR:modelscope import failed:%s\n" % str(_imp_e)[:200])
+    sys.exit(3)
 
 try:
     from modelscope.hub.snapshot_download import snapshot_download
