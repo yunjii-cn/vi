@@ -357,11 +357,11 @@
                     <button class="up-copy" type="button" title="复制" style="${copyBtnStyle}">⧉</button>
                 </div>
             </div>
-            <div style="border-top:1px solid rgba(255,255,255,.08);">
-                <button id="user-panel-switch" type="button" style="width:100%;text-align:left;padding:10px 16px;background:transparent;border:none;color:#e5e7eb;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;" onmouseover="this.style.background='rgba(255,255,255,.05)'" onmouseout="this.style.background='transparent'">
+            <div style="border-top:1px solid rgba(255,255,255,.08);padding:12px 16px;display:flex;gap:8px;">
+                <button id="user-panel-switch" type="button" style="flex:1;padding:8px 0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e5e7eb;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:background .15s,border-color .15s;" onmouseover="this.style.background='rgba(255,255,255,.12)';this.style.borderColor='rgba(255,255,255,.25)'" onmouseout="this.style.background='rgba(255,255,255,.05)';this.style.borderColor='rgba(255,255,255,.12)'">
                     <span>🔄</span><span>切换账号</span>
                 </button>
-                <button id="user-panel-logout" type="button" style="width:100%;text-align:left;padding:10px 16px;background:transparent;border:none;color:#f87171;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;" onmouseover="this.style.background='rgba(239,68,68,.1)'" onmouseout="this.style.background='transparent'">
+                <button id="user-panel-logout" type="button" style="flex:1;padding:8px 0;background:rgba(239,68,68,.08);border:1px solid rgba(248,113,113,.25);border-radius:8px;color:#f87171;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:background .15s,border-color .15s;" onmouseover="this.style.background='rgba(239,68,68,.18)';this.style.borderColor='rgba(248,113,113,.45)'" onmouseout="this.style.background='rgba(239,68,68,.08)';this.style.borderColor='rgba(248,113,113,.25)'">
                     <span>⏏</span><span>退出登录</span>
                 </button>
             </div>
