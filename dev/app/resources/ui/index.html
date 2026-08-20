@@ -1283,7 +1283,10 @@
     </script>
     <!-- ★ 2026-06-16 v3 修复: 版本号 v5→v6,强制浏览器重新加载 index.js
          (旧版本因为哨兵在 wrapper 外面 + 每次翻页都清 cache buster,导致图片一直加载不完) -->
-    <script src="index.js?v=progress-ui-v6" defer></script>
+    <!-- ★ 2026-08-20: 版本号 v6→v7,强制浏览器重新加载 index.js
+         (v6 修复了触底翻页死锁,但 max-age=300 缓存期内 Chrome/360 一直用旧 JS,
+          自带测试浏览器是干净会话才"看起来已修复"。改动 index.js 必须同步 bump 版本串!) -->
+    <script src="index.js?v=lazyfix-v7" defer></script>
     <script>
     // ★ 2026-06-16 v2 提速: index.js 加了 defer,这个内联脚本必须等 DOMContentLoaded
     //                  (defer 脚本在 DOMContentLoaded 前按顺序执行完),否则检测不到 window.switchMode 等
