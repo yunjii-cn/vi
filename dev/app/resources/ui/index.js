@@ -264,14 +264,53 @@
                 loginAtStr = d.toLocaleString('zh-CN', { hour12: false });
             } catch (_) {}
         }
-        // 简化 openid(中间打码)
-        const openidShort = user.openid ? (user.openid.substring(0, 6) + '…' + user.openid.substring(user.openid.length - 4)) : '—';
         const siteLabel = user.site === '1' ? '主站' : (user.site || '—');
-        const tokenShort = user.token ? (user.token.substring(0, 8) + '…' + user.token.substring(user.token.length - 6)) : '—';
 
-        const rowStyle = 'display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:12px;';
-        const kStyle = 'color:#94a3b8;';
+        // ★ 2026-08-20: OpenID / Token 改为完整显示(自动折行),整行点击复制
+        function copyValue(text, done) {
+            const fallback = () => {
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none;left:-9999px;';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    ta.remove();
+                    done();
+                } catch (_) {}
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(done, fallback);
+            } else {
+                fallback();
+            }
+        }
+        function bindCopyRow(rowEl, text) {
+            if (!rowEl || !text) return;
+            rowEl.addEventListener('click', () => {
+                copyValue(text, () => {
+                    const valEl = rowEl.querySelector('.up-val');
+                    if (!valEl || valEl.dataset.busy === '1') return;
+                    valEl.dataset.busy = '1';
+                    const orig = valEl.textContent;
+                    valEl.textContent = '✓ 已复制';
+                    valEl.style.color = '#4ade80';
+                    setTimeout(() => {
+                        valEl.textContent = orig;
+                        valEl.style.color = '';
+                        valEl.dataset.busy = '0';
+                    }, 1200);
+                });
+            });
+        }
+
+        const rowStyle = 'display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;font-size:12px;';
+        // 值可折行的行(OpenID/Token 完整显示,长值自动换行,flex-start 保证多行时标签顶部对齐)
+        const rowWrapStyle = 'display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:6px 0;font-size:12px;cursor:pointer;';
+        const kStyle = 'color:#94a3b8;flex-shrink:0;';
         const vStyle = 'color:#e5e7eb;font-family:ui-monospace,Consolas,monospace;font-size:11px;';
+        const vWrapStyle = 'color:#e5e7eb;font-family:ui-monospace,Consolas,monospace;font-size:11px;word-break:break-all;text-align:right;flex:1;min-width:0;';
 
         panel.innerHTML = `
             <div style="padding:16px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:12px;">
@@ -289,17 +328,17 @@
                     <span style="${kStyle}">用户名</span>
                     <span style="${vStyle}" title="${escapeHtml(user.username || '')}">${escapeHtml(user.username || '—')}</span>
                 </div>
-                <div style="${rowStyle}">
+                <div id="user-panel-openid" style="${rowWrapStyle}" title="点击复制 OpenID">
                     <span style="${kStyle}">OpenID</span>
-                    <span style="${vStyle}" title="${escapeHtml(user.openid || '')}">${escapeHtml(openidShort)}</span>
+                    <span class="up-val" style="${vWrapStyle}">${escapeHtml(user.openid || '—')}</span>
                 </div>
                 <div style="${rowStyle}">
                     <span style="${kStyle}">登录时间</span>
                     <span style="${vStyle}">${escapeHtml(loginAtStr)}</span>
                 </div>
-                <div style="${rowStyle}">
+                <div id="user-panel-token" style="${rowWrapStyle}" title="点击复制 Token">
                     <span style="${kStyle}">Token</span>
-                    <span style="${vStyle}" title="${escapeHtml(user.token || '')}">${escapeHtml(tokenShort)}</span>
+                    <span class="up-val" style="${vWrapStyle}">${escapeHtml(user.token || '—')}</span>
                 </div>
             </div>
             <div style="border-top:1px solid rgba(255,255,255,.08);">
@@ -311,6 +350,10 @@
                 </button>
             </div>
         `;
+
+        // 绑定复制事件(OpenID / Token 整行点击复制)
+        bindCopyRow(panel.querySelector('#user-panel-openid'), user.openid);
+        bindCopyRow(panel.querySelector('#user-panel-token'), user.token);
 
         // 绑定按钮事件
         panel.querySelector('#user-panel-switch').onclick = () => {
@@ -367,6 +410,12 @@ function yunjiLogout() {
 
     // 已登录:暴露全局变量 + 注入用户信息框 + 移除遮罩
     function onLoggedIn(user) {
+        // ★ 2026-08-20: 打点本次登录时间(秒级时间戳)
+        //   服务端 islogin/login 均不返回登录时间,前端在登录成功时记录;
+        //   sessionStorage/localStorage 缓存的是同一份对象,F5 刷新不重打
+        if (!user.login_at) {
+            try { user.login_at = Math.floor(Date.now() / 1000); } catch (_) {}
+        }
         window.__yunjiUser = user;
         try { history.replaceState(null, '', location.pathname); } catch (_) {}
         // ★ 2026-06-16 v5 提速: 写到 localStorage,让 F5 后的 inline 脚本瞬间脱遮罩
@@ -410,6 +459,18 @@ function yunjiLogout() {
         if (userB64) {
             const u = parseUserB64(userB64);
             if (u) {
+                // ★ 2026-08-20: 扫码回跳的用户对象若缺头像/昵称等字段(登录页只回精简数据),
+                //   走 islogin.php 补全 — 扫码成功后 vi 的 cookie 已种上,能查到完整资料
+                if (!u.nickname || !u.avatar || !u.openid || !u.token) {
+                    try {
+                        const full = await checkIsLogin();
+                        if (full && typeof full === 'object') {
+                            for (const k of ['nickname', 'avatar', 'openid', 'username', 'token', 'site']) {
+                                if (!u[k] && full[k]) u[k] = full[k];
+                            }
+                        }
+                    } catch (_) { /* 补全失败不影响登录,缺字段照常进入 */ }
+                }
                 onLoggedIn(u);
                 return;
             }
@@ -3274,7 +3335,26 @@ async function loadModelCheckpoints() {
             const res = await fetch(`${BASE}/api/models/registry`);
             const data = await res.json();
             const allModels = _collectLocalModelsFromRegistry(data);
-            const models = allModels.filter(_isVideoCheckpoint);
+            let models = allModels.filter(_isVideoCheckpoint);
+            // ★ 2026-08-20: 同步启动器"模型管理"的真实视频模型列表
+            //   原逻辑只显示已下载的 checkpoint,导致下拉框仅剩默认官方蒸馏模型一项。
+            //   现把 registry 中未下载的视频 checkpoint 也纳入(以 model_id 作稳定 value),
+            //   与启动器模型管理保持一致——全部真实视频模型可见,未下载的标注"未下载"。
+            const seenVideo = new Set(models.map((m) => (m.path || '').toLowerCase()));
+            (data.models || []).forEach((m) => {
+                if (m.model_category !== 'video') return;
+                const fname = (m.filename || m.name || '').toLowerCase();
+                if (!fname.endsWith('.safetensors') || !fname.includes('ltx')) return;
+                const key = (m.local_path || m.model_id || '').toLowerCase();
+                if (!key || seenVideo.has(key)) return;
+                seenVideo.add(key);
+                models.push({
+                    name: m.filename || m.name,
+                    path: m.local_path || m.model_id,
+                    downloaded: !!m.downloaded,
+                    model_id: m.model_id,
+                });
+            });
             select.innerHTML = '';
             const defOpt = document.createElement('option');
             defOpt.value = '';
@@ -3283,7 +3363,13 @@ async function loadModelCheckpoints() {
             models.forEach((model) => {
                 const opt = document.createElement('option');
                 opt.value = model.path;
-                opt.textContent = _beautifyModelName(model.name);
+                const label = _beautifyModelName(model.name);
+                if (model.downloaded === false) {
+                    opt.textContent = `${label}（未下载）`;
+                    opt.style.color = 'var(--text-dim)';
+                } else {
+                    opt.textContent = label;
+                }
                 select.appendChild(opt);
             });
             if (saved && models.some((model) => model.path === saved)) {
