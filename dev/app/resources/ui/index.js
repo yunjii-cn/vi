@@ -7386,11 +7386,15 @@ function downloadCurrentPreviewAsset() {
             const newLc = document.getElementById('current-loading-card');
             if (newLc) newLc.onclick = showGeneratingView;
 
-            if (isFirstLoad || !_historyHasRendered) {
-                await loadVisibleImages();
-            } else {
-                requestHistoryThumbLoad();
-            }
+            // ★ 2026-08-20 修复(懒加载死锁): 缩略图加载绝不阻塞数据流程
+            //   旧逻辑首屏 await loadVisibleImages(): 任何一个缩略图反复失败时,
+            //   loadVisibleImages 的重试循环永不退出 → fetchHistory 卡死 →
+            //   isLoadingHistory 恒 true → 哨兵 IO 永远被 continue 挡掉 →
+            //   向下滚动无法加载更多页。
+            //   改为非阻塞调度: requestHistoryThumbLoad 内部走 rAF,
+            //   若已有 loader 在跑仅置 queued 标志(正在跑的循环每轮重查 DOM,
+            //   会自动接走新挂载卡片的缩略图)。
+            requestHistoryThumbLoad();
             _historyListFingerprint = fingerprint;
 
             // ★ 2026-06-17: 默认激活最新作品并显示大图
@@ -7667,6 +7671,17 @@ function downloadCurrentPreviewAsset() {
             return true;
         }
         media.classList.remove('history-thumb-loading');
+        // ★ 2026-08-20 修复(重试封顶): 失败重试最多 3 次。
+        //   旧逻辑无限重试(nextThumbRetry=+1200ms),而 loadVisibleImages 的
+        //   while 批量 await 耗时(单图超时 5s)远超 1.2s,下一轮立刻又选中
+        //   失败媒体 → 无限空转。损坏/无法解码的文件不值得无限循环。
+        const thumbFails = Number(media.dataset.thumbFails || 0) + 1;
+        media.dataset.thumbFails = String(thumbFails);
+        if (thumbFails >= 3) {
+            // 放弃: 移出 lazy-load 调度队列,保持占位(刷新列表后 DOM 重建自然重置)
+            media.classList.add('history-thumb-failed');
+            return false;
+        }
         media.classList.add('lazy-load');
         media.dataset.nextThumbRetry = String(Date.now() + 1200);
         media.removeAttribute('src');
