@@ -266,7 +266,9 @@
         }
         const siteLabel = user.site === '1' ? '主站' : (user.site || '—');
 
-        // ★ 2026-08-20: OpenID / Token 改为完整显示(自动折行),整行点击复制
+        // ★ 2026-08-20 v2: OpenID 完整显示(28字符单行放得下) / Token 简短显示(前8…尾6,
+        //   JWT 100+字符完整显示占3-4行影响观感,hover title 可看全文)。
+        //   两行行尾统一复制按钮,整行点击同样触发复制,成功后值位置显示「✓ 已复制」。
         function copyValue(text, done) {
             const fallback = () => {
                 try {
@@ -288,7 +290,7 @@
         }
         function bindCopyRow(rowEl, text) {
             if (!rowEl || !text) return;
-            rowEl.addEventListener('click', () => {
+            const handler = () => {
                 copyValue(text, () => {
                     const valEl = rowEl.querySelector('.up-val');
                     if (!valEl || valEl.dataset.busy === '1') return;
@@ -302,15 +304,26 @@
                         valEl.dataset.busy = '0';
                     }, 1200);
                 });
-            });
+            };
+            rowEl.addEventListener('click', handler);
+            const btn = rowEl.querySelector('.up-copy');
+            if (btn) btn.addEventListener('click', (e) => { e.stopPropagation(); handler(); });
         }
 
+        // ★ 2026-08-20 v2: username 是账号名,nickname 是微信昵称(独立字段);
+        //   值相同或 username 为空时不再重复显示"用户名"行(头部已显示昵称)
+        const showUsernameRow = !!(user.username && user.username !== nick);
+        // Token 简短形式(前8…尾6);短 token(≤16字符)完整显示,截断反而更长更乱
+        const tokenShort = (user.token && user.token.length > 16)
+            ? (user.token.substring(0, 8) + '…' + user.token.substring(user.token.length - 6))
+            : (user.token || '—');
+
         const rowStyle = 'display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;font-size:12px;';
-        // 值可折行的行(OpenID/Token 完整显示,长值自动换行,flex-start 保证多行时标签顶部对齐)
-        const rowWrapStyle = 'display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:6px 0;font-size:12px;cursor:pointer;';
+        const rowCopyStyle = 'display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;font-size:12px;cursor:pointer;';
         const kStyle = 'color:#94a3b8;flex-shrink:0;';
         const vStyle = 'color:#e5e7eb;font-family:ui-monospace,Consolas,monospace;font-size:11px;';
-        const vWrapStyle = 'color:#e5e7eb;font-family:ui-monospace,Consolas,monospace;font-size:11px;word-break:break-all;text-align:right;flex:1;min-width:0;';
+        const vCopyStyle = 'color:#e5e7eb;font-family:ui-monospace,Consolas,monospace;font-size:11px;text-align:right;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+        const copyBtnStyle = 'flex-shrink:0;width:20px;height:20px;border-radius:5px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#94a3b8;font-size:10px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;';
 
         panel.innerHTML = `
             <div style="padding:16px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:12px;">
@@ -324,21 +337,24 @@
                 </div>
             </div>
             <div style="padding:12px 16px;">
+                ${showUsernameRow ? `
                 <div style="${rowStyle}">
                     <span style="${kStyle}">用户名</span>
                     <span style="${vStyle}" title="${escapeHtml(user.username || '')}">${escapeHtml(user.username || '—')}</span>
-                </div>
-                <div id="user-panel-openid" style="${rowWrapStyle}" title="点击复制 OpenID">
+                </div>` : ''}
+                <div id="user-panel-openid" style="${rowCopyStyle}" title="${escapeHtml(user.openid || '')}&#10;点击复制 OpenID">
                     <span style="${kStyle}">OpenID</span>
-                    <span class="up-val" style="${vWrapStyle}">${escapeHtml(user.openid || '—')}</span>
+                    <span class="up-val" style="${vCopyStyle}">${escapeHtml(user.openid || '—')}</span>
+                    <button class="up-copy" type="button" title="复制" style="${copyBtnStyle}">⧉</button>
                 </div>
                 <div style="${rowStyle}">
                     <span style="${kStyle}">登录时间</span>
                     <span style="${vStyle}">${escapeHtml(loginAtStr)}</span>
                 </div>
-                <div id="user-panel-token" style="${rowWrapStyle}" title="点击复制 Token">
+                <div id="user-panel-token" style="${rowCopyStyle}" title="${escapeHtml(user.token || '')}&#10;点击复制 Token">
                     <span style="${kStyle}">Token</span>
-                    <span class="up-val" style="${vWrapStyle}">${escapeHtml(user.token || '—')}</span>
+                    <span class="up-val" style="${vCopyStyle}">${escapeHtml(tokenShort)}</span>
+                    <button class="up-copy" type="button" title="复制" style="${copyBtnStyle}">⧉</button>
                 </div>
             </div>
             <div style="border-top:1px solid rgba(255,255,255,.08);">
