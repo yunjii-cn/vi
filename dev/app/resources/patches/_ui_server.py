@@ -141,7 +141,7 @@ if sys.platform == "win32":
 APP_NAME = '云集智能视频创意站'
 VERSION = '2026.06.17.1106'
 
-_ui_log_path = 'E:\\软件开发\\云集智能视频创意站\\dev\\temp\\logs\\ui_server_20260804_062827.log'
+_ui_log_path = 'E:\\软件开发\\云集智能视频创意站\\dev\\temp\\logs\\ui_server_20260820_094052.log'
 os.makedirs(os.path.dirname(_ui_log_path), exist_ok=True)
 
 def _ui_log(msg):
@@ -228,6 +228,12 @@ def _get_http_client(timeout: float) -> _httpx_global.AsyncClient:
         _http_client = _httpx_global.AsyncClient(
             timeout=timeout, limits=limits,
             http2=False,  # uvicorn 默认 http/1.1,强开 h2 会失败
+            # ★ 2026-08-20 修复: 本机转发绝不能走系统代理
+            #   httpx trust_env=True 经 urllib.getproxies() 读 Windows 注册表系统代理
+            #   (但不解析 ProxyOverride 豁免)。Clash 等代理开着时,7000→6000 的本机
+            #   转发会被送进代理,代理拒绝回连 → 所有 API 502 → 前端显示后端离线。
+            #   本机服务间通信直连,禁用一切环境/系统代理。
+            trust_env=False,
         )
     return _http_client
 

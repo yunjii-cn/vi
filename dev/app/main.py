@@ -7937,6 +7937,17 @@ class MainWindow(QMainWindow):
             repo_lbl.setStyleSheet("font-size: 10px; color: #666666; background: transparent; border: none;")
             info_layout.addWidget(repo_lbl)
 
+        # 本地路径（已下载/本地扫描的模型显示实际落盘位置，未下载不显示）
+        local_path = r.get("local_path", "")
+        if local_path:
+            path_lbl = QLabel(f"路径: {local_path}")
+            path_lbl.setWordWrap(True)
+            path_lbl.setToolTip("点击复制路径")
+            path_lbl.setStyleSheet("font-size: 10px; color: #888888; background: transparent; border: none;")
+            path_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            path_lbl.mousePressEvent = lambda _e, _p=local_path: QApplication.clipboard().setText(_p)
+            info_layout.addWidget(path_lbl)
+
         detail_layout.addLayout(info_layout, 1)
 
         # 收起按钮
@@ -15953,7 +15964,7 @@ sys.path.insert(0, patch_dir)
 sys.path.insert(1, backend_dir)
 import asyncio
 import sys
-import uvicorn, traceback, faulthandler
+import uvicorn, traceback
 from ltx2_server import app
 
 import socket as _sock
@@ -16058,7 +16069,6 @@ if sys.platform == "win32":
 
 
 if __name__ == '__main__':
-    faulthandler.dump_traceback_later(60, file=sys.stderr)
     print("[LAUNCHER] reached uvicorn.run port={self._backend_port} routes=", len(getattr(app, 'routes', [])), flush=True)
     try:
         uvicorn.run(app, host="0.0.0.0", port={self._backend_port}, log_level="info", access_log=False)
@@ -16385,6 +16395,12 @@ def _get_http_client(timeout: float) -> _httpx_global.AsyncClient:
         _http_client = _httpx_global.AsyncClient(
             timeout=timeout, limits=limits,
             http2=False,  # uvicorn 默认 http/1.1,强开 h2 会失败
+            # ★ 2026-08-20 修复: 本机转发绝不能走系统代理
+            #   httpx trust_env=True 经 urllib.getproxies() 读 Windows 注册表系统代理
+            #   (但不解析 ProxyOverride 豁免)。Clash 等代理开着时,7000→6000 的本机
+            #   转发会被送进代理,代理拒绝回连 → 所有 API 502 → 前端显示后端离线。
+            #   本机服务间通信直连,禁用一切环境/系统代理。
+            trust_env=False,
         )
     return _http_client
 
